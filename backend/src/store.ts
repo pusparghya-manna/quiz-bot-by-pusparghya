@@ -122,9 +122,24 @@ class Store {
   getAttempt(examId: string, telegramUserId: number | string) {
     const numId = Number(telegramUserId);
     const strId = String(telegramUserId);
-    return this.getAttempts(examId).find(a =>
+    const mine = this.getAttempts(examId).filter(a =>
       a.telegramUserId === numId || String(a.telegramUserId) === strId || a.studentId === strId
     );
+    if (!mine.length) return undefined;
+    const active = mine.find(a => a.status === 'IN_PROGRESS');
+    if (active) return active;
+    // newest first (attempts are unshifted on save)
+    return mine[0];
+  }
+  getStudentAttempts(examId: string, telegramUserId: number | string) {
+    const numId = Number(telegramUserId);
+    const strId = String(telegramUserId);
+    return this.getAttempts(examId).filter(a =>
+      a.telegramUserId === numId || String(a.telegramUserId) === strId || a.studentId === strId
+    );
+  }
+  hasOfficialAttempt(examId: string, telegramUserId: number | string) {
+    return this.getStudentAttempts(examId, telegramUserId).some(a => a.isOfficial !== false && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED' || a.status === 'IN_PROGRESS'));
   }
   saveAttempt(a: Attempt) {
     const idx = this.data.attempts.findIndex(x => x.id === a.id);

@@ -50,24 +50,45 @@ export function calculateAttemptScore(exam: Exam, answers: Record<string, number
 // Recalculate ranks for all attempts of an exam according to default ranking rules:
 // Priority: 1. Higher score -> 2. Lower time taken -> 3. Earlier submission timestamp
 export function updateExamRanks(examId: string) {
-  const attempts = store.getAttempts(examId).filter(a => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED');
+  // Only FIRST (official) attempts count toward ranking
+  const attempts = store.getAttempts(examId).filter(a =>
+    (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false
+  );
 
   attempts.sort((a, b) => {
-    if (b.score !== a.score) {
-      return b.score - a.score; // 1. Higher score
-    }
-    if (a.timeTakenSeconds !== b.timeTakenSeconds) {
-      return a.timeTakenSeconds - b.timeTakenSeconds; // 2. Lower time taken
-    }
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.timeTakenSeconds !== b.timeTakenSeconds) return a.timeTakenSeconds - b.timeTakenSeconds;
     const aTime = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
     const bTime = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
-    return aTime - bTime; // 3. Earlier submission
+    return aTime - bTime;
+  });
+
+  // Clear ranks on non-official attempts
+  store.getAttempts(examId).forEach(att => {
+    if (att.isOfficial === false) {
+      att.rank = undefined;
+      store.saveAttempt(att);
+    }
   });
 
   attempts.forEach((att, idx) => {
     att.rank = idx + 1;
     store.saveAttempt(att);
   });
+}
+
+function isExamTimeEnded(exam: Exam): boolean {
+  if (exam.status === 'ENDED' || exam.status === 'RESULTS_PUBLISHED') return true;
+  const start = new Date(exam.startDate).getTime();
+  const end = start + (exam.durationMinutes || 0) * 60 * 1000;
+  // Also consider exam window: if teacher set LIVE without end, use generous window
+  // Ranking visible when status ended OR now past start+duration for non-live
+  if (exam.status === 'LIVE') {
+    // For LIVE exams, ranks after individual submission time isn't enough —
+    // show ranks only when teacher marks ENDED/RESULTS_PUBLISHED OR past a soft end of start+duration
+    return Date.now() >= end;
+  }
+  return Date.now() >= end;
 }
 
 // Format timer remaining string
@@ -91,17 +112,17 @@ export function getOrCreateStudent(user: TelegramUser): Student {
     name = telegramUsername;
   }
   if (!name) {
-    name = `Student #${user.id}`;
+    name = 'Student';
   }
 
   if (!student) {
     student = {
       id: `STU_${user.id}`,
-      studentId: `TG-${user.id}`,
+      studentId: `S${String(user.id).slice(-6)}`,
       name: name,
       className: 'ALL',
       status: 'linked',
-      linkCode: `TG-${user.id}`,
+      linkCode: `S${String(user.id).slice(-6)}`,
       telegramUserId: user.id,
       telegramUsername: telegramUsername,
       linkedAt: now
@@ -149,6 +170,9 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
     } else if (data.startsWith('start_exam_') || data.startsWith('resume_exam_')) {
       const examId = data.replace('start_exam_', '').replace('resume_exam_', '');
       response = handleStartOrResumeExam(examId, student, user);
+    } else if (data.startsWith('reattempt_')) {
+      const examId = data.replace('reattempt_', '');
+      response = handleStartOrResumeExam(examId, student, user, true);
     } else if (data.startsWith('ans_')) {
       // ans_EXAMID_qIdx_optIdx
       const rest = data.slice(4); // Remove "ans_"
@@ -226,19 +250,29 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
 
     // Standard /start command
     if (text.startsWith('/start')) {
+      const parts = text.trim().split(/\s+/);
+      const payload = parts[1] || '';
+
+      // Deep link: /start exam_<examId>
+      if (payload.startsWith('exam_')) {
+        const examId = payload.slice(5);
+        return handleStartOrResumeExam(examId, student, user);
+      }
+
+      const notice = store.getSettings().systemNotice;
       return {
         chatId: user.id,
-        text: `👋 *Welcome to Telegram Exam System!*\n\n` +
-          `👤 *Name:* ${student.name}\n` +
-          `💬 *Telegram Handle:* ${student.telegramUsername || '_None_'}\n` +
-          `🆔 *Student ID:* \`${student.studentId}\`\n\n` +
-          `✏️ *To change your display name on leaderboards, send:* \`/setname Your Full Name\`\n\n` +
-          `Select an option below to view available examinations and past results:`,
+        text: `👋 *Welcome to TeleExam Pro!*\n\n` +
+          (notice ? `📢 ${notice}\n\n` : '') +
+          `You are registered as *${student.name}*.\n` +
+          `✏️ Change display name: \`/setname Your Full Name\`\n\n` +
+          `Teachers share a special link for each exam. Open that link to start.\n` +
+          `You can also view your past attempts below.`,
         replyMarkup: {
           inline_keyboard: [
-            [{ text: '📚 Available Examinations', callback_data: 'btn_exams' }],
-            [{ text: '📊 My Past Results', callback_data: 'btn_results' }],
-            [{ text: '🏆 Class Leaderboards', callback_data: 'btn_leaderboard' }]
+            [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
+            [{ text: '📊 My Results', callback_data: 'btn_results' }],
+            [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }]
           ]
         },
         type: 'sendMessage'
@@ -271,49 +305,61 @@ function renderUnlinkedMsg(chatId: number): SimulatorResponse {
 
 function renderExamsList(student: Student): SimulatorResponse {
   const now = new Date();
-  const exams = store.getExams().filter(e => e.status !== 'DRAFT');
+  // Only exams this student has already opened (via teacher link) or attempted
+  const myAttempts = store.getAttempts().filter(a =>
+    a.telegramUserId === student.telegramUserId || a.studentId === student.studentId
+  );
+  const examIds = [...new Set(myAttempts.map(a => a.examId))];
+  const exams = examIds.map(id => store.getExamById(id)).filter(Boolean) as Exam[];
 
   if (exams.length === 0) {
     return {
       chatId: student.telegramUserId!,
-      text: `📚 *No Active Examinations*\n\nThere are currently no active or scheduled examinations available.`,
+      text: `📚 *My Exams*\n\nYou have no exams yet.\n\nAsk your teacher for the *exam link*. Opening that link starts the exam.`,
       replyMarkup: {
         inline_keyboard: [
-          [{ text: '🔄 Refresh', callback_data: 'btn_exams' }],
-          [{ text: '📊 Past Results', callback_data: 'btn_results' }]
+          [{ text: '📊 My Results', callback_data: 'btn_results' }],
+          [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }]
         ]
       },
       type: 'sendMessage'
     };
   }
 
-  let text = `📚 *Available Examinations*\n\n`;
+  let text = `📚 *My Exams*\n\n`;
   const keyboard: InlineKeyboardButton[][] = [];
 
   exams.forEach((exam, idx) => {
     const startDate = new Date(exam.startDate);
     const isLocked = now < startDate;
-    const attempt = store.getAttempt(exam.id, student.telegramUserId!);
+    const attempts = store.getStudentAttempts(exam.id, student.telegramUserId!);
+    const active = attempts.find(a => a.status === 'IN_PROGRESS');
+    const officialDone = attempts.find(a => a.isOfficial !== false && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'));
+    const anyDone = attempts.some(a => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED');
 
     text += `*${idx + 1}. ${exam.title}*\n`;
-    text += `   Subject: ${exam.subject} | Questions: ${exam.totalQuestions}\n`;
-    text += `   Duration: ${exam.durationMinutes} mins | Total Marks: ${exam.totalMarks}\n`;
-    text += `   Start Time: ${startDate.toLocaleString()}\n`;
+    text += `   ${exam.subject || ''} · ${exam.totalQuestions} Qs · ${exam.durationMinutes} min\n`;
 
     if (isLocked) {
-      text += `   🔒 *STATUS: LOCKED* (Inaccessible until start time)\n\n`;
-      keyboard.push([{ text: `🔒 ${exam.title} (Locked)`, callback_data: `start_exam_${exam.id}` }]);
-    } else if (attempt && (attempt.status === 'SUBMITTED' || attempt.status === 'AUTO_SUBMITTED')) {
-      text += `   ✅ *STATUS: SUBMITTED* (Score: ${attempt.score}/${attempt.maxScore})\n\n`;
-      keyboard.push([{ text: `✅ View Result (${exam.title})`, callback_data: `start_exam_${exam.id}` }]);
-    } else if (attempt && attempt.status === 'IN_PROGRESS') {
-      text += `   ⚡ *STATUS: IN PROGRESS* (${formatRemaining(attempt.expiresAt)} remaining)\n\n`;
-      keyboard.push([{ text: `▶ Resume Exam (${exam.title})`, callback_data: `resume_exam_${exam.id}` }]);
+      text += `   🔒 Locked until ${startDate.toLocaleString()}\n\n`;
+      keyboard.push([{ text: `🔒 ${exam.title}`, callback_data: `start_exam_${exam.id}` }]);
+    } else if (active) {
+      text += `   ⚡ In progress (${formatRemaining(active.expiresAt)} left)\n\n`;
+      keyboard.push([{ text: `▶ Resume · ${exam.title}`, callback_data: `resume_exam_${exam.id}` }]);
+    } else if (anyDone) {
+      const score = officialDone ? `${officialDone.score}/${officialDone.maxScore}` : 'done';
+      text += `   ✅ Attempted (${score}) — you can reattempt for practice\n\n`;
+      keyboard.push([
+        { text: `📊 Result · ${exam.title}`, callback_data: `start_exam_${exam.id}` },
+        { text: `🔁 Reattempt`, callback_data: `reattempt_${exam.id}` }
+      ]);
     } else {
-      text += `   🟢 *STATUS: AVAILABLE NOW*\n\n`;
-      keyboard.push([{ text: `🚀 Start Exam Now (${exam.title})`, callback_data: `start_exam_${exam.id}` }]);
+      text += `   🟢 Ready to start\n\n`;
+      keyboard.push([{ text: `🚀 Start · ${exam.title}`, callback_data: `start_exam_${exam.id}` }]);
     }
   });
+
+  keyboard.push([{ text: '📊 My Results', callback_data: 'btn_results' }]);
 
   return {
     chatId: student.telegramUserId!,
@@ -323,79 +369,91 @@ function renderExamsList(student: Student): SimulatorResponse {
   };
 }
 
-function handleStartOrResumeExam(examId: string, student: Student, user: TelegramUser): SimulatorResponse {
+function handleStartOrResumeExam(examId: string, student: Student, user: TelegramUser, forceNew = false): SimulatorResponse {
   const now = new Date();
   const exam = store.getExamById(examId);
 
   if (!exam) {
     return {
       chatId: user.id,
-      text: `❌ *Exam Not Found*`,
+      text: `❌ *Exam not found*\n\nAsk your teacher for a valid exam link.`,
       type: 'sendMessage'
     };
   }
 
-  // ENFORCE SERVER-SIDE LOCK BEFORE START TIME!
+  if (exam.status === 'DRAFT') {
+    return {
+      chatId: user.id,
+      text: `🔒 This exam is not open yet.`,
+      type: 'sendMessage'
+    };
+  }
+
   const startDate = new Date(exam.startDate);
   if (now < startDate) {
     return {
       chatId: user.id,
-      text: `🔒 *EXAM LOCKED UNTIL START TIME*\n\n` +
-        `📝 *Exam:* ${exam.title}\n` +
-        `📅 *Official Start Time:* ${startDate.toLocaleString()}\n\n` +
-        `⚠️ Questions and answer options are strictly encrypted and locked on the server until the official start time.`,
+      text: `🔒 *Exam locked until start time*\n\n` +
+        `📝 *${exam.title}*\n` +
+        `📅 Starts: ${startDate.toLocaleString()}`,
       replyMarkup: {
-        inline_keyboard: [[{ text: '🔄 Check Again', callback_data: 'btn_exams' }]]
+        inline_keyboard: [[{ text: '🔄 Check again', callback_data: `start_exam_${exam.id}` }]]
       },
       type: 'sendMessage'
     };
   }
 
-  // Check attempt
   let attempt = store.getAttempt(examId, student.telegramUserId!);
+  const allMine = store.getStudentAttempts(examId, student.telegramUserId!);
+  const officialExists = allMine.some(a => a.isOfficial !== false && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'));
 
-  if (attempt && (attempt.status === 'SUBMITTED' || attempt.status === 'AUTO_SUBMITTED')) {
-    // Show completed result
+  // Viewing previous result (not forcing reattempt)
+  if (!forceNew && attempt && (attempt.status === 'SUBMITTED' || attempt.status === 'AUTO_SUBMITTED')) {
     return renderAttemptSummary(exam, attempt);
   }
 
-  // Create new attempt if none exists
-  if (!attempt) {
-    const startedAt = now.toISOString();
-    const expiresAt = new Date(now.getTime() + exam.durationMinutes * 60 * 1000).toISOString();
-
-    attempt = {
-      id: `ATT_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      examId,
-      studentId: student.studentId,
-      telegramUserId: student.telegramUserId!,
-      studentName: student.name,
-      studentClass: student.className,
-      startedAt,
-      expiresAt,
-      submittedAt: null,
-      status: 'IN_PROGRESS',
-      answers: {},
-      currentQuestionIndex: 0,
-      score: 0,
-      maxScore: exam.totalMarks,
-      percentage: 0,
-      correctCount: 0,
-      wrongCount: 0,
-      skippedCount: exam.totalQuestions,
-      timeTakenSeconds: 0
-    };
-
-    store.saveAttempt(attempt);
-    store.addAuditLog('EXAM_STARTED', `Student ${student.name} (${student.studentId}) started ${exam.title}`);
+  // Resume in-progress
+  if (!forceNew && attempt && attempt.status === 'IN_PROGRESS') {
+    if (now.getTime() > new Date(attempt.expiresAt).getTime()) {
+      return autoSubmitExam(exam, attempt);
+    }
+    return renderQuestionView(exam.id, attempt.currentQuestionIndex, student, user);
   }
 
-  // Check if time expired
-  if (now.getTime() > new Date(attempt.expiresAt).getTime()) {
-    return autoSubmitExam(exam, attempt);
-  }
+  // Start new attempt (first or reattempt)
+  const attemptNumber = allMine.length + 1;
+  const isOfficial = !officialExists; // only first completed line is official; if none official yet, this is official
+  const startedAt = now.toISOString();
+  const expiresAt = new Date(now.getTime() + exam.durationMinutes * 60 * 1000).toISOString();
 
-  return renderQuestionView(exam.id, attempt.currentQuestionIndex, student, user);
+  attempt = {
+    id: `ATT_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    examId,
+    studentId: student.studentId,
+    telegramUserId: student.telegramUserId!,
+    studentName: student.name,
+    studentClass: student.className,
+    startedAt,
+    expiresAt,
+    submittedAt: null,
+    status: 'IN_PROGRESS',
+    answers: {},
+    currentQuestionIndex: 0,
+    score: 0,
+    maxScore: exam.totalMarks,
+    percentage: 0,
+    correctCount: 0,
+    wrongCount: 0,
+    skippedCount: exam.totalQuestions,
+    timeTakenSeconds: 0,
+    isOfficial,
+    attemptNumber
+  };
+
+  store.saveAttempt(attempt);
+  store.addAuditLog('EXAM_STARTED', `${student.name} started ${exam.title} (attempt #${attemptNumber}, official=${isOfficial})`);
+
+  return renderQuestionView(exam.id, 0, student, user);
 }
 
 function handleOptionSelect(examId: string, qIdx: number, optIdx: number, student: Student, user: TelegramUser): SimulatorResponse {
@@ -666,23 +724,26 @@ function autoSubmitExam(exam: Exam, attempt: Attempt): SimulatorResponse {
 function renderAttemptSummary(exam: Exam, attempt: Attempt): SimulatorResponse {
   let text = `🎉 *Examination Submitted*\n\n`;
   text += `📝 *${exam.title}*\n`;
-  text += `👤 *Student:* ${attempt.studentName} (\`${attempt.studentId}\`)\n`;
-  text += `📌 *Status:* ${attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-Submitted (Time Expired)' : '✅ Submitted'}\n\n`;
+  text += `👤 *Student:* ${attempt.studentName}\n`;
+  if (attempt.attemptNumber && attempt.attemptNumber > 1) {
+    text += `🔁 Practice attempt #${attempt.attemptNumber} (not ranked)\n`;
+  }
+  text += `📌 *Status:* ${attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-submitted (time up)' : '✅ Submitted'}\n\n`;
 
   if (exam.resultVisibility === 'PUBLISHED') {
-    text += `📊 *RESULTS BREAKDOWN:*\n`;
-    text += `⭐ *Score:* ${attempt.score} / ${attempt.maxScore} (${attempt.percentage}%)\n`;
-    text += `✅ Correct: ${attempt.correctCount}\n`;
-    text += `❌ Wrong: ${attempt.wrongCount}\n`;
-    text += `⚪ Skipped: ${attempt.skippedCount}\n`;
+    text += `📊 *Your score*\n`;
+    text += `⭐ ${attempt.score} / ${attempt.maxScore} (${attempt.percentage}%)\n`;
+    text += `✅ Correct: ${attempt.correctCount} · ❌ Wrong: ${attempt.wrongCount} · ⚪ Skipped: ${attempt.skippedCount}\n`;
     const mins = Math.floor(attempt.timeTakenSeconds / 60);
     const secs = attempt.timeTakenSeconds % 60;
-    text += `⏱️ Time Taken: ${mins}m ${secs}s\n`;
-    if (attempt.rank) {
-      text += `🏆 *Class Rank:* #${attempt.rank}\n`;
+    text += `⏱️ Time: ${mins}m ${secs}s\n`;
+    if (attempt.isOfficial !== false && isExamTimeEnded(exam) && attempt.rank) {
+      text += `🏆 *Rank:* #${attempt.rank}\n`;
+    } else if (attempt.isOfficial !== false && !isExamTimeEnded(exam)) {
+      text += `🏆 Rank will appear after the exam ends.\n`;
     }
   } else {
-    text += `🔒 *Results are hidden by the teacher until official grading completion.*\n`;
+    text += `🔒 Results are hidden by the teacher for now.\n`;
   }
 
   return {
@@ -690,8 +751,9 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt): SimulatorResponse {
     text,
     replyMarkup: {
       inline_keyboard: [
-        [{ text: '📚 Back to Exams List', callback_data: 'btn_exams' }],
-        [{ text: '🏆 Class Leaderboard', callback_data: 'btn_leaderboard' }]
+        [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
+        [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }],
+        [{ text: '🔁 Reattempt (practice)', callback_data: `reattempt_${exam.id}` }]
       ]
     },
     type: 'editMessageText'
@@ -699,28 +761,35 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt): SimulatorResponse {
 }
 
 function renderStudentResults(student: Student): SimulatorResponse {
-  const attempts = store.getAttempts().filter(a => a.studentId === student.studentId && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'));
+  const attempts = store.getAttempts().filter(a =>
+    (a.telegramUserId === student.telegramUserId || a.studentId === student.studentId) &&
+    (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED')
+  );
 
   if (attempts.length === 0) {
     return {
       chatId: student.telegramUserId!,
-      text: `📊 *My Results*\n\nYou have not submitted any examinations yet.`,
-      replyMarkup: { inline_keyboard: [[{ text: '📚 View Exams', callback_data: 'btn_exams' }]] },
+      text: `📊 *My Results*\n\nYou have not submitted any exams yet.\nOpen the link from your teacher to start.`,
+      replyMarkup: { inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]] },
       type: 'sendMessage'
     };
   }
 
-  let text = `📊 *Past Examination Results for ${student.name}*\n\n`;
+  let text = `📊 *My Results — ${student.name}*\n\n`;
 
   attempts.forEach((att, idx) => {
     const exam = store.getExamById(att.examId);
     const title = exam ? exam.title : att.examId;
-    text += `*${idx + 1}. ${title}*\n`;
+    const practice = att.isOfficial === false ? ' (practice)' : '';
+    text += `*${idx + 1}. ${title}*${practice}\n`;
     if (exam && exam.resultVisibility === 'PUBLISHED') {
-      text += `   Score: *${att.score}/${att.maxScore}* (${att.percentage}%) | Rank: #${att.rank || '-'}\n`;
-      text += `   Correct: ${att.correctCount} | Wrong: ${att.wrongCount} | Skipped: ${att.skippedCount}\n\n`;
+      text += `   Score: *${att.score}/${att.maxScore}* (${att.percentage}%)`;
+      if (att.isOfficial !== false && isExamTimeEnded(exam) && att.rank) {
+        text += ` · Rank #${att.rank}`;
+      }
+      text += `\n\n`;
     } else {
-      text += `   🔒 Results Hidden by Teacher\n\n`;
+      text += `   🔒 Results hidden\n\n`;
     }
   });
 
@@ -728,7 +797,10 @@ function renderStudentResults(student: Student): SimulatorResponse {
     chatId: student.telegramUserId!,
     text,
     replyMarkup: {
-      inline_keyboard: [[{ text: '📚 Active Exams', callback_data: 'btn_exams' }]]
+      inline_keyboard: [
+        [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
+        [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]
+      ]
     },
     type: 'sendMessage'
   };
@@ -743,33 +815,27 @@ function matchesClass(studentClass?: string, examClass?: string): boolean {
 }
 
 function renderStudentLeaderboard(student: Student): SimulatorResponse {
-  const exams = store.getExams().filter(e =>
-    e.status !== 'DRAFT' &&
-    (e.leaderboardVisibility === 'PUBLISHED' || !e.leaderboardVisibility) &&
-    matchesClass(student.className, e.className)
-  );
+  // Only exams the student participated in, and only after exam time ended
+  const myExamIds = [...new Set(
+    store.getAttempts().filter(a => a.telegramUserId === student.telegramUserId || a.studentId === student.studentId).map(a => a.examId)
+  )];
+  const exams = myExamIds.map(id => store.getExamById(id)).filter((e): e is Exam => !!e && isExamTimeEnded(e));
 
   if (exams.length === 0) {
-    const classLabel = (student.className && student.className !== 'ALL' && student.className !== 'All Students')
-      ? ` for *${student.className}*`
-      : '';
     return {
       chatId: student.telegramUserId!,
-      text: `🏆 *Leaderboard*\n\nNo published leaderboards are available${classLabel} at this time.`,
-      replyMarkup: { inline_keyboard: [[{ text: '📚 Active Exams', callback_data: 'btn_exams' }]] },
+      text: `🏆 *Leaderboard*\n\nRankings appear only *after an exam ends*.\n\nComplete an exam and wait until its time is over.`,
+      replyMarkup: { inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]] },
       type: 'sendMessage'
     };
   }
 
-  const classTitle = (student.className && student.className !== 'ALL' && student.className !== 'All Students')
-    ? ` - ${student.className}`
-    : '';
-  let text = `🏆 *Class Leaderboard${classTitle}*\n\n`;
+  let text = `🏆 *Leaderboard*\n_(First attempt only)_\n\n`;
 
   exams.forEach((exam) => {
     text += `📝 *${exam.title}*\n`;
     const attempts = store.getAttempts(exam.id)
-      .filter(a => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED');
+      .filter(a => (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false);
 
     attempts.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
@@ -778,13 +844,13 @@ function renderStudentLeaderboard(student: Student): SimulatorResponse {
     });
 
     if (attempts.length === 0) {
-      text += `   _No submissions yet._\n\n`;
+      text += `   _No ranked submissions._\n\n`;
     } else {
       attempts.slice(0, 10).forEach((att, idx) => {
         const rankNum = att.rank || (idx + 1);
         const medal = rankNum === 1 ? '🥇' : rankNum === 2 ? '🥈' : rankNum === 3 ? '🥉' : `#${rankNum}`;
         const isMe = (att.telegramUserId === student.telegramUserId || att.studentId === student.studentId) ? ' (You)' : '';
-        text += `   ${medal} ${att.studentName}${isMe} - *${att.score} pts* (${att.percentage}%)\n`;
+        text += `   ${medal} ${att.studentName}${isMe} — *${att.score}* (${att.percentage}%)\n`;
       });
       text += `\n`;
     }
@@ -794,7 +860,7 @@ function renderStudentLeaderboard(student: Student): SimulatorResponse {
     chatId: student.telegramUserId!,
     text,
     replyMarkup: {
-      inline_keyboard: [[{ text: '📚 Active Exams', callback_data: 'btn_exams' }]]
+      inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]]
     },
     type: 'sendMessage'
   };

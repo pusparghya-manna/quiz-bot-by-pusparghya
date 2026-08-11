@@ -193,7 +193,7 @@ export default function App() {
         ) : (
           <>
             {tab === 'home' && <Home exams={exams.length} live={live} submissions={done} onExams={() => setTab('exams')} />}
-            {tab === 'exams' && <Exams exams={exams} onRefresh={load} />}
+            {tab === 'exams' && <Exams exams={exams} botUsername={settings.botUsername} onRefresh={load} />}
             {tab === 'results' && <Results exams={exams} attempts={attempts} onRefresh={load} />}
             {tab === 'settings' && <Settings settings={settings} logs={logs} onRefresh={load} />}
           </>
@@ -201,8 +201,8 @@ export default function App() {
       </main>
 
       {/* Bottom nav — always visible on mobile */}
-      <nav className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200" style={{ paddingBottom: 'var(--safe-bottom)' }}>
-        <div className="max-w-3xl mx-auto grid grid-cols-4 h-16">
+      <nav className="fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]" style={{ paddingBottom: 'max(var(--safe-bottom), 8px)' }}>
+        <div className="max-w-3xl mx-auto grid grid-cols-4 h-[60px]">
           {nav.map(({ id, label, Icon }) => {
             const on = tab === id;
             return (
@@ -260,7 +260,8 @@ function Home({ exams, live, submissions, onExams }: { exams: number; live: numb
 }
 
 /* ─── EXAMS (questions inside exam) ─── */
-function Exams({ exams, onRefresh }: { exams: Exam[]; onRefresh: () => void }) {
+function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: string; onRefresh: () => void }) {
+  const [shareLink, setShareLink] = useState('');
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -277,6 +278,22 @@ function Exams({ exams, onRefresh }: { exams: Exam[]; onRefresh: () => void }) {
   const [jsonText, setJsonText] = useState('');
   const [ocrBusy, setOcrBusy] = useState(false);
   const [toast, setToast] = useState('');
+  const examLink = (id: string) => {
+    const u = (botUsername || '').replace(/^@/, '').trim() || 'YourBot';
+    return `https://t.me/${u}?start=exam_${id}`;
+  };
+  const copyLink = async (id: string) => {
+    const link = examLink(id);
+    try {
+      await navigator.clipboard.writeText(link);
+      setShareLink(link);
+      alert('Exam link copied!\n\n' + link);
+    } catch {
+      setShareLink(link);
+      prompt('Copy this exam link for students:', link);
+    }
+  };
+
 
   const filtered = exams.filter((e) => {
     const s = search.toLowerCase();
@@ -341,8 +358,13 @@ function Exams({ exams, onRefresh }: { exams: Exam[]; onRefresh: () => void }) {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.error || 'Save failed');
       }
+      const saved = await res.json().catch(() => ({}));
+      const newId = saved.id || editId;
       setOpen(false);
       onRefresh();
+      if (newId) {
+        setTimeout(() => copyLink(String(newId)), 300);
+      }
     } catch (e: any) {
       alert(e.message || 'Failed to save');
     } finally {
@@ -448,6 +470,13 @@ function Exams({ exams, onRefresh }: { exams: Exam[]; onRefresh: () => void }) {
       </div>
 
       <input className={inp} placeholder="Search exams…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      {shareLink && (
+        <div className="rounded-2xl bg-blue-50 border border-blue-100 p-3 text-sm break-all">
+          <div className="font-semibold text-blue-800 mb-1">Student exam link</div>
+          <a href={shareLink} className="text-blue-600 underline" target="_blank" rel="noreferrer">{shareLink}</a>
+          <p className="text-xs text-blue-700/80 mt-1">Share this with students. Only this link starts the exam.</p>
+        </div>
+      )}
 
       <div className="space-y-3">
         {filtered.length === 0 && (
@@ -466,6 +495,9 @@ function Exams({ exams, onRefresh }: { exams: Exam[]; onRefresh: () => void }) {
                 <div className="mt-2.5"><Badge s={exam.status} /></div>
               </div>
               <div className="flex flex-col gap-1 shrink-0">
+                <button type="button" className="w-10 h-10 rounded-xl border border-blue-100 flex items-center justify-center text-blue-600 hover:bg-blue-50 text-[10px] font-bold" onClick={() => copyLink(exam.id)} aria-label="Share">
+                  Link
+                </button>
                 <button type="button" className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50" onClick={() => startEdit(exam)} aria-label="Edit">
                   <IconEdit className="w-4 h-4" />
                 </button>

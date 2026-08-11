@@ -69,6 +69,8 @@ export interface Attempt {
   skippedCount: number;
   timeTakenSeconds: number;
   rank?: number;
+  isOfficial?: boolean;
+  attemptNumber?: number;
 }
 
 export interface AuditLog {

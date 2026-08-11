@@ -69,6 +69,9 @@ export interface Attempt {
   skippedCount: number;
   timeTakenSeconds: number;
   rank?: number;
+  /** First attempt counts for leaderboard; reattempts are practice-only */
+  isOfficial?: boolean;
+  attemptNumber?: number;
 }
 
 export interface AuditLog {
