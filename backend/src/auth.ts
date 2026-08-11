@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { Request, Response, NextFunction } from 'express';
 import { db } from './db.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'quiz-bot-tinkori-secret-2026';
+const JWT_SECRET = process.env.JWT_SECRET || 'quiz-bot-change-me-in-production';
 
 export interface TeacherPayload {
   username: string;
@@ -20,20 +20,25 @@ export async function ensureTeachersTable() {
         created_at TEXT NOT NULL
       )
     `);
-    // Seed default teacher if empty
-    const existing = await db.execute({
-      sql: 'SELECT username FROM teachers WHERE username = ?',
-      args: [process.env.TEACHER_USERNAME || 'TinkoriSir']
-    });
-    if (existing.rows.length === 0) {
-      const user = process.env.TEACHER_USERNAME || 'TinkoriSir';
-      const pass = process.env.TEACHER_PASSWORD || 'OnlineQuiz@123';
-      const hash = await bcrypt.hash(pass, 10);
-      await db.execute({
-        sql: 'INSERT INTO teachers (username, name, password_hash, created_at) VALUES (?, ?, ?, ?)',
-        args: [user, 'Tinkori Sir', hash, new Date().toISOString()]
+
+    // Seed ONLY if TEACHER_USERNAME + TEACHER_PASSWORD are set in environment
+    // Never hardcode credentials in source.
+    const user = process.env.TEACHER_USERNAME?.trim();
+    const pass = process.env.TEACHER_PASSWORD;
+    if (user && pass) {
+      const existing = await db.execute({
+        sql: 'SELECT username FROM teachers WHERE username = ?',
+        args: [user]
       });
-      console.log('Seeded default teacher:', user);
+      if (existing.rows.length === 0) {
+        const hash = await bcrypt.hash(pass, 10);
+        const name = process.env.TEACHER_NAME?.trim() || user;
+        await db.execute({
+          sql: 'INSERT INTO teachers (username, name, password_hash, created_at) VALUES (?, ?, ?, ?)',
+          args: [user, name, hash, new Date().toISOString()]
+        });
+        console.log('Seeded teacher from environment:', user);
+      }
     }
   } catch (e) {
     console.error('ensureTeachersTable failed', e);
