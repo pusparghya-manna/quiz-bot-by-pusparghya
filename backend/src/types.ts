@@ -17,6 +17,7 @@ export interface Question {
 
 export interface Exam {
   id: string;
+  teacherId?: string;
   title: string;
   subject: string;
   className: string;

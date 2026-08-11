@@ -56,8 +56,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 /* ─── Login ─── */
 function Login({ onOk }: { onOk: () => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [u, setU] = useState('');
   const [p, setP] = useState('');
+  const [name, setName] = useState('');
   const [show, setShow] = useState(false);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -67,13 +69,17 @@ function Login({ onOk }: { onOk: () => void }) {
     setErr('');
     setBusy(true);
     try {
-      const res = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: u.trim(), password: p }) });
+      const path = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const body = mode === 'login'
+        ? { username: u.trim(), password: p }
+        : { username: u.trim(), password: p, name: name.trim() || u.trim() };
+      const res = await api(path, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Invalid credentials');
+      if (!res.ok) throw new Error(data.error || (mode === 'login' ? 'Invalid credentials' : 'Registration failed'));
       setToken(data.token);
       onOk();
     } catch (e: any) {
-      setErr(e.message || 'Login failed');
+      setErr(e.message || 'Failed');
     } finally {
       setBusy(false);
     }
@@ -82,27 +88,46 @@ function Login({ onOk }: { onOk: () => void }) {
   return (
     <div className="min-h-full flex flex-col items-center justify-center p-5 bg-gradient-to-b from-blue-50 via-slate-50 to-slate-100">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/30 mb-4">
             <IconBot className="w-8 h-8" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Quiz Bot by Pusparghya</h1>
           <p className="text-sm text-slate-500 mt-1">Teacher Dashboard</p>
         </div>
+
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mb-4">
+          <button type="button" onClick={() => { setMode('login'); setErr(''); }}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold ${mode === 'login' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>
+            Sign in
+          </button>
+          <button type="button" onClick={() => { setMode('register'); setErr(''); }}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold ${mode === 'register' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>
+            Register
+          </button>
+        </div>
+
         <form onSubmit={go} className={card + ' p-5 space-y-4'}>
+          {mode === 'register' && (
+            <Field label="Full name">
+              <input className={inp} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Your name" />
+            </Field>
+          )}
           <Field label="Username">
-            <input className={inp} value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" autoCapitalize="off" required placeholder="Enter username" />
+            <input className={inp} value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" autoCapitalize="off" required placeholder="Choose a username" />
           </Field>
           <Field label="Password">
             <div className="relative">
-              <input className={inp + ' pr-12'} type={show ? 'text' : 'password'} value={p} onChange={(e) => setP(e.target.value)} autoComplete="current-password" required placeholder="Enter password" />
+              <input className={inp + ' pr-12'} type={show ? 'text' : 'password'} value={p} onChange={(e) => setP(e.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required placeholder={mode === 'register' ? 'Min 6 characters' : 'Password'} />
               <button type="button" tabIndex={-1} onMouseDown={(e) => e.preventDefault()} onClick={() => setShow((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center text-slate-400">
                 {show ? <IconEyeOff className="w-4 h-4" /> : <IconEye className="w-4 h-4" />}
               </button>
             </div>
           </Field>
           {err && <div className="text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2.5">{err}</div>}
-          <button type="submit" disabled={busy} className={btnP + ' w-full'}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          <button type="submit" disabled={busy} className={btnP + ' w-full'}>
+            {busy ? (mode === 'login' ? 'Signing in…' : 'Creating account…') : (mode === 'login' ? 'Sign in' : 'Create account')}
+          </button>
         </form>
         <p className="text-center text-xs text-slate-400 mt-6">Quiz Bot by Pusparghya</p>
       </div>

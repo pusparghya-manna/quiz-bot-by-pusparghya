@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { initDb } from './db.js';
-import { loginTeacher, authMiddleware } from './auth.js';
+import { loginTeacher, registerTeacher, authMiddleware, ensureTeachersTable } from './auth.js';
 import { store } from './store.js';
 import { processTelegramUpdate, updateExamRanks, calculateAttemptScore, sendTelegramResponse } from './telegramBot.js';
 import { startTelegramPolling } from './telegramPolling.js';
@@ -22,13 +22,25 @@ async function startServer() {
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
   // Auth
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     try {
       const { username, password } = req.body || {};
-      const result = loginTeacher(username, password);
+      if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+      const result = await loginTeacher(username, password);
       res.json(result);
     } catch (e: any) {
       res.status(401).json({ error: e.message || 'Login failed' });
+    }
+  });
+
+  app.post('/api/auth/register', async (req, res) => {
+    try {
+      const { username, password, name } = req.body || {};
+      if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+      const result = await registerTeacher(username, password, name || username);
+      res.json(result);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message || 'Registration failed' });
     }
   });
 
@@ -44,13 +56,21 @@ async function startServer() {
 
   // 1. Dashboard Overview Stats & Complete Data Batch
   app.get('/api/data', (req, res) => {
+    const teacher = (req as any).teacher;
+    const teacherId = teacher?.username;
+    let exams = store.getExams();
+    if (teacherId) {
+      exams = exams.filter((e: any) => !e.teacherId || e.teacherId === teacherId);
+    }
+    const examIds = new Set(exams.map((e: any) => e.id));
+    const attempts = store.getAttempts().filter((a: any) => examIds.has(a.examId));
     res.json({
-      exams: store.getExams(),
+      exams,
       questions: store.getQuestionBank(),
       students: store.getStudents(),
-      attempts: store.getAttempts(),
+      attempts,
       settings: store.getSettings(),
-      auditLogs: store.getAuditLogs()
+      auditLogs: store.getAuditLogs().slice(0, 50)
     });
   });
 
@@ -115,8 +135,10 @@ async function startServer() {
     const data = req.body;
     const now = new Date().toISOString();
 
+    const teacher = (req as any).teacher;
     const newExam: Exam = {
       id: `EXAM_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      teacherId: teacher?.username || data.teacherId,
       title: data.title || 'Untitled Examination',
       subject: data.subject || 'General',
       className: data.className || 'Class 10-A Biology',
@@ -146,10 +168,15 @@ async function startServer() {
     if (!exam) {
       return res.status(404).json({ error: 'Exam not found' });
     }
+    const teacher = (req as any).teacher;
+    if (exam.teacherId && teacher?.username && exam.teacherId !== teacher.username) {
+      return res.status(403).json({ error: 'Not your exam' });
+    }
 
     const updated: Exam = {
       ...exam,
       ...req.body,
+      teacherId: exam.teacherId || (req as any).teacher?.username,
       totalQuestions: req.body.questions ? req.body.questions.length : exam.totalQuestions,
       updatedAt: new Date().toISOString()
     };
@@ -162,6 +189,10 @@ async function startServer() {
   app.delete('/api/exams/:id', (req, res) => {
     const exam = store.getExamById(req.params.id);
     if (exam) {
+      const teacher = (req as any).teacher;
+      if (exam.teacherId && teacher?.username && exam.teacherId !== teacher.username) {
+        return res.status(403).json({ error: 'Not your exam' });
+      }
       store.deleteExam(req.params.id);
       store.addAuditLog('EXAM_DELETED', `Deleted exam "${exam.title}"`);
       return res.json({ success: true });
@@ -435,6 +466,7 @@ async function startServer() {
 
 async function main() {
   await initDb();
+  await ensureTeachersTable();
   await store.init();
   await startServer();
 }
