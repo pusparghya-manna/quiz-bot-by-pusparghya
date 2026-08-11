@@ -1,7 +1,7 @@
 import { db } from './db.js';
 import { Exam, Question, Student, Attempt, AuditLog, SystemSettings } from './types.js';
 
-const TEACHER_ID = 'TCH_TINKORI';
+const TEACHER_ID = 'default';
 
 function generateInitialSettings(): SystemSettings {
   return {

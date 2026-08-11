@@ -22,4 +22,4 @@ Bot: [@quizbotbypusparghya_bot](https://t.me/quizbotbypusparghya_bot)
 3. Deploy
 
 ## Teacher login
-Configure via env: `TEACHER_USERNAME` / `TEACHER_PASSWORD`
+Use **Register** on the login page, or set `TEACHER_USERNAME` / `TEACHER_PASSWORD` as Railway secrets only (never commit passwords).
