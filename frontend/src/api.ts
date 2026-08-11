@@ -21,10 +21,11 @@ export async function api(path: string, options: RequestInit = {}) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (res.status === 401) {
+
+  // Only clear token on 401 for protected routes — never force reload
+  // (reload caused infinite keyboard open/close loop on mobile login)
+  if (res.status === 401 && !path.includes('/auth/login')) {
     clearToken();
-    window.location.reload();
-    throw new Error('Unauthorized');
   }
   return res;
 }

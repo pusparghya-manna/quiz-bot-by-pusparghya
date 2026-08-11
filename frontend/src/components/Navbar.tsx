@@ -6,13 +6,15 @@ interface NavbarProps {
   botActive: boolean;
   onOpenSettings: () => void;
   onScrollToSection: (sectionId: string) => void;
+  onLogout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   onReseedData,
   botActive,
   onOpenSettings,
-  onScrollToSection
+  onScrollToSection,
+  onLogout
 }) => {
   return (
     <header id="main-header" className="bg-white border-b border-slate-200 text-slate-900 sticky top-0 z-30 shadow-2xs">
