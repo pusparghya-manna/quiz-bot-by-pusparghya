@@ -1,21 +1,25 @@
-# Quiz Bot By Pusparghya
+# Quiz Bot by Pusparghya
 
-Telegram Exam / Quiz Bot with Teacher Dashboard.
+Telegram quiz / exam bot with a teacher dashboard.
 
-- Backend: Railway (Node + Express + Telegram polling)
-- Frontend: Vercel (React + Vite)
-- Database: Turso
-- OCR: Gemini (photo → JSON questions → exam)
+- **Frontend:** Vercel (React + Vite) — teacher dashboard  
+- **Backend:** Railway (Node + Express + Telegram polling)  
+- **Database:** Turso  
+- **OCR:** Gemini (photo → questions → exam)  
+
+Bot: [@quizbotbypusparghya_bot](https://t.me/quizbotbypusparghya_bot)
 
 ## Deploy
 
 ### Backend (Railway)
 1. Root directory: `backend`
-2. Set environment variables (see backend/.env.example)
+2. Environment variables: see `backend/.env.example`
 3. Deploy
 
 ### Frontend (Vercel)
 1. Root directory: `frontend`
-2. Set `VITE_API_URL` to your Railway public URL (e.g. https://xxx.up.railway.app)
+2. `VITE_API_URL` = your Railway public URL  
 3. Deploy
 
+## Teacher login
+Configure via env: `TEACHER_USERNAME` / `TEACHER_PASSWORD`

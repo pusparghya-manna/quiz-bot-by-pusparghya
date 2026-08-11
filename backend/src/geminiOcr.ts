@@ -10,7 +10,7 @@ export async function parseQuestionsFromMedia(fileBase64: string, mimeType: stri
     apiKey,
     httpOptions: {
       headers: {
-        'User-Agent': 'aistudio-build'
+        'User-Agent': 'QuizBotByPusparghya'
       }
     }
   });

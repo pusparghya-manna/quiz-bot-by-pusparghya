@@ -7,7 +7,7 @@ function generateInitialSettings(): SystemSettings {
   return {
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
     webhookUrl: '',
-    botUsername: '@ExamMasterBot',
+    botUsername: '@quizbotbypusparghya_bot',
     botActive: true,
     autoPublishResults: true,
     systemNotice: 'System ready for exam setup.'

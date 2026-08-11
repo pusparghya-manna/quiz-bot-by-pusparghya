@@ -86,8 +86,8 @@ function Login({ onOk }: { onOk: () => void }) {
           <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/30 mb-4">
             <IconBot className="w-8 h-8" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">TeleExam Pro</h1>
-          <p className="text-sm text-slate-500 mt-1">Teacher dashboard</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Quiz Bot by Pusparghya</h1>
+          <p className="text-sm text-slate-500 mt-1">Teacher Dashboard</p>
         </div>
         <form onSubmit={go} className={card + ' p-5 space-y-4'}>
           <Field label="Username">
@@ -104,6 +104,7 @@ function Login({ onOk }: { onOk: () => void }) {
           {err && <div className="text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2.5">{err}</div>}
           <button type="submit" disabled={busy} className={btnP + ' w-full'}>{busy ? 'Signing in…' : 'Sign in'}</button>
         </form>
+        <p className="text-center text-xs text-slate-400 mt-6">Quiz Bot by Pusparghya</p>
       </div>
     </div>
   );
@@ -129,7 +130,7 @@ export default function App() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [settings, setSettings] = useState<SystemSettings>({
-    telegramBotToken: '', webhookUrl: '', botUsername: '@ExamMasterBot',
+    telegramBotToken: '', webhookUrl: '', botUsername: '@quizbotbypusparghya_bot',
     botActive: true, autoPublishResults: true, systemNotice: '',
   });
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -174,7 +175,7 @@ export default function App() {
               <IconBot className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="font-bold text-sm text-slate-900 leading-tight">TeleExam Pro</div>
+              <div className="font-bold text-sm text-slate-900 leading-tight">Quiz Bot by Pusparghya</div>
               <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${settings.botActive ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                 {settings.botActive ? 'Bot online' : 'Bot offline'}
@@ -228,7 +229,7 @@ function Home({ exams, live, submissions, onExams }: { exams: number; live: numb
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Manage Telegram exams</p>
+        <p className="text-sm text-slate-500 mt-0.5">Manage exams on Telegram</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {[

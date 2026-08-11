@@ -262,7 +262,7 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
       const notice = store.getSettings().systemNotice;
       return {
         chatId: user.id,
-        text: `👋 *Welcome to TeleExam Pro!*\n\n` +
+        text: `👋 *Welcome to Quiz Bot by Pusparghya!*\n\n` +
           (notice ? `📢 ${notice}\n\n` : '') +
           `You are registered as *${student.name}*.\n` +
           `✏️ Change display name: \`/setname Your Full Name\`\n\n` +
