@@ -8,7 +8,7 @@ export interface Question {
   bankId?: string;
   question: string;
   options: string[];
-  answer: number | null; // 0-based index: 0=A, 1=B, 2=C, 3=D, or null if unknown
+  answer: number | null;
   marks: number;
   negativeMarks: number;
   explanation?: string;
@@ -22,7 +22,7 @@ export interface Exam {
   className: string;
   testNumber: string;
   totalQuestions: number;
-  startDate: string; // ISO format string
+  startDate: string;
   durationMinutes: number;
   totalMarks: number;
   negativeMarking: number;
@@ -38,7 +38,7 @@ export interface Exam {
 
 export interface Student {
   id: string;
-  studentId: string; // e.g. "2026-BIO-001"
+  studentId: string;
   name: string;
   className: string;
   telegramUserId: number | null;
@@ -59,7 +59,7 @@ export interface Attempt {
   expiresAt: string;
   submittedAt: string | null;
   status: AttemptStatus;
-  answers: Record<string, number>; // questionId -> selectedOptionIndex (0..3)
+  answers: Record<string, number>;
   currentQuestionIndex: number;
   score: number;
   maxScore: number;
@@ -86,59 +86,4 @@ export interface SystemSettings {
   botActive: boolean;
   autoPublishResults: boolean;
   systemNotice: string;
-}
-
-export interface InlineKeyboardButton {
-  text: string;
-  callback_data: string;
-}
-
-export interface InlineKeyboardMarkup {
-  inline_keyboard: InlineKeyboardButton[][];
-}
-
-export interface TelegramChat {
-  id: number;
-  first_name?: string;
-  last_name?: string;
-  username?: string;
-  type: 'private' | 'group';
-}
-
-export interface TelegramUser {
-  id: number;
-  is_bot?: boolean;
-  first_name: string;
-  last_name?: string;
-  username?: string;
-}
-
-export interface TelegramMessage {
-  message_id: number;
-  from: TelegramUser;
-  chat: TelegramChat;
-  date: number;
-  text?: string;
-  reply_markup?: InlineKeyboardMarkup;
-}
-
-export interface TelegramCallbackQuery {
-  id: string;
-  from: TelegramUser;
-  message?: TelegramMessage;
-  data?: string;
-}
-
-export interface TelegramUpdate {
-  update_id: number;
-  message?: TelegramMessage;
-  callback_query?: TelegramCallbackQuery;
-}
-
-export interface SimulatorResponse {
-  chatId: number;
-  text: string;
-  replyMarkup?: InlineKeyboardMarkup;
-  messageId?: number;
-  type: 'sendMessage' | 'editMessageText';
 }
