@@ -7,10 +7,6 @@ Telegram Exam / Quiz Bot with Teacher Dashboard.
 - Database: Turso
 - OCR: Gemini (photo → JSON questions → exam)
 
-## Teacher Login
-- Username: `TinkoriSir`
-- Password: `OnlineQuiz@123`
-
 ## Deploy
 
 ### Backend (Railway)
