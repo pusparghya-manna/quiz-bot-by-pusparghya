@@ -609,7 +609,7 @@ function Exams({ exams, onRefresh }: { exams: Exam[]; onRefresh: () => void }) {
                   <label className={btnP + ' w-full cursor-pointer'}>
                     <IconUpload className="w-5 h-5" />
                     {ocrBusy ? 'Parsing…' : 'Choose photo'}
-                    <input type="file" accept="image/*" capture="environment" className="hidden" disabled={ocrBusy}
+                    <input type="file" accept="image/*" className="hidden" disabled={ocrBusy}
                       onChange={(e) => e.target.files?.[0] && onOcr(e.target.files[0])} />
                   </label>
                   <button type="button" className={btnS + ' w-full'} onClick={() => setQMode('list')}>Back to list</button>
