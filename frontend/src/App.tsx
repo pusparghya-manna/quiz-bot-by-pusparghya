@@ -24,6 +24,40 @@ const btnS = btn + ' bg-white text-slate-700 border border-slate-200 hover:bg-sl
 const btnD = btn + ' text-red-600 hover:bg-red-50 px-3 py-2';
 const card = 'bg-white rounded-2xl border border-slate-200/80 shadow-sm';
 
+/** Exam times are always Asia/Kolkata (IST, UTC+5:30) */
+const IST_OFFSET = '+05:30';
+
+function toDatetimeLocalIST(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  // format as YYYY-MM-DDTHH:mm in IST
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).formatToParts(d);
+  const get = (t: string) => parts.find(p => p.type === t)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+}
+
+/** datetime-local value (no zone) interpreted as IST → ISO UTC string */
+function fromDatetimeLocalIST(local: string): string {
+  if (!local) return new Date().toISOString();
+  // local is "YYYY-MM-DDTHH:mm" meaning IST
+  const withOffset = local.length === 16 ? `${local}:00${IST_OFFSET}` : `${local}${IST_OFFSET}`;
+  const d = new Date(withOffset);
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
+function formatIST(iso: string | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+
 function Badge({ s }: { s: string }) {
   return <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${STATUS_STYLE[s] || STATUS_STYLE.DRAFT}`}>{s.replace(/_/g, ' ')}</span>;
 }
@@ -329,7 +363,7 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
   const reset = () => {
     setForm({
       title: '', subject: '', className: '', testNumber: '',
-      startDate: new Date().toISOString().slice(0, 16),
+      startDate: toDatetimeLocalIST(new Date().toISOString()),
       durationMinutes: 60, negativeMarking: 0, status: 'DRAFT',
       randomizeQuestions: false, randomizeOptions: false,
     });
@@ -345,7 +379,7 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
     setEditId(exam.id);
     setForm({
       title: exam.title, subject: exam.subject || '', className: exam.className || '',
-      testNumber: exam.testNumber || '', startDate: exam.startDate?.slice(0, 16) || '',
+      testNumber: exam.testNumber || '', startDate: toDatetimeLocalIST(exam.startDate) || '',
       durationMinutes: exam.durationMinutes || 60, negativeMarking: exam.negativeMarking || 0,
       status: exam.status, randomizeQuestions: !!exam.randomizeQuestions, randomizeOptions: !!exam.randomizeOptions,
     });
@@ -365,7 +399,7 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
         subject: form.subject,
         className: form.className,
         testNumber: form.testNumber,
-        startDate: form.startDate ? new Date(form.startDate).toISOString() : new Date().toISOString(),
+        startDate: form.startDate ? fromDatetimeLocalIST(form.startDate) : new Date().toISOString(),
         durationMinutes: Number(form.durationMinutes),
         negativeMarking: Number(form.negativeMarking),
         status: form.status,
@@ -518,6 +552,7 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
                 <div className="text-xs text-slate-500 mt-1">
                   {exam.subject || '—'} · {exam.className || '—'} · {exam.totalQuestions || exam.questions?.length || 0} Qs · {exam.durationMinutes}m
                 </div>
+                <div className="text-xs text-slate-500 mt-0.5">Starts: {formatIST(exam.startDate)} (IST)</div>
                 <div className="mt-2.5"><Badge s={exam.status} /></div>
               </div>
               <div className="flex flex-col gap-1 shrink-0">
@@ -563,7 +598,7 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
                 <Field label="Subject"><input className={inp} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} /></Field>
                 <Field label="Class / group"><input className={inp} value={form.className} onChange={(e) => setForm({ ...form, className: e.target.value })} /></Field>
                 <Field label="Test code"><input className={inp} value={form.testNumber} onChange={(e) => setForm({ ...form, testNumber: e.target.value })} /></Field>
-                <Field label="Start time"><input type="datetime-local" className={inp} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
+                <Field label="Start time (IST)"><input type="datetime-local" className={inp} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
                 <Field label="Duration (minutes)"><input type="number" className={inp} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: +e.target.value })} /></Field>
                 <Field label="Negative marking"><input type="number" step="0.25" className={inp} value={form.negativeMarking} onChange={(e) => setForm({ ...form, negativeMarking: +e.target.value })} /></Field>
               </div>

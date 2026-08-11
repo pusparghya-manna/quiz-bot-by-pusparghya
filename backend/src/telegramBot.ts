@@ -92,6 +92,16 @@ function isExamTimeEnded(exam: Exam): boolean {
 }
 
 // Format timer remaining string
+
+function formatInIST(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true
+  }) + ' IST';
+}
+
 function formatRemaining(expiresAtIso: string): string {
   const expiresAt = new Date(expiresAtIso).getTime();
   const now = Date.now();
@@ -341,7 +351,7 @@ function renderExamsList(student: Student): SimulatorResponse {
     text += `   ${exam.subject || ''} · ${exam.totalQuestions} Qs · ${exam.durationMinutes} min\n`;
 
     if (isLocked) {
-      text += `   🔒 Locked until ${startDate.toLocaleString()}\n\n`;
+      text += `   🔒 Locked until ${formatInIST(startDate)}\n\n`;
       keyboard.push([{ text: `🔒 ${exam.title}`, callback_data: `start_exam_${exam.id}` }]);
     } else if (active) {
       text += `   ⚡ In progress (${formatRemaining(active.expiresAt)} left)\n\n`;
@@ -395,7 +405,7 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
       chatId: user.id,
       text: `🔒 *Exam locked until start time*\n\n` +
         `📝 *${exam.title}*\n` +
-        `📅 Starts: ${startDate.toLocaleString()}`,
+        `📅 Starts: ${formatInIST(startDate)}`,
       replyMarkup: {
         inline_keyboard: [[{ text: '🔄 Check again', callback_data: `start_exam_${exam.id}` }]]
       },
