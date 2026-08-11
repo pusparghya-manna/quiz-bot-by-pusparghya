@@ -108,6 +108,28 @@ class Store {
     this.persist('students');
     return s;
   }
+  getStudentById(id: string) {
+    return this.data.students.find(s => s.id === id || s.studentId === id);
+  }
+  deleteStudent(id: string) {
+    const stu = this.getStudentById(id);
+    if (!stu) return false;
+    this.data.students = this.data.students.filter(s => s.id !== stu.id);
+    // remove all attempts by this student
+    const before = this.data.attempts.length;
+    this.data.attempts = this.data.attempts.filter(a =>
+      a.studentId !== stu.studentId && a.telegramUserId !== stu.telegramUserId
+    );
+    this.persist('students');
+    if (this.data.attempts.length !== before) this.persist('attempts');
+    return true;
+  }
+  deleteAttemptById(id: string) {
+    const len = this.data.attempts.length;
+    this.data.attempts = this.data.attempts.filter(a => a.id !== id);
+    if (this.data.attempts.length !== len) { this.persist('attempts'); return true; }
+    return false;
+  }
   getStudentByTelegramId(id: number) {
     return this.data.students.find(s => s.telegramUserId === id);
   }

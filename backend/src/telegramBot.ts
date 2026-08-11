@@ -732,26 +732,42 @@ function autoSubmitExam(exam: Exam, attempt: Attempt): SimulatorResponse {
 }
 
 function renderAttemptSummary(exam: Exam, attempt: Attempt): SimulatorResponse {
-  let text = `🎉 *Examination Submitted*\n\n`;
+  let text = `🎉 *Exam submitted*\n\n`;
   text += `📝 *${exam.title}*\n`;
-  text += `👤 *Student:* ${attempt.studentName}\n`;
+  text += `👤 *${attempt.studentName}*\n`;
   if (attempt.attemptNumber && attempt.attemptNumber > 1) {
     text += `🔁 Practice attempt #${attempt.attemptNumber} (not ranked)\n`;
   }
-  text += `📌 *Status:* ${attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-submitted (time up)' : '✅ Submitted'}\n\n`;
+  text += `📌 ${attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-submitted (time up)' : '✅ Submitted'}\n\n`;
 
   if (exam.resultVisibility === 'PUBLISHED') {
     text += `📊 *Your score*\n`;
     text += `⭐ ${attempt.score} / ${attempt.maxScore} (${attempt.percentage}%)\n`;
-    text += `✅ Correct: ${attempt.correctCount} · ❌ Wrong: ${attempt.wrongCount} · ⚪ Skipped: ${attempt.skippedCount}\n`;
+    text += `✅ ${attempt.correctCount}  ❌ ${attempt.wrongCount}  ⚪ ${attempt.skippedCount}\n`;
     const mins = Math.floor(attempt.timeTakenSeconds / 60);
     const secs = attempt.timeTakenSeconds % 60;
     text += `⏱️ Time: ${mins}m ${secs}s\n`;
     if (attempt.isOfficial !== false && isExamTimeEnded(exam) && attempt.rank) {
-      text += `🏆 *Rank:* #${attempt.rank}\n`;
+      text += `🏆 Rank: #${attempt.rank}\n`;
     } else if (attempt.isOfficial !== false && !isExamTimeEnded(exam)) {
-      text += `🏆 Rank will appear after the exam ends.\n`;
+      text += `🏆 Rank after exam ends\n`;
     }
+    text += `\n*Question-wise*\n`;
+    exam.questions.forEach((q, i) => {
+      const sel = attempt.answers[q.id];
+      const has = sel !== undefined && sel !== null;
+      let mark = '⚪';
+      let extra = 'Skipped';
+      if (has) {
+        const ok = q.answer !== null && sel === q.answer;
+        mark = ok ? '✅' : '❌';
+        const chosen = q.options?.[sel] ?? `opt ${sel}`;
+        const correct = q.answer !== null && q.options?.[q.answer] !== undefined ? q.options[q.answer] : '—';
+        extra = ok ? `Your answer: ${chosen}` : `Yours: ${chosen} · Correct: ${correct}`;
+      }
+      const short = (q.question || '').slice(0, 60);
+      text += `${mark} Q${i + 1}. ${short}${short.length >= 60 ? '…' : ''}\n   ${extra}\n`;
+    });
   } else {
     text += `🔒 Results are hidden by the teacher for now.\n`;
   }

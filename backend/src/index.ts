@@ -351,6 +351,54 @@ async function startServer() {
     res.json(updated);
   });
 
+  app.delete('/api/students/:id', (req, res) => {
+    const student = store.getStudentById(req.params.id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    // collect exam ids for re-rank
+    const examIds = [...new Set(store.getAttempts().filter(a =>
+      a.studentId === student.studentId || a.telegramUserId === student.telegramUserId
+    ).map(a => a.examId))];
+    store.deleteStudent(student.id);
+    examIds.forEach(id => updateExamRanks(id));
+    store.addAuditLog('STUDENT_DELETED', `Removed student ${student.name}`);
+    res.json({ success: true });
+  });
+
+  app.delete('/api/attempts/:id', (req, res) => {
+    const att = store.getAttempts().find(a => a.id === req.params.id);
+    if (!att) return res.status(404).json({ error: 'Attempt not found' });
+    store.deleteAttempt(att.id);
+    updateExamRanks(att.examId);
+    store.addAuditLog('ATTEMPT_DELETED', `Removed attempt ${att.id} for ${att.studentName}`);
+    res.json({ success: true });
+  });
+
+  app.get('/api/attempts/:id/detail', (req, res) => {
+    const att = store.getAttempts().find(a => a.id === req.params.id);
+    if (!att) return res.status(404).json({ error: 'Attempt not found' });
+    const exam = store.getExamById(att.examId);
+    const breakdown = (exam?.questions || []).map((q, idx) => {
+      const selected = att.answers[q.id];
+      const has = selected !== undefined && selected !== null;
+      let status: 'correct' | 'wrong' | 'skipped' = 'skipped';
+      if (has) {
+        status = (q.answer !== null && selected === q.answer) ? 'correct' : 'wrong';
+      }
+      return {
+        index: idx + 1,
+        questionId: q.id,
+        question: q.question,
+        options: q.options,
+        correctAnswer: q.answer,
+        selected,
+        status,
+        marks: q.marks,
+        explanation: q.explanation || ''
+      };
+    });
+    res.json({ attempt: att, exam: exam ? { id: exam.id, title: exam.title, totalQuestions: exam.totalQuestions } : null, breakdown });
+  });
+
   app.post('/api/students/:id/reset-attempt', (req, res) => {
     const { examId } = req.body;
     const student = store.getStudentById(req.params.id);
@@ -387,9 +435,15 @@ async function startServer() {
       attempts = attempts.filter(a => a.examId === String(examId));
     }
 
-    let csv = 'Rank,Student ID,Student Name,Class,Status,Score,Max Score,Percentage,Correct,Wrong,Skipped,Time Taken (sec),Submitted At\n';
-    attempts.forEach(a => {
-      csv += `"${a.rank || ''}","${a.studentId}","${a.studentName}","${a.studentClass}","${a.status}",${a.score},${a.maxScore},${a.percentage}%,${a.correctCount},${a.wrongCount},${a.skippedCount},${a.timeTakenSeconds},"${a.submittedAt || ''}"\n`;
+    attempts = attempts
+      .filter(a => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED')
+      .slice()
+      .sort((a, b) => (b.score - a.score) || (a.timeTakenSeconds - b.timeTakenSeconds));
+    let csv = 'Rank,Student ID,Student Name,Class,Telegram,Status,Score,Max Score,Percentage,Correct,Wrong,Skipped,Time Taken (sec),Submitted At\n';
+    attempts.forEach((a, i) => {
+      const stu = store.getStudents().find(s => s.studentId === a.studentId || s.telegramUserId === a.telegramUserId);
+      const tg = stu?.telegramUsername || '';
+      csv += `"${a.rank || i + 1}","${a.studentId}","${a.studentName}","${a.studentClass}","${tg}","${a.status}",${a.score},${a.maxScore},${a.percentage},${a.correctCount},${a.wrongCount},${a.skippedCount},${a.timeTakenSeconds},"${a.submittedAt || ''}"\n`;
     });
 
     res.setHeader('Content-Type', 'text/csv');
