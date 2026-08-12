@@ -77,18 +77,21 @@ export function updateExamRanks(examId: string) {
   });
 }
 
+/** Official exam window: [startDate, startDate + durationMinutes) */
+function getExamWindow(exam: Exam): { start: number; end: number } {
+  const start = new Date(exam.startDate).getTime();
+  const end = start + Math.max(1, exam.durationMinutes || 60) * 60 * 1000;
+  return { start, end };
+}
+
+function isExamWindowOpen(exam: Exam, now = Date.now()): boolean {
+  const { start, end } = getExamWindow(exam);
+  return now >= start && now < end;
+}
+
 function isExamTimeEnded(exam: Exam): boolean {
   if (exam.status === 'ENDED' || exam.status === 'RESULTS_PUBLISHED') return true;
-  const start = new Date(exam.startDate).getTime();
-  const end = start + (exam.durationMinutes || 0) * 60 * 1000;
-  // Also consider exam window: if teacher set LIVE without end, use generous window
-  // Ranking visible when status ended OR now past start+duration for non-live
-  if (exam.status === 'LIVE') {
-    // For LIVE exams, ranks after individual submission time isn't enough —
-    // show ranks only when teacher marks ENDED/RESULTS_PUBLISHED OR past a soft end of start+duration
-    return Date.now() >= end;
-  }
-  return Date.now() >= end;
+  return Date.now() >= getExamWindow(exam).end;
 }
 
 // Format timer remaining string
@@ -448,9 +451,20 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
 
   // Start new attempt (first or reattempt)
   const attemptNumber = allMine.length + 1;
-  const isOfficial = !officialExists; // only first completed line is official; if none official yet, this is official
+  const windowOpen = isExamWindowOpen(exam, now.getTime());
+  // Official ONLY inside [start, start+duration) and no prior official attempt
+  const isOfficial = windowOpen && !officialExists;
+  if (!windowOpen && !officialExists && !forceNew) {
+    // First visit after window closed — allow practice, explain
+  }
   const startedAt = now.toISOString();
-  const expiresAt = new Date(now.getTime() + exam.durationMinutes * 60 * 1000).toISOString();
+  const { end: windowEnd } = getExamWindow(exam);
+  let expiresMs = now.getTime() + Math.max(1, exam.durationMinutes || 60) * 60 * 1000;
+  // Official attempt cannot run past the global exam window end
+  if (isOfficial) {
+    expiresMs = Math.min(expiresMs, windowEnd);
+  }
+  const expiresAt = new Date(expiresMs).toISOString();
 
   attempt = {
     id: `ATT_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -478,6 +492,20 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
 
   store.saveAttempt(attempt);
   store.addAuditLog('EXAM_STARTED', `${student.name} started ${exam.title} (attempt #${attemptNumber}, official=${isOfficial})`);
+
+  // If practice (window closed or reattempt), show a notice then questions
+  if (!isOfficial) {
+    return {
+      chatId: user.id,
+      text: windowOpen
+        ? `🔁 *Practice attempt*\n\nThis will *not* count on the leaderboard (you already have an official attempt).\n\n📝 ${exam.title}`
+        : `🔁 *Practice mode*\n\nThe official exam window has ended.\n📅 Window: ${formatInIST(new Date(getExamWindow(exam).start))} → ${formatInIST(new Date(getExamWindow(exam).end))}\n\nYou can still practice — scores will *not* affect the leaderboard.\n\n📝 ${exam.title}`,
+      replyMarkup: {
+        inline_keyboard: [[{ text: '▶ Continue to questions', callback_data: `resume_exam_${exam.id}` }]]
+      },
+      type: 'sendMessage'
+    };
+  }
 
   return renderQuestionView(exam.id, 0, student, user);
 }
