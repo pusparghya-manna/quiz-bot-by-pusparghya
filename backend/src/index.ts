@@ -57,20 +57,47 @@ async function startServer() {
   // 1. Dashboard Overview Stats & Complete Data Batch
   app.get('/api/data', (req, res) => {
     const teacher = (req as any).teacher;
-    const teacherId = teacher?.username;
+    const teacherId = teacher?.username as string | undefined;
+    // Strict isolation: only this teacher's exams
     let exams = store.getExams();
     if (teacherId) {
-      exams = exams.filter((e: any) => !e.teacherId || e.teacherId === teacherId);
+      exams = exams.filter((e: any) => e.teacherId === teacherId);
+    } else {
+      exams = [];
     }
     const examIds = new Set(exams.map((e: any) => e.id));
     const attempts = store.getAttempts().filter((a: any) => examIds.has(a.examId));
+    // Students linked to this teacher only
+    let students = store.getStudents();
+    if (teacherId) {
+      students = students.filter((s: any) => {
+        if (Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId)) return true;
+        // also include if they have an attempt on this teacher's exam
+        return attempts.some((a: any) =>
+          a.studentId === s.studentId || (s.telegramUserId && a.telegramUserId === s.telegramUserId)
+        );
+      });
+      // dedupe by telegram id
+      const seen = new Set<string>();
+      students = students.filter((s: any) => {
+        const key = s.telegramUserId ? `tg:${s.telegramUserId}` : `id:${s.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    } else {
+      students = [];
+    }
+    // Shared bot settings (token from env preferred)
+    const settings = { ...store.getSettings() };
+    if (process.env.TELEGRAM_BOT_TOKEN) settings.telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
     res.json({
       exams,
-      questions: store.getQuestionBank(),
-      students: store.getStudents(),
+      questions: [], // question bank not shared across teachers
+      students,
       attempts,
-      settings: store.getSettings(),
-      auditLogs: store.getAuditLogs().slice(0, 50)
+      settings,
+      auditLogs: store.getAuditLogs().filter((l: any) => !teacherId || (l.details || '').includes(teacherId) || l.actor === teacherId).slice(0, 30)
     });
   });
 
@@ -304,7 +331,16 @@ async function startServer() {
 
   // 6. Student Management
   app.get('/api/students', (req, res) => {
+    const teacherId = (req as any).teacher?.username as string | undefined;
     let students = store.getStudents();
+    if (teacherId) {
+      const myExamIds = new Set(store.getExams().filter((e: any) => e.teacherId === teacherId).map((e: any) => e.id));
+      const myAttempts = store.getAttempts().filter((a: any) => myExamIds.has(a.examId));
+      students = students.filter((s: any) => {
+        if (Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId)) return true;
+        return myAttempts.some((a: any) => a.studentId === s.studentId || (s.telegramUserId && a.telegramUserId === s.telegramUserId));
+      });
+    }
     const { className, search, status } = req.query;
 
     if (className) {
@@ -430,7 +466,11 @@ async function startServer() {
 
   app.get('/api/results/export', (req, res) => {
     const { examId } = req.query;
-    let attempts = store.getAttempts();
+    const teacherId = (req as any).teacher?.username as string | undefined;
+    const myExamIds = new Set(
+      store.getExams().filter((e: any) => !teacherId || e.teacherId === teacherId).map((e: any) => e.id)
+    );
+    let attempts = store.getAttempts().filter(a => myExamIds.has(a.examId));
     if (examId) {
       attempts = attempts.filter(a => a.examId === String(examId));
     }
@@ -474,15 +514,28 @@ async function startServer() {
   app.post('/api/broadcast', async (req, res) => {
     const message = String(req.body?.message || '').trim();
     if (!message) return res.status(400).json({ error: 'Message required' });
-    const students = store.getStudents().filter(s => s.telegramUserId);
-    // unique by telegramUserId
+    const teacherId = (req as any).teacher?.username as string | undefined;
+    if (!teacherId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Only students belonging to this teacher
+    const myExamIds = new Set(store.getExams().filter((e: any) => e.teacherId === teacherId).map((e: any) => e.id));
+    const myAttempts = store.getAttempts().filter((a: any) => myExamIds.has(a.examId));
+    const tgIds = new Set<number>();
+    for (const a of myAttempts) {
+      if (a.telegramUserId) tgIds.add(Number(a.telegramUserId));
+    }
+    const students = store.getStudents().filter((s: any) => {
+      if (Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId)) return true;
+      return s.telegramUserId && tgIds.has(Number(s.telegramUserId));
+    });
     const seen = new Set<number>();
-    const unique = students.filter(s => {
+    const unique = students.filter((s: any) => {
       const id = Number(s.telegramUserId);
-      if (seen.has(id)) return false;
+      if (!id || seen.has(id)) return false;
       seen.add(id);
       return true;
     });
+
     let sent = 0;
     let failed = 0;
     for (const s of unique) {
@@ -497,7 +550,7 @@ async function startServer() {
         failed++;
       }
     }
-    store.addAuditLog('BROADCAST', `Broadcast to ${sent} students (${failed} failed)`);
+    store.addAuditLog('BROADCAST', `Teacher ${teacherId} broadcast to ${sent} students`, teacherId);
     res.json({ sent, failed, total: unique.length });
   });
 

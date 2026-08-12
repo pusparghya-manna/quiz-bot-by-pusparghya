@@ -47,6 +47,8 @@ export interface Student {
   linkCode: string;
   status: 'linked' | 'unlinked';
   linkedAt?: string;
+  /** Teachers whose exams this student has opened */
+  teacherIds?: string[];
 }
 
 export interface Attempt {

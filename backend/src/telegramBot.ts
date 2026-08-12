@@ -111,6 +111,17 @@ function formatRemaining(expiresAtIso: string): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+function linkStudentToTeacher(student: Student, teacherId?: string | null) {
+  if (!teacherId) return student;
+  const ids = Array.isArray(student.teacherIds) ? [...student.teacherIds] : [];
+  if (!ids.includes(teacherId)) {
+    ids.push(teacherId);
+    student.teacherIds = ids;
+    store.saveStudent(student);
+  }
+  return student;
+}
+
 export function getOrCreateStudent(user: TelegramUser): Student {
   let student = store.getStudentByTelegramId(user.id);
   const now = new Date().toISOString();
@@ -400,6 +411,9 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
       type: 'sendMessage'
     };
   }
+
+  // Bind student to this exam's teacher (multi-tenant isolation)
+  linkStudentToTeacher(student, exam.teacherId);
 
   const startDate = new Date(exam.startDate);
   if (now < startDate) {
