@@ -54,7 +54,19 @@ function formatIST(iso: string | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
-  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+  // e.g. "12 Aug 2026, 9:30 PM"
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  }).formatToParts(d);
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+  const dayPeriod = (get('dayPeriod') || '').toUpperCase();
+  return `${get('day')} ${get('month')} ${get('year')}, ${get('hour')}:${get('minute')} ${dayPeriod}`;
 }
 
 
@@ -625,7 +637,7 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
                 <div className="text-xs text-slate-500 mt-1">
                   {exam.subject || '—'} · {exam.className || '—'} · {exam.totalQuestions || exam.questions?.length || 0} Qs · {exam.durationMinutes}m
                 </div>
-                <div className="text-xs text-slate-500 mt-0.5">Starts: {formatIST(exam.startDate)} (IST)</div>
+                <div className="text-xs text-slate-500 mt-0.5">Starts: {formatIST(exam.startDate)}</div>
                 <div className="mt-2.5"><Badge s={exam.status} /></div>
               </div>
               <div className="flex flex-col gap-1 shrink-0">
@@ -671,7 +683,7 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
                 <Field label="Subject"><input className={inp} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} /></Field>
                 <Field label="Class / group"><input className={inp} value={form.className} onChange={(e) => setForm({ ...form, className: e.target.value })} /></Field>
                 <Field label="Test code"><input className={inp} value={form.testNumber} onChange={(e) => setForm({ ...form, testNumber: e.target.value })} /></Field>
-                <Field label="Start time (IST)"><input type="datetime-local" className={inp} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
+                <Field label="Start time"><input type="datetime-local" className={inp} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
                 <Field label="Duration (minutes)"><input type="number" className={inp} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: +e.target.value })} /></Field>
                 <Field label="Negative marking"><input type="number" step="0.25" className={inp} value={form.negativeMarking} onChange={(e) => setForm({ ...form, negativeMarking: +e.target.value })} /></Field>
               </div>

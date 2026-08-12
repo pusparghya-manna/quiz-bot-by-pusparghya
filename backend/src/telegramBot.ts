@@ -98,11 +98,25 @@ function isExamTimeEnded(exam: Exam): boolean {
 
 function formatInIST(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleString('en-IN', {
+  if (isNaN(d.getTime())) return '—';
+  // e.g. "12 Aug 2026, 9:30 PM"
+  const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Kolkata',
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: true
-  }) + ' IST';
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  }).formatToParts(d);
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+  const day = get('day');
+  const month = get('month');
+  const year = get('year');
+  const hour = get('hour');
+  const minute = get('minute');
+  const dayPeriod = (get('dayPeriod') || '').toUpperCase(); // AM / PM
+  return `${day} ${month} ${year}, ${hour}:${minute} ${dayPeriod}`;
 }
 
 function formatRemaining(expiresAtIso: string): string {
