@@ -470,6 +470,37 @@ async function startServer() {
     res.json(store.getSettings());
   });
 
+  
+  app.post('/api/broadcast', async (req, res) => {
+    const message = String(req.body?.message || '').trim();
+    if (!message) return res.status(400).json({ error: 'Message required' });
+    const students = store.getStudents().filter(s => s.telegramUserId);
+    // unique by telegramUserId
+    const seen = new Set<number>();
+    const unique = students.filter(s => {
+      const id = Number(s.telegramUserId);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    let sent = 0;
+    let failed = 0;
+    for (const s of unique) {
+      try {
+        await sendTelegramResponse({
+          chatId: s.telegramUserId!,
+          text: '📢 *Message from teacher*\n\n' + message,
+          type: 'sendMessage'
+        });
+        sent++;
+      } catch {
+        failed++;
+      }
+    }
+    store.addAuditLog('BROADCAST', `Broadcast to ${sent} students (${failed} failed)`);
+    res.json({ sent, failed, total: unique.length });
+  });
+
   app.put('/api/settings', (req, res) => {
     const updated = store.updateSettings(req.body);
     store.addAuditLog('SETTINGS_UPDATED', 'Updated system & bot configuration');

@@ -176,7 +176,9 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
     } else if (data === 'btn_results') {
       response = renderStudentResults(student);
     } else if (data === 'btn_leaderboard') {
-      response = renderStudentLeaderboard(student);
+      response = renderStudentLeaderboard(student, false);
+    } else if (data === 'leaderboard_more') {
+      response = renderStudentLeaderboard(student, true);
     } else if (data.startsWith('start_exam_') || data.startsWith('resume_exam_')) {
       const examId = data.replace('start_exam_', '').replace('resume_exam_', '');
       response = handleStartOrResumeExam(examId, student, user);
@@ -298,7 +300,7 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
     }
 
     if (text === '/leaderboard') {
-      return renderStudentLeaderboard(student);
+      return renderStudentLeaderboard(student, false);
     }
   }
 
@@ -840,8 +842,7 @@ function matchesClass(studentClass?: string, examClass?: string): boolean {
   return s === e;
 }
 
-function renderStudentLeaderboard(student: Student): SimulatorResponse {
-  // Only exams the student participated in, and only after exam time ended
+function renderStudentLeaderboard(student: Student, showAll = false): SimulatorResponse {
   const myExamIds = [...new Set(
     store.getAttempts().filter(a => a.telegramUserId === student.telegramUserId || a.studentId === student.studentId).map(a => a.examId)
   )];
@@ -850,44 +851,54 @@ function renderStudentLeaderboard(student: Student): SimulatorResponse {
   if (exams.length === 0) {
     return {
       chatId: student.telegramUserId!,
-      text: `🏆 *Leaderboard*\n\nRankings appear only *after an exam ends*.\n\nComplete an exam and wait until its time is over.`,
+      text: `🏆 *Leaderboard*\n\nRankings appear only *after an exam ends*.`,
       replyMarkup: { inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]] },
       type: 'sendMessage'
     };
   }
 
   let text = `🏆 *Leaderboard*\n_(First attempt only)_\n\n`;
+  let hasMore = false;
+  const keyboard: InlineKeyboardButton[][] = [];
 
   exams.forEach((exam) => {
     text += `📝 *${exam.title}*\n`;
     const attempts = store.getAttempts(exam.id)
-      .filter(a => (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false);
-
-    attempts.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (a.timeTakenSeconds !== b.timeTakenSeconds) return a.timeTakenSeconds - b.timeTakenSeconds;
-      return 0;
-    });
+      .filter(a => (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false)
+      .slice()
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (a.timeTakenSeconds !== b.timeTakenSeconds) return a.timeTakenSeconds - b.timeTakenSeconds;
+        return 0;
+      });
 
     if (attempts.length === 0) {
       text += `   _No ranked submissions._\n\n`;
-    } else {
-      attempts.slice(0, 10).forEach((att, idx) => {
-        const rankNum = att.rank || (idx + 1);
-        const medal = rankNum === 1 ? '🥇' : rankNum === 2 ? '🥈' : rankNum === 3 ? '🥉' : `#${rankNum}`;
-        const isMe = (att.telegramUserId === student.telegramUserId || att.studentId === student.studentId) ? ' (You)' : '';
-        text += `   ${medal} ${att.studentName}${isMe} — *${att.score}* (${att.percentage}%)\n`;
-      });
-      text += `\n`;
+      return;
     }
+    const limit = showAll ? attempts.length : 10;
+    if (!showAll && attempts.length > 10) hasMore = true;
+    attempts.slice(0, limit).forEach((att, idx) => {
+      const rankNum = att.rank || (idx + 1);
+      const medal = rankNum === 1 ? '🥇' : rankNum === 2 ? '🥈' : rankNum === 3 ? '🥉' : `#${rankNum}`;
+      const isMe = (att.telegramUserId === student.telegramUserId || att.studentId === student.studentId) ? ' (You)' : '';
+      text += `   ${medal} ${att.studentName}${isMe} — *${att.score}* (${att.percentage}%)\n`;
+    });
+    if (!showAll && attempts.length > 10) {
+      text += `   _…and ${attempts.length - 10} more_\n`;
+    }
+    text += `\n`;
   });
+
+  if (hasMore && !showAll) {
+    keyboard.push([{ text: 'Show full leaderboard', callback_data: 'leaderboard_more' }]);
+  }
+  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
 
   return {
     chatId: student.telegramUserId!,
     text,
-    replyMarkup: {
-      inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]]
-    },
+    replyMarkup: { inline_keyboard: keyboard },
     type: 'sendMessage'
   };
 }

@@ -102,9 +102,18 @@ class Store {
 
   getStudents() { return this.data.students; }
   saveStudent(s: Student) {
-    const idx = this.data.students.findIndex(x => x.id === s.id);
+    // 1 telegram id = 1 student
+    let idx = this.data.students.findIndex(x => x.id === s.id);
+    if (idx < 0 && s.telegramUserId) {
+      idx = this.data.students.findIndex(x => x.telegramUserId === s.telegramUserId);
+      if (idx >= 0) s = { ...this.data.students[idx], ...s, id: this.data.students[idx].id };
+    }
     if (idx >= 0) this.data.students[idx] = s;
     else this.data.students.unshift(s);
+    // purge any other rows with same telegramUserId
+    if (s.telegramUserId) {
+      this.data.students = this.data.students.filter(x => x.id === s.id || x.telegramUserId !== s.telegramUserId);
+    }
     this.persist('students');
     return s;
   }

@@ -254,7 +254,7 @@ export default function App() {
           <div className="py-20 text-center text-slate-500 text-sm">Loading…</div>
         ) : (
           <>
-            {tab === 'home' && <Home exams={exams.length} live={live} submissions={done} students={students} onExams={() => setTab('exams')} onResults={() => setTab('results')} />}
+            {tab === 'home' && <Home exams={exams.length} live={live} submissions={done} students={students} attempts={attempts} examList={exams} onExams={() => setTab('exams')} />}
             {tab === 'exams' && <Exams exams={exams} botUsername={settings.botUsername} onRefresh={load} />}
             {tab === 'results' && <Results exams={exams} attempts={attempts} students={students} onRefresh={load} />}
             {tab === 'settings' && <Settings settings={settings} logs={logs} onRefresh={load} />}
@@ -285,55 +285,104 @@ export default function App() {
   );
 }
 
-function Home({ exams, live, submissions, students, onExams, onResults }: { exams: number; live: number; submissions: number; students: Student[]; onExams: () => void; onResults: () => void }) {
-  const linked = students.filter((s) => s.status === 'linked' || s.telegramUserId);
-  return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Quiz Bot by Pusparghya</p>
+function Home({ exams, live, submissions, students, attempts, examList, onExams }: {
+  exams: number; live: number; submissions: number; students: Student[]; attempts: Attempt[]; examList: Exam[]; onExams: () => void;
+}) {
+  const [profile, setProfile] = useState<Student | null>(null);
+  const uniqueStudents = (() => {
+    const map = new Map<string, Student>();
+    for (const s of students) {
+      const key = s.telegramUserId ? `tg:${s.telegramUserId}` : `id:${s.id}`;
+      if (!map.has(key)) map.set(key, s);
+    }
+    return [...map.values()];
+  })();
+  const performance = (s: Student) => {
+    const mine = attempts.filter(a =>
+      (a.telegramUserId && s.telegramUserId && a.telegramUserId === s.telegramUserId) || a.studentId === s.studentId
+    ).filter(a => a.isOfficial !== false && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'));
+    if (!mine.length) return -1;
+    return Math.max(...mine.map(a => a.percentage || 0));
+  };
+  const ranked = uniqueStudents.slice().sort((a, b) => performance(b) - performance(a));
+  const studentAttempts = (s: Student) =>
+    attempts.filter(a =>
+      (a.telegramUserId && s.telegramUserId && a.telegramUserId === s.telegramUserId) || a.studentId === s.studentId
+    ).slice().sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime());
+  const tgLink = (s: Student) => {
+    if (s.telegramUsername) return `https://t.me/${s.telegramUsername.replace(/^@/, '')}`;
+    if (s.telegramUserId) return `tg://user?id=${s.telegramUserId}`;
+    return null;
+  };
+  if (profile) {
+    const list = studentAttempts(profile);
+    const msg = tgLink(profile);
+    return (
+      <div className="space-y-3">
+        <button type="button" className="text-sm font-semibold text-blue-600" onClick={() => setProfile(null)}>← Back</button>
+        <div className={card + ' p-3 space-y-1'}>
+          <div className="font-bold text-base">👤 {profile.name}</div>
+          <div className="text-xs text-slate-500">💬 {profile.telegramUsername || '—'}</div>
+          <div className="text-xs text-slate-500">🆔 {profile.studentId}</div>
+          {msg && (
+            <a href={msg} target="_blank" rel="noreferrer" className={btnP + ' w-full mt-2 text-sm no-underline'}>Message on Telegram</a>
+          )}
+        </div>
+        <h2 className="font-bold text-sm">Exams & results</h2>
+        {list.length === 0 && <p className="text-sm text-slate-500">No attempts yet</p>}
+        <div className="space-y-2">
+          {list.map((a) => {
+            const exam = examList.find((e) => e.id === a.examId);
+            const practice = a.isOfficial === false;
+            return (
+              <div key={a.id} className={card + ' p-3'}>
+                <div className="font-semibold text-sm">{exam?.title || a.examId}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{practice ? '🔁 Practice' : '📌 Official'} · {a.status.replace(/_/g, ' ')}</div>
+                <div className="text-sm mt-1">⭐ {a.score}/{a.maxScore} ({a.percentage}%) · ⏱️ {Math.floor(a.timeTakenSeconds / 60)}m {a.timeTakenSeconds % 60}s{a.rank ? ` · #${a.rank}` : ''}</div>
+              </div>
+            );
+          })}
+        </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        {[
-          { label: 'Total exams', value: exams, color: 'text-blue-600 bg-blue-50' },
-          { label: 'Live / scheduled', value: live, color: 'text-emerald-600 bg-emerald-50' },
-          { label: 'Submissions', value: submissions, color: 'text-indigo-600 bg-indigo-50' },
-          { label: 'Students', value: students.length, color: 'text-amber-600 bg-amber-50' },
-        ].map((c) => (
-          <div key={c.label} className={card + ' p-4'}>
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 font-bold ${c.color}`}>{c.value}</div>
-            <div className="text-xs text-slate-500">{c.label}</div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold">Home</h1>
+          <p className="text-xs text-slate-500">Quiz Bot by Pusparghya</p>
+        </div>
+        <button type="button" onClick={onExams} className={btnP + ' !py-2 !px-3 text-xs'}><IconPlus className="w-4 h-4" /> Exam</button>
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        {[{ label: 'Exams', value: exams }, { label: 'Live', value: live }, { label: 'Subs', value: submissions }, { label: 'Students', value: ranked.length }].map((c) => (
+          <div key={c.label} className={card + ' p-2.5 text-center'}>
+            <div className="text-lg font-bold">{c.value}</div>
+            <div className="text-[10px] text-slate-500">{c.label}</div>
           </div>
         ))}
       </div>
-      <button type="button" onClick={onExams} className={btnP + ' w-full'}>
-        <IconPlus className="w-5 h-5" /> Create or manage exams
-      </button>
-
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-bold text-sm">Students</h2>
-          <button type="button" className="text-xs font-semibold text-blue-600" onClick={onResults}>Results →</button>
-        </div>
-        {linked.length === 0 ? (
-          <div className={card + ' p-4 text-sm text-slate-500'}>No students yet. They appear after opening an exam link on Telegram.</div>
-        ) : (
-          <div className="space-y-2">
-            {linked.slice(0, 20).map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={onResults}
-                className={card + ' p-3 w-full text-left hover:border-blue-300 transition'}
-              >
-                <div className="font-semibold text-sm text-slate-900">👤 {s.name}</div>
-                <div className="text-xs text-slate-500 mt-1">💬 Telegram: {s.telegramUsername || '—'}</div>
-                <div className="text-xs text-slate-500">🆔 Student ID: {s.studentId}</div>
+      <h2 className="font-bold text-sm pt-1">Students · by performance</h2>
+      {ranked.length === 0 ? (
+        <div className={card + ' p-4 text-sm text-slate-500'}>No students yet</div>
+      ) : (
+        <div className="space-y-1.5">
+          {ranked.map((s, i) => {
+            const perf = performance(s);
+            return (
+              <button key={s.id} type="button" onClick={() => setProfile(s)} className={card + ' p-2.5 w-full text-left flex items-center gap-2 hover:border-blue-300'}>
+                <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 shrink-0">{i + 1}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-sm truncate">👤 {s.name}</div>
+                  <div className="text-[11px] text-slate-500 truncate">💬 {s.telegramUsername || '—'} · 🆔 {s.studentId}</div>
+                </div>
+                <div className="text-xs font-bold text-blue-600 shrink-0">{perf < 0 ? '—' : `${perf}%`}</div>
               </button>
-            ))}
-          </div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -363,12 +412,17 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
   };
   const copyLink = async (id: string) => {
     const link = examLink(id);
+    setShareLink(link);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Exam link', text: 'Join this exam:', url: link });
+        return;
+      }
+    } catch { /* user cancelled share */ }
     try {
       await navigator.clipboard.writeText(link);
-      setShareLink(link);
       alert('Exam link copied!\n\n' + link);
     } catch {
-      setShareLink(link);
       prompt('Copy this exam link for students:', link);
     }
   };
@@ -576,7 +630,7 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
               </div>
               <div className="flex flex-col gap-1 shrink-0">
                 <button type="button" className="w-10 h-10 rounded-xl border border-blue-100 flex items-center justify-center text-blue-600 hover:bg-blue-50 text-[10px] font-bold" onClick={() => copyLink(exam.id)} aria-label="Share">
-                  Link
+                  Share
                 </button>
                 <button type="button" className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50" onClick={() => startEdit(exam)} aria-label="Edit">
                   <IconEdit className="w-4 h-4" />
@@ -772,117 +826,110 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
 function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; attempts: Attempt[]; students: Student[]; onRefresh: () => void }) {
   const [examId, setExamId] = useState('');
   const [detail, setDetail] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
-  const list = (examId ? attempts.filter((a) => a.examId === examId) : attempts)
-    .filter((a) => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED' || a.status === 'IN_PROGRESS')
+  const official = attempts.filter((a) =>
+    a.isOfficial !== false && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED')
+  );
+  const list = (examId ? official.filter((a) => a.examId === examId) : official)
     .slice()
-    .sort((a, b) => (b.score - a.score) || (a.timeTakenSeconds - b.timeTakenSeconds) || (a.rank || 999) - (b.rank || 999));
+    .sort((a, b) => (b.score - a.score) || (a.timeTakenSeconds - b.timeTakenSeconds));
+  const visible = showAll ? list : list.slice(0, 10);
 
   const findStudent = (a: Attempt) =>
-    students.find((s) => s.studentId === a.studentId || s.telegramUserId === a.telegramUserId);
+    students.find((s) => (s.telegramUserId && a.telegramUserId && s.telegramUserId === a.telegramUserId) || s.studentId === a.studentId);
 
   const openDetail = async (attemptId: string) => {
-    setBusy(true);
-    try {
-      const res = await api(`/api/attempts/${attemptId}/detail`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed');
-      setDetail(data);
-    } catch (e: any) {
-      alert(e.message || 'Could not load detail');
-    } finally {
-      setBusy(false);
-    }
+    const res = await api(`/api/attempts/${attemptId}/detail`);
+    const data = await res.json();
+    if (res.ok) setDetail(data);
+    else alert(data.error || 'Failed');
   };
 
   const removeAttempt = async (id: string) => {
-    if (!confirm('Remove this result from leaderboard?')) return;
+    if (!confirm('Remove from leaderboard?')) return;
     await api(`/api/attempts/${id}`, { method: 'DELETE' });
     setDetail(null);
     onRefresh();
   };
 
   const removeStudent = async (studentId: string) => {
-    if (!confirm('Delete this student and all their attempts?')) return;
+    if (!confirm('Delete student and all attempts?')) return;
     await api(`/api/students/${studentId}`, { method: 'DELETE' });
     setDetail(null);
     onRefresh();
   };
 
-  const exportCsv = async () => {
+  const copyText = async () => {
+    const lines = list.map((a, i) => `${a.rank || i + 1} - ${a.studentName} - ${a.score}`);
+    const text = lines.join('\n');
     try {
-      const path = `/api/results/export?examId=${examId || ''}`;
-      const res = await api(path);
-      if (!res.ok) throw new Error('Export failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `results_${examId || 'all'}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      alert(e.message || 'CSV export failed — check login');
+      await navigator.clipboard.writeText(text);
+      alert('Copied results text');
+    } catch {
+      prompt('Copy:', text);
     }
   };
 
+  const exportCsv = async () => {
+    const res = await api(`/api/results/export?examId=${examId || ''}`);
+    if (!res.ok) return alert('Export failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `results_${examId || 'all'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const msgStudent = (a: Attempt) => {
+    const s = findStudent(a);
+    if (s?.telegramUsername) window.open(`https://t.me/${s.telegramUsername.replace(/^@/, '')}`, '_blank');
+    else if (s?.telegramUserId || a.telegramUserId) window.open(`tg://user?id=${s?.telegramUserId || a.telegramUserId}`, '_blank');
+    else alert('No Telegram handle');
+  };
+
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold">Results</h1>
-        <p className="text-sm text-slate-500">Sorted by score · tap a name for details</p>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h1 className="text-lg font-bold">Results</h1>
+          <p className="text-xs text-slate-500">Official only · Rank - Name - Marks</p>
+        </div>
+        <button type="button" className={btnS + ' !py-2 text-xs'} onClick={copyText}>Copy text</button>
       </div>
-      <select className={inp} value={examId} onChange={(e) => setExamId(e.target.value)}>
+      <select className={inp + ' !py-2.5'} value={examId} onChange={(e) => { setExamId(e.target.value); setShowAll(false); }}>
         <option value="">All exams</option>
         {exams.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}
       </select>
-      <div className="flex gap-2">
-        <button type="button" className={btnS + ' flex-1 text-sm'} disabled={!examId} onClick={async () => {
-          if (!examId) return;
-          await api(`/api/exams/${examId}/recalculate`, { method: 'POST' });
-          onRefresh();
-        }}>
-          <IconRefresh className="w-4 h-4" /> Recalculate
-        </button>
-        <button type="button" className={btnS + ' flex-1 text-sm'} onClick={exportCsv}>
-          Export CSV
-        </button>
-      </div>
-      <div className="space-y-2">
-        {list.length === 0 && <div className={card + ' p-8 text-center text-sm text-slate-500'}>No submissions yet</div>}
-        {list.map((a, i) => {
+      <button type="button" className={btnS + ' w-full !py-2 text-xs'} onClick={exportCsv}>Export CSV</button>
+      <div className="space-y-1.5">
+        {list.length === 0 && <div className={card + ' p-6 text-center text-sm text-slate-500'}>No official results yet</div>}
+        {visible.map((a, i) => {
           const stu = findStudent(a);
           return (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => openDetail(a.id)}
-              className={card + ' p-3.5 flex items-center gap-3 w-full text-left hover:border-blue-300 transition'}
-            >
-              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-sm text-slate-600 shrink-0">
-                {a.rank || i + 1}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm truncate text-blue-700">👤 {a.studentName}</div>
-                <div className="text-xs text-slate-500 truncate">
-                  💬 {stu?.telegramUsername || '—'} · 🆔 {a.studentId}
+            <div key={a.id} className={card + ' p-2.5 flex items-center gap-2'}>
+              <button type="button" onClick={() => openDetail(a.id)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+                <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold shrink-0">{a.rank || i + 1}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-sm truncate text-blue-700">👤 {a.studentName}</div>
+                  <div className="text-[11px] text-slate-500 truncate">💬 {stu?.telegramUsername || '—'} · {a.score} marks</div>
                 </div>
-                <div className="text-[11px] text-slate-400">{a.status.replace(/_/g, ' ')} · {Math.floor(a.timeTakenSeconds / 60)}m {a.timeTakenSeconds % 60}s</div>
-              </div>
-              <div className="text-right shrink-0">
-                <div className="font-bold text-blue-600">{a.percentage}%</div>
-                <div className="text-[11px] text-slate-500">{a.score}/{a.maxScore}</div>
-              </div>
-            </button>
+                <div className="font-bold text-sm text-blue-600 shrink-0">{a.percentage}%</div>
+              </button>
+              <button type="button" className="text-[10px] font-bold text-slate-500 px-2 py-1 border border-slate-200 rounded-lg shrink-0" onClick={() => msgStudent(a)}>Msg</button>
+            </div>
           );
         })}
       </div>
-
+      {list.length > 10 && (
+        <button type="button" className={btnS + ' w-full !py-2 text-xs'} onClick={() => setShowAll((v) => !v)}>
+          {showAll ? 'Show top 10' : `Show more (${list.length - 10} more)`}
+        </button>
+      )}
       {detail && (
-        <Sheet title={detail.attempt?.studentName || 'Attempt detail'} onClose={() => setDetail(null)}>
+        <Sheet title={detail.attempt?.studentName || 'Detail'} onClose={() => setDetail(null)}>
           <div className="space-y-3 text-sm">
             <div className={card + ' p-3 space-y-1'}>
               <div>👤 <strong>{detail.attempt.studentName}</strong></div>
@@ -890,31 +937,22 @@ function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; atte
               <div>🆔 {detail.attempt.studentId}</div>
               <div>📝 {detail.exam?.title}</div>
               <div>⭐ {detail.attempt.score}/{detail.attempt.maxScore} ({detail.attempt.percentage}%)</div>
-              <div>✅ {detail.attempt.correctCount} · ❌ {detail.attempt.wrongCount} · ⚪ {detail.attempt.skippedCount}</div>
               <div>⏱️ {Math.floor(detail.attempt.timeTakenSeconds / 60)}m {detail.attempt.timeTakenSeconds % 60}s</div>
-              {detail.attempt.rank ? <div>🏆 Rank #{detail.attempt.rank}</div> : null}
             </div>
-            <div className="font-bold">Question-wise</div>
-            <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+            <button type="button" className={btnP + ' w-full text-sm'} onClick={() => msgStudent(detail.attempt)}>Message on Telegram</button>
+            <div className="font-bold text-xs">Question-wise</div>
+            <div className="space-y-1.5 max-h-[35vh] overflow-y-auto">
               {(detail.breakdown || []).map((b: any) => (
-                <div key={b.questionId} className={`border rounded-xl p-3 ${b.status === 'correct' ? 'border-emerald-200 bg-emerald-50' : b.status === 'wrong' ? 'border-red-200 bg-red-50' : 'border-slate-200'}`}>
-                  <div className="text-xs font-bold text-slate-500 mb-1">Q{b.index} · {b.status.toUpperCase()}</div>
-                  <div className="font-medium">{b.question}</div>
-                  <div className="text-xs mt-1 text-slate-600">
-                    Your: {b.selected != null ? (b.options?.[b.selected] ?? b.selected) : '—'}
-                    {b.status === 'wrong' && b.correctAnswer != null ? ` · Correct: ${b.options?.[b.correctAnswer] ?? b.correctAnswer}` : ''}
-                  </div>
+                <div key={b.questionId} className={`border rounded-lg p-2 text-xs ${b.status === 'correct' ? 'border-emerald-200 bg-emerald-50' : b.status === 'wrong' ? 'border-red-200 bg-red-50' : 'border-slate-200'}`}>
+                  <div className="font-bold text-slate-500">Q{b.index} · {b.status}</div>
+                  <div className="font-medium text-sm">{b.question}</div>
                 </div>
               ))}
             </div>
-            <div className="flex gap-2 pt-2">
-              <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-xl py-3'} onClick={() => removeAttempt(detail.attempt.id)}>
-                Remove from leaderboard
-              </button>
+            <div className="flex gap-2">
+              <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-xl py-2.5'} onClick={() => removeAttempt(detail.attempt.id)}>Remove result</button>
               {findStudent(detail.attempt) && (
-                <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-xl py-3'} onClick={() => removeStudent(findStudent(detail.attempt)!.id)}>
-                  Delete student
-                </button>
+                <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-xl py-2.5'} onClick={() => removeStudent(findStudent(detail.attempt)!.id)}>Delete student</button>
               )}
             </div>
           </div>
@@ -928,6 +966,8 @@ function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; atte
 function Settings({ settings, logs, onRefresh }: { settings: SystemSettings; logs: AuditLog[]; onRefresh: () => void }) {
   const [form, setForm] = useState(settings);
   const [busy, setBusy] = useState(false);
+  const [broadcast, setBroadcast] = useState('');
+  const [bcastBusy, setBcastBusy] = useState(false);
   useEffect(() => setForm(settings), [settings]);
 
   const save = async () => {
@@ -945,38 +985,46 @@ function Settings({ settings, logs, onRefresh }: { settings: SystemSettings; log
     }
   };
 
+  const sendBroadcast = async () => {
+    if (!broadcast.trim()) return alert('Enter a message');
+    if (!confirm('Send to all students via the bot?')) return;
+    setBcastBusy(true);
+    try {
+      const res = await api('/api/broadcast', { method: 'POST', body: JSON.stringify({ message: broadcast.trim() }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      alert(`Sent to ${data.sent} students` + (data.failed ? ` (${data.failed} failed)` : ''));
+      setBroadcast('');
+    } catch (e: any) {
+      alert(e.message || 'Broadcast failed');
+    } finally {
+      setBcastBusy(false);
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold">Settings</h1>
-        <p className="text-sm text-slate-500">Bot & system</p>
-      </div>
-      <div className={card + ' p-4 space-y-3'}>
-        <Field label="Telegram bot token"><input className={inp} value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} /></Field>
-        <Field label="Bot username"><input className={inp} value={form.botUsername} onChange={(e) => setForm({ ...form, botUsername: e.target.value })} /></Field>
-        <Field label="Webhook URL"><input className={inp} value={form.webhookUrl} onChange={(e) => setForm({ ...form, webhookUrl: e.target.value })} /></Field>
+    <div className="space-y-3">
+      <h1 className="text-lg font-bold">Settings</h1>
+      <div className={card + ' p-3 space-y-2.5'}>
+        <Field label="Bot token"><input className={inp + ' !py-2.5'} value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} /></Field>
+        <Field label="Bot username"><input className={inp + ' !py-2.5'} value={form.botUsername} onChange={(e) => setForm({ ...form, botUsername: e.target.value })} /></Field>
         <Field label="System notice"><textarea className={inp} value={form.systemNotice} onChange={(e) => setForm({ ...form, systemNotice: e.target.value })} /></Field>
-        <label className="flex items-center gap-2.5 text-sm"><input type="checkbox" checked={form.botActive} onChange={(e) => setForm({ ...form, botActive: e.target.checked })} /> Bot active</label>
-        <label className="flex items-center gap-2.5 text-sm"><input type="checkbox" checked={form.autoPublishResults} onChange={(e) => setForm({ ...form, autoPublishResults: e.target.checked })} /> Auto-publish results</label>
-        <button type="button" className={btnP + ' w-full'} disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save settings'}</button>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.botActive} onChange={(e) => setForm({ ...form, botActive: e.target.checked })} /> Bot active</label>
+        <button type="button" className={btnP + ' w-full !py-2.5'} disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
-      <button type="button" className={btnD + ' w-full border border-red-100 rounded-xl py-3'} onClick={async () => {
+      <div className={card + ' p-3 space-y-2.5'}>
+        <h2 className="font-bold text-sm">📢 Message all students</h2>
+        <p className="text-xs text-slate-500">Sends via Telegram bot to every linked student.</p>
+        <textarea className={inp + ' min-h-[88px]'} value={broadcast} onChange={(e) => setBroadcast(e.target.value)} placeholder="Type your announcement…" />
+        <button type="button" className={btnP + ' w-full !py-2.5'} disabled={bcastBusy} onClick={sendBroadcast}>
+          {bcastBusy ? 'Sending…' : 'Send to all students'}
+        </button>
+      </div>
+      <button type="button" className={btnD + ' w-full border border-red-100 rounded-xl py-2.5'} onClick={async () => {
         if (!confirm('Reset ALL data?')) return;
         await api('/api/reseed', { method: 'POST' });
         onRefresh();
       }}>Reset all data</button>
-      <div>
-        <h3 className="text-sm font-bold mb-2">Recent activity</h3>
-        <div className="space-y-1.5 max-h-48 overflow-y-auto">
-          {logs.slice(0, 20).map((l) => (
-            <div key={l.id} className="text-xs bg-white border border-slate-100 rounded-xl px-3 py-2">
-              <span className="font-semibold">{l.action}</span>
-              <span className="text-slate-500"> — {l.details}</span>
-            </div>
-          ))}
-          {logs.length === 0 && <p className="text-xs text-slate-400">No logs yet</p>}
-        </div>
-      </div>
     </div>
   );
 }
