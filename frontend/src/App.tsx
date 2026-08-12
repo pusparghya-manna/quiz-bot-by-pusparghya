@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api, getToken, setToken, clearToken } from './api';
 import type { Exam, Question, Attempt, SystemSettings, AuditLog, ExamStatus, Student } from './types';
 import {
-  IconHome, IconExam, IconResults, IconSettings, IconPlus, IconTrash, IconEdit,
+  IconHome, IconExam, IconResults, IconSettings, IconBell, IconPlus, IconTrash, IconEdit,
   IconLogout, IconCheck, IconUpload, IconEye, IconEyeOff, IconBot, IconRefresh,
   IconClose, IconUsers, IconLive
 } from './icons';
@@ -301,6 +301,11 @@ function Home({ exams, live, submissions, students, attempts, examList, onExams 
   exams: number; live: number; submissions: number; students: Student[]; attempts: Attempt[]; examList: Exam[]; onExams: () => void;
 }) {
   const [profile, setProfile] = useState<Student | null>(null);
+  const [showNotif, setShowNotif] = useState(false);
+  const [notifSeenAt, setNotifSeenAt] = useState(() => {
+    try { return localStorage.getItem('quiz_notif_seen') || ''; } catch { return ''; }
+  });
+
   const uniqueStudents = (() => {
     const map = new Map<string, Student>();
     for (const s of students) {
@@ -309,6 +314,7 @@ function Home({ exams, live, submissions, students, attempts, examList, onExams 
     }
     return [...map.values()];
   })();
+
   const performance = (s: Student) => {
     const mine = attempts.filter(a =>
       (a.telegramUserId && s.telegramUserId && a.telegramUserId === s.telegramUserId) || a.studentId === s.studentId
@@ -326,6 +332,58 @@ function Home({ exams, live, submissions, students, attempts, examList, onExams 
     if (s.telegramUserId) return `tg://user?id=${s.telegramUserId}`;
     return null;
   };
+
+  type Notif = { id: string; at: string; title: string; body: string; kind: 'student' | 'official' | 'practice' | 'progress' };
+  const notifications: Notif[] = (() => {
+    const items: Notif[] = [];
+    for (const s of uniqueStudents) {
+      const at = s.linkedAt || '';
+      if (at) {
+        items.push({
+          id: `stu_${s.id}`,
+          at,
+          title: 'New student',
+          body: `${s.name}${s.telegramUsername ? ' (' + s.telegramUsername + ')' : ''} joined`,
+          kind: 'student'
+        });
+      }
+    }
+    for (const a of attempts) {
+      const exam = examList.find(e => e.id === a.examId);
+      const examTitle = exam?.title || 'Exam';
+      if (a.status === 'IN_PROGRESS' && a.startedAt) {
+        items.push({
+          id: `prog_${a.id}`,
+          at: a.startedAt,
+          title: 'Exam in progress',
+          body: `${a.studentName} started ${examTitle}`,
+          kind: 'progress'
+        });
+      }
+      if ((a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.submittedAt) {
+        const practice = a.isOfficial === false;
+        items.push({
+          id: `sub_${a.id}`,
+          at: a.submittedAt,
+          title: practice ? 'Practice submitted' : 'Exam submitted',
+          body: `${a.studentName} · ${examTitle} · ${a.score}/${a.maxScore} (${a.percentage}%)`,
+          kind: practice ? 'practice' : 'official'
+        });
+      }
+    }
+    items.sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime());
+    return items.slice(0, 80);
+  })();
+
+  const unread = notifications.filter(n => !notifSeenAt || new Date(n.at).getTime() > new Date(notifSeenAt).getTime()).length;
+
+  const openNotif = () => {
+    setShowNotif(true);
+    const now = new Date().toISOString();
+    setNotifSeenAt(now);
+    try { localStorage.setItem('quiz_notif_seen', now); } catch {}
+  };
+
   if (profile) {
     const list = studentAttempts(profile);
     const msg = tgLink(profile);
@@ -358,6 +416,7 @@ function Home({ exams, live, submissions, students, attempts, examList, onExams 
       </div>
     );
   }
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -365,7 +424,17 @@ function Home({ exams, live, submissions, students, attempts, examList, onExams 
           <h1 className="text-lg font-bold">Home</h1>
           <p className="text-xs text-slate-500">Quiz Bot by Pusparghya</p>
         </div>
-        <button type="button" onClick={onExams} className={btnP + ' !py-2 !px-3 text-xs'}><IconPlus className="w-4 h-4" /> Exam</button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={openNotif} className="relative w-10 h-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-600 hover:border-blue-300" aria-label="Notifications">
+            <IconBell className="w-5 h-5" />
+            {unread > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                {unread > 9 ? '9+' : unread}
+              </span>
+            )}
+          </button>
+          <button type="button" onClick={onExams} className={btnP + ' !py-2 !px-3 text-xs'}><IconPlus className="w-4 h-4" /> Exam</button>
+        </div>
       </div>
       <div className="grid grid-cols-4 gap-2">
         {[{ label: 'Exams', value: exams }, { label: 'Live', value: live }, { label: 'Subs', value: submissions }, { label: 'Students', value: ranked.length }].map((c) => (
@@ -394,6 +463,29 @@ function Home({ exams, live, submissions, students, attempts, examList, onExams 
             );
           })}
         </div>
+      )}
+
+      {showNotif && (
+        <Sheet title="Notifications" onClose={() => setShowNotif(false)}>
+          <div className="space-y-2">
+            {notifications.length === 0 && (
+              <p className="text-sm text-slate-500 text-center py-8">No activity yet</p>
+            )}
+            {notifications.map((n) => (
+              <div key={n.id} className={card + ' p-3'}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-500">
+                      {n.kind === 'student' ? '👤' : n.kind === 'practice' ? '🔁' : n.kind === 'progress' ? '⚡' : '✅'} {n.title}
+                    </div>
+                    <div className="text-sm font-medium mt-0.5">{n.body}</div>
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1.5">{formatIST(n.at)}</div>
+              </div>
+            ))}
+          </div>
+        </Sheet>
       )}
     </div>
   );

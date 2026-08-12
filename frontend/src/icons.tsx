@@ -21,3 +21,4 @@ export const IconClose = ({ className }: P) => <svg {...s} className={className}
 export const IconChevron = ({ className }: P) => <svg {...s} className={className}><path d="M9 18l6-6-6-6"/></svg>;
 export const IconUsers = ({ className }: P) => <svg {...s} className={className}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg>;
 export const IconLive = ({ className }: P) => <svg {...s} className={className}><circle cx="12" cy="12" r="3"/><path d="M5 5a10 10 0 0 1 0 14"/><path d="M19 5a10 10 0 0 0 0 14"/></svg>;
+export const IconBell = ({ className }: P) => <svg {...s} className={className}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>;
