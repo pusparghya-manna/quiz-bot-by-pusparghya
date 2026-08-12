@@ -555,8 +555,12 @@ async function startServer() {
   });
 
   app.put('/api/settings', (req, res) => {
-    const updated = store.updateSettings(req.body);
-    store.addAuditLog('SETTINGS_UPDATED', 'Updated system & bot configuration');
+    const body = { ...req.body };
+    delete body.telegramBotToken;
+    delete body.botUsername;
+    delete body.webhookUrl;
+    const updated = store.updateSettings(body);
+    store.addAuditLog('SETTINGS_UPDATED', 'Updated teacher settings');
     res.json(updated);
   });
 

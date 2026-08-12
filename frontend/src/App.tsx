@@ -1018,10 +1018,9 @@ function Settings({ settings, logs, onRefresh }: { settings: SystemSettings; log
     <div className="space-y-3">
       <h1 className="text-lg font-bold">Settings</h1>
       <div className={card + ' p-3 space-y-2.5'}>
-        <Field label="Bot token"><input className={inp + ' !py-2.5'} value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} /></Field>
-        <Field label="Bot username"><input className={inp + ' !py-2.5'} value={form.botUsername} onChange={(e) => setForm({ ...form, botUsername: e.target.value })} /></Field>
+        <p className="text-xs text-slate-500">Bot token & username are set by the developer and cannot be changed here.</p>
         <Field label="System notice"><textarea className={inp} value={form.systemNotice} onChange={(e) => setForm({ ...form, systemNotice: e.target.value })} /></Field>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.botActive} onChange={(e) => setForm({ ...form, botActive: e.target.checked })} /> Bot active</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.botActive} onChange={(e) => setForm({ ...form, botActive: e.target.checked })} /> Accept new exam attempts</label>
         <button type="button" className={btnP + ' w-full !py-2.5'} disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
       <div className={card + ' p-3 space-y-2.5'}>

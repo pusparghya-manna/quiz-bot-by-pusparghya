@@ -206,7 +206,12 @@ class Store {
     return this.data.settings;
   }
   updateSettings(updates: Partial<SystemSettings>) {
-    this.data.settings = { ...this.data.settings, ...updates };
+    // Bot token & username are developer-only (env / defaults)
+    const { telegramBotToken: _t, botUsername: _u, webhookUrl: _w, ...safe } = updates as any;
+    this.data.settings = { ...this.data.settings, ...safe };
+    if (process.env.TELEGRAM_BOT_TOKEN) {
+      this.data.settings.telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    }
     this.persist('settings');
     return this.data.settings;
   }
