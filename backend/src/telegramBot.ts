@@ -247,8 +247,10 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
       response = handleFinalSubmit(examId, student, user);
     }
 
-    if (response && cbMessageId && !response.messageId) {
+    // Single-chat UI: always edit the same message on button taps
+    if (response && cbMessageId) {
       response.messageId = cbMessageId;
+      response.type = 'editMessageText';
     }
     return response;
   }
@@ -964,12 +966,7 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
   if (!token) return;
 
   try {
-    let endpoint = resp.type === 'editMessageText' ? 'editMessageText' : 'sendMessage';
-
-    // If editMessageText was requested but no messageId is present, fall back to sendMessage
-    if (endpoint === 'editMessageText' && !resp.messageId) {
-      endpoint = 'sendMessage';
-    }
+    let endpoint = resp.type === 'editMessageText' && resp.messageId ? 'editMessageText' : 'sendMessage';
 
     const payload: any = {
       chat_id: resp.chatId,
@@ -993,14 +990,30 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
 
     const data: any = await res.json().catch(() => ({}));
     if (!data.ok) {
-      console.warn(`[Telegram API] ${endpoint} failed (${data.description}). Retrying without Markdown parsing...`);
-      // If Markdown parsing error or editMessageText mismatch, retry with sendMessage & no parse_mode
+      const desc = String(data.description || '');
+      // "message is not modified" is fine — ignore
+      if (desc.toLowerCase().includes('message is not modified')) return;
+
+      console.warn(`[Telegram API] ${endpoint} failed (${desc}). Retrying without Markdown...`);
       delete payload.parse_mode;
-      if (endpoint === 'editMessageText') {
-        endpoint = 'sendMessage';
+
+      // Prefer re-editing the same message (single-screen UI). Only send new if edit is impossible.
+      if (endpoint === 'editMessageText' && resp.messageId) {
+        payload.message_id = resp.messageId;
+        const retry = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const retryData: any = await retry.json().catch(() => ({}));
+        if (retryData.ok || String(retryData.description || '').toLowerCase().includes('message is not modified')) {
+          return;
+        }
+        // Last resort: send new only if message can't be edited (deleted/too old)
         delete payload.message_id;
       }
-      await fetch(`https://api.telegram.org/bot${token}/${endpoint}`, {
+
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
