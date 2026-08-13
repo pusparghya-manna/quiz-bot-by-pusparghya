@@ -185,6 +185,34 @@ export function getOrCreateStudent(user: TelegramUser): Student {
   return student;
 }
 
+
+function renderMainMenu(student: Student): SimulatorResponse {
+  const notice = store.getSettings().systemNotice;
+  return {
+    chatId: student.telegramUserId!,
+    text: `👋 *Welcome to Quiz Bot by Pusparghya!*
+
+` +
+      (notice ? `📢 ${notice}
+
+` : '') +
+      `You are registered as *${student.name}*.
+` +
+      `✏️ Change display name: \`/setname Your Full Name\`
+
+` +
+      `Teachers share a special link for each exam. Open that link to start.`,
+    replyMarkup: {
+      inline_keyboard: [
+        [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
+        [{ text: '📊 My Results', callback_data: 'btn_results' }],
+        [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }]
+      ]
+    },
+    type: 'editMessageText'
+  };
+}
+
 export async function processTelegramUpdate(update: TelegramUpdate): Promise<SimulatorResponse | null> {
   const now = new Date();
 
@@ -199,7 +227,9 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
     let response: SimulatorResponse | null = null;
 
     // 1. Navigation / List Exams
-    if (data === 'btn_exams') {
+    if (data === 'btn_home' || data === 'btn_menu') {
+      response = renderMainMenu(student);
+    } else if (data === 'btn_exams') {
       response = renderExamsList(student);
     } else if (data === 'btn_results') {
       response = renderStudentResults(student);
@@ -401,13 +431,16 @@ function renderExamsList(student: Student): SimulatorResponse {
     }
   });
 
-  keyboard.push([{ text: '📊 My Results', callback_data: 'btn_results' }]);
+  keyboard.push([
+    { text: '🏠 Main menu', callback_data: 'btn_home' },
+    { text: '📊 My Results', callback_data: 'btn_results' }
+  ]);
 
   return {
     chatId: student.telegramUserId!,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    type: 'sendMessage'
+    type: 'editMessageText'
   };
 }
 
@@ -442,7 +475,10 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
         `📝 *${exam.title}*\n` +
         `📅 Starts: ${formatInIST(startDate)}`,
       replyMarkup: {
-        inline_keyboard: [[{ text: '🔄 Check again', callback_data: `start_exam_${exam.id}` }]]
+        inline_keyboard: [
+          [{ text: '🔄 Check again', callback_data: `start_exam_${exam.id}` }],
+          [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
+        ]
       },
       type: 'sendMessage'
     };
@@ -517,7 +553,10 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
         ? `🔁 *Practice attempt*\n\nThis will *not* count on the leaderboard (you already have an official attempt).\n\n📝 ${exam.title}`
         : `🔁 *Practice mode*\n\nThe official exam window has ended.\n📅 Window: ${formatInIST(new Date(getExamWindow(exam).start))} → ${formatInIST(new Date(getExamWindow(exam).end))}\n\nYou can still practice — scores will *not* affect the leaderboard.\n\n📝 ${exam.title}`,
       replyMarkup: {
-        inline_keyboard: [[{ text: '▶ Continue to questions', callback_data: `resume_exam_${exam.id}` }]]
+        inline_keyboard: [
+          [{ text: '▶ Continue to questions', callback_data: `resume_exam_${exam.id}` }],
+          [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
+        ]
       },
       type: 'sendMessage'
     };
@@ -631,6 +670,7 @@ function renderQuestionView(examId: string, qIdx: number, student: Student, user
     { text: '📋 Question Grid', callback_data: `grid_${exam.id}` },
     { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` }
   ]);
+  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
   return {
     chatId: user.id,
@@ -686,9 +726,10 @@ function renderQuestionGrid(examId: string, student: Student, user: TelegramUser
   });
 
   keyboard.push([
-    { text: '🔙 Back to Current Question', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex}` },
+    { text: '🔙 Back to question', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex}` },
     { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` }
   ]);
+  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
   return {
     chatId: user.id,
@@ -725,7 +766,8 @@ function renderSubmitConfirmation(examId: string, student: Student, user: Telegr
     replyMarkup: {
       inline_keyboard: [
         [{ text: '🚀 Yes, Submit Exam Now', callback_data: `do_submit_${exam.id}` }],
-        [{ text: '🔙 Continue Answering', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex}` }]
+        [{ text: '🔙 Continue Answering', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex}` }],
+        [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
       ]
     },
     type: 'editMessageText'
@@ -837,6 +879,7 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt): SimulatorResponse {
     text,
     replyMarkup: {
       inline_keyboard: [
+        [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
         [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
         [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }],
         [{ text: '🔁 Reattempt (practice)', callback_data: `reattempt_${exam.id}` }]
@@ -884,11 +927,12 @@ function renderStudentResults(student: Student): SimulatorResponse {
     text,
     replyMarkup: {
       inline_keyboard: [
+        [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
         [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
         [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]
       ]
     },
-    type: 'sendMessage'
+    type: 'editMessageText'
   };
 }
 
@@ -910,8 +954,11 @@ function renderStudentLeaderboard(student: Student, showAll = false): SimulatorR
     return {
       chatId: student.telegramUserId!,
       text: `🏆 *Leaderboard*\n\nRankings appear only *after an exam ends*.`,
-      replyMarkup: { inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]] },
-      type: 'sendMessage'
+      replyMarkup: { inline_keyboard: [
+        [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
+        [{ text: '📚 My Exams', callback_data: 'btn_exams' }]
+      ] },
+      type: 'editMessageText'
     };
   }
 
@@ -951,13 +998,16 @@ function renderStudentLeaderboard(student: Student, showAll = false): SimulatorR
   if (hasMore && !showAll) {
     keyboard.push([{ text: 'Show full leaderboard', callback_data: 'leaderboard_more' }]);
   }
-  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
+  keyboard.push([
+    { text: '🏠 Main menu', callback_data: 'btn_home' },
+    { text: '📚 My Exams', callback_data: 'btn_exams' }
+  ]);
 
   return {
     chatId: student.telegramUserId!,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    type: 'sendMessage'
+    type: 'editMessageText'
   };
 }
 
