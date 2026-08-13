@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    proxy: { '/api': 'http://localhost:3000' }
+    proxy: { '/api': 'http://localhost:3000' },
+    allowedHosts: ['.monkeycode-ai.live']
   }
 });
