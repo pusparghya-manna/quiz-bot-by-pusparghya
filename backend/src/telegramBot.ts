@@ -431,10 +431,8 @@ function renderExamsList(student: Student): SimulatorResponse {
     }
   });
 
-  keyboard.push([
-    { text: '🏠 Main menu', callback_data: 'btn_home' },
-    { text: '📊 My Results', callback_data: 'btn_results' }
-  ]);
+  keyboard.push([{ text: '📊 My Results', callback_data: 'btn_results' }]);
+  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
   return {
     chatId: student.telegramUserId!,
@@ -879,10 +877,10 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt): SimulatorResponse {
     text,
     replyMarkup: {
       inline_keyboard: [
-        [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
         [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
         [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }],
-        [{ text: '🔁 Reattempt (practice)', callback_data: `reattempt_${exam.id}` }]
+        [{ text: '🔁 Reattempt (practice)', callback_data: `reattempt_${exam.id}` }],
+        [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
       ]
     },
     type: 'editMessageText'
@@ -927,9 +925,9 @@ function renderStudentResults(student: Student): SimulatorResponse {
     text,
     replyMarkup: {
       inline_keyboard: [
-        [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
         [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
-        [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]
+        [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }],
+        [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
       ]
     },
     type: 'editMessageText'
@@ -998,10 +996,8 @@ function renderStudentLeaderboard(student: Student, showAll = false): SimulatorR
   if (hasMore && !showAll) {
     keyboard.push([{ text: 'Show full leaderboard', callback_data: 'leaderboard_more' }]);
   }
-  keyboard.push([
-    { text: '🏠 Main menu', callback_data: 'btn_home' },
-    { text: '📚 My Exams', callback_data: 'btn_exams' }
-  ]);
+  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
+  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
   return {
     chatId: student.telegramUserId!,
