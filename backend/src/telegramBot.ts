@@ -313,32 +313,63 @@ This name will appear on results and the leaderboard.`,
     const user = msg.from;
     const student = getOrCreateStudent(user);
 
-    // /setname command
+    // Name from "Set your name" button — next plain text is the name
+    if (pendingNameUsers.has(user.id) && !text.startsWith('/')) {
+      const newName = text.trim().slice(0, 60);
+      if (newName.length < 2) {
+        return {
+          chatId: user.id,
+          text: `✏️ Name is too short. Please send your full name (at least 2 characters).`,
+          replyMarkup: {
+            inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]]
+          },
+          type: 'sendMessage'
+        };
+      }
+      pendingNameUsers.delete(user.id);
+      student.name = newName;
+      store.saveStudent(student);
+      return {
+        chatId: user.id,
+        text: `✅ *Name updated!*\n\nYour name is now: *${newName}*\n\nThis will appear on results and the leaderboard.`,
+        replyMarkup: {
+          inline_keyboard: [
+            [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
+            [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
+          ]
+        },
+        type: 'sendMessage'
+      };
+    }
+
+    // /setname command (still supported)
     if (text.startsWith('/setname')) {
-      const newName = text.replace('/setname', '').trim();
+      const newName = text.replace('/setname', '').trim().slice(0, 60);
       if (newName) {
+        pendingNameUsers.delete(user.id);
         student.name = newName;
         store.saveStudent(student);
         return {
           chatId: user.id,
-          text: `✅ *Name Updated Successfully!*\n\n` +
-            `Your official exam name is set to: *${newName}*\n` +
-            `This name will appear on official exam results and leaderboards.`,
+          text: `✅ *Name updated!*\n\nYour name is now: *${newName}*`,
           replyMarkup: {
             inline_keyboard: [
-              [{ text: '📚 Available Exams', callback_data: 'btn_exams' }],
-              [{ text: '📊 My Results', callback_data: 'btn_results' }]
+              [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
+              [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
             ]
           },
           type: 'sendMessage'
         };
-      } else {
-        return {
-          chatId: user.id,
-          text: `✏️ *Set Your Name*\n\nPlease provide your name after the command.\n*Example:* \`/setname Alex Johnson\``,
-          type: 'sendMessage'
-        };
       }
+      pendingNameUsers.add(user.id);
+      return {
+        chatId: user.id,
+        text: `✏️ *Set your name*\n\nPlease type your full name and send it as a message.`,
+        replyMarkup: {
+          inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]]
+        },
+        type: 'sendMessage'
+      };
     }
 
     // Standard /start command
@@ -358,14 +389,14 @@ This name will appear on results and the leaderboard.`,
         text: `👋 *Welcome to Quiz Bot by Pusparghya!*\n\n` +
           (notice ? `📢 ${notice}\n\n` : '') +
           `You are registered as *${student.name}*.\n` +
-          `✏️ Change display name: \`/setname Your Full Name\`\n\n` +
           `Teachers share a special link for each exam. Open that link to start.\n` +
           `You can also view your past attempts below.`,
         replyMarkup: {
           inline_keyboard: [
             [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
             [{ text: '📊 My Results', callback_data: 'btn_results' }],
-            [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }]
+            [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }],
+            [{ text: '✏️ Set your name', callback_data: 'btn_setname' }]
           ]
         },
         type: 'sendMessage'
