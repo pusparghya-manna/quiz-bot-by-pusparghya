@@ -511,6 +511,34 @@ async function startServer() {
   });
 
   
+  
+  app.post('/api/message', async (req, res) => {
+    const teacherId = (req as any).teacher?.username as string | undefined;
+    if (!teacherId) return res.status(401).json({ error: 'Unauthorized' });
+    const message = String(req.body?.message || '').trim();
+    const telegramUserId = Number(req.body?.telegramUserId);
+    if (!message) return res.status(400).json({ error: 'Message required' });
+    if (!telegramUserId) return res.status(400).json({ error: 'telegramUserId required' });
+
+    // Ensure student belongs to this teacher
+    const myExamIds = new Set(store.getExams().filter((e: any) => e.teacherId === teacherId).map((e: any) => e.id));
+    const allowed = store.getAttempts().some((a: any) => myExamIds.has(a.examId) && Number(a.telegramUserId) === telegramUserId)
+      || store.getStudents().some((s: any) => Number(s.telegramUserId) === telegramUserId && Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId));
+    if (!allowed) return res.status(403).json({ error: 'Student not in your class' });
+
+    try {
+      await sendTelegramResponse({
+        chatId: telegramUserId,
+        text: '📢 *Message from teacher*\n\n' + message,
+        type: 'sendMessage'
+      });
+      store.addAuditLog('DM', `Teacher ${teacherId} messaged TG ${telegramUserId}`, teacherId);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Send failed' });
+    }
+  });
+
   app.post('/api/broadcast', async (req, res) => {
     const message = String(req.body?.message || '').trim();
     if (!message) return res.status(400).json({ error: 'Message required' });

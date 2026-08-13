@@ -1135,16 +1135,27 @@ function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: 
 
 /* ─── RESULTS ─── */
 function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; attempts: Attempt[]; students: Student[]; onRefresh: () => void }) {
+  type View = 'exams' | 'pick' | 'official' | 'practice';
+  const [view, setView] = useState<View>('exams');
   const [examId, setExamId] = useState('');
   const [detail, setDetail] = useState<any>(null);
   const [showAll, setShowAll] = useState(false);
+  const [dmText, setDmText] = useState('');
+  const [dmBusy, setDmBusy] = useState(false);
 
-  const official = attempts.filter((a) =>
-    a.isOfficial !== false && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED')
-  );
-  const list = (examId ? official.filter((a) => a.examId === examId) : official)
+  const selectedExam = exams.find((e) => e.id === examId);
+
+  const baseList = attempts.filter((a) => a.examId === examId && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'));
+  const official = baseList
+    .filter((a) => a.isOfficial !== false)
     .slice()
     .sort((a, b) => (b.score - a.score) || (a.timeTakenSeconds - b.timeTakenSeconds));
+  const practice = baseList
+    .filter((a) => a.isOfficial === false)
+    .slice()
+    .sort((a, b) => (b.score - a.score) || (a.timeTakenSeconds - b.timeTakenSeconds));
+
+  const list = view === 'official' ? official : view === 'practice' ? practice : [];
   const visible = showAll ? list : list.slice(0, 10);
 
   const findStudent = (a: Attempt) =>
@@ -1153,12 +1164,12 @@ function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; atte
   const openDetail = async (attemptId: string) => {
     const res = await api(`/api/attempts/${attemptId}/detail`);
     const data = await res.json();
-    if (res.ok) setDetail(data);
+    if (res.ok) { setDetail(data); setDmText(''); }
     else alert(data.error || 'Failed');
   };
 
   const removeAttempt = async (id: string) => {
-    if (!confirm('Remove from leaderboard?')) return;
+    if (!confirm('Remove from results?')) return;
     await api(`/api/attempts/${id}`, { method: 'DELETE' });
     setDetail(null);
     onRefresh();
@@ -1172,7 +1183,11 @@ function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; atte
   };
 
   const copyText = async () => {
-    const lines = list.map((a, i) => `${a.rank || i + 1} - ${a.studentName} - ${a.score}`);
+    const lines = list.map((a, i) => {
+      const rank = a.rank || i + 1;
+      const att = a.isOfficial === false && a.attemptNumber ? ` (attempt #${a.attemptNumber})` : '';
+      return `${rank} - ${a.studentName}${att} - ${a.score}`;
+    });
     const text = lines.join('\n');
     try {
       await navigator.clipboard.writeText(text);
@@ -1183,122 +1198,198 @@ function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; atte
   };
 
   const exportCsv = async () => {
-    const res = await api(`/api/results/export?examId=${examId || ''}`);
-    if (!res.ok) return alert('Export failed');
+    const res = await api(`/api/results/export?examId=${examId || ''}&practice=${view === 'practice' ? '1' : '0'}`);
+    if (!res.ok) {
+      // fallback: build client-side CSV if server ignores practice flag
+      const rows = ['Rank,Name,Telegram,Score,Max,Percentage,Attempt,Status,TimeSec'];
+      list.forEach((a, i) => {
+        const stu = findStudent(a);
+        rows.push([a.rank || i + 1, a.studentName, stu?.telegramUsername || '', a.score, a.maxScore, a.percentage, a.attemptNumber || 1, a.status, a.timeTakenSeconds].map((x) => `"${x}"`).join(','));
+      });
+      const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const el = document.createElement('a');
+      el.href = url;
+      el.download = `${view}_${examId || 'exam'}.csv`;
+      el.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `results_${examId || 'all'}.csv`;
+    a.download = `${view}_${examId || 'exam'}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const msgStudent = (a: Attempt) => {
-    const s = findStudent(a);
-    if (s?.telegramUsername) window.open(`https://t.me/${s.telegramUsername.replace(/^@/, '')}`, '_blank');
-    else if (s?.telegramUserId || a.telegramUserId) window.open(`tg://user?id=${s?.telegramUserId || a.telegramUserId}`, '_blank');
-    else alert('No Telegram handle');
+  const sendDm = async (telegramUserId: number) => {
+    if (!dmText.trim()) return alert('Enter a message');
+    setDmBusy(true);
+    try {
+      const res = await api('/api/message', { method: 'POST', body: JSON.stringify({ telegramUserId, message: dmText.trim() }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Send failed');
+      alert('Message sent via bot');
+      setDmText('');
+    } catch (e: any) {
+      alert(e.message || 'Failed');
+    } finally {
+      setDmBusy(false);
+    }
   };
 
-  const initials = (name: string) =>
-    name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || '?';
+  // —— Main: exam list only ——
+  if (view === 'exams') {
+    return (
+      <div className="space-y-3">
+        <div>
+          <h1 className="text-lg font-bold tracking-tight">Results</h1>
+          <p className="text-[11px] text-slate-500 mt-0.5">Select an exam to view official or practice results</p>
+        </div>
+        {exams.length === 0 ? (
+          <div className={card + ' p-8 text-center text-sm text-slate-500'}>No exams yet</div>
+        ) : (
+          <div className="space-y-1.5">
+            {exams.map((e) => {
+              const att = attempts.filter((a) => a.examId === e.id && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'));
+              const off = att.filter((a) => a.isOfficial !== false).length;
+              const prac = att.filter((a) => a.isOfficial === false).length;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => { setExamId(e.id); setView('pick'); setShowAll(false); }}
+                  className={card + ' p-3 w-full text-left hover:border-blue-300 transition'}
+                >
+                  <div className="font-semibold text-sm text-slate-900">{e.title}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {e.subject || '—'} · Official {off} · Practice {prac}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
-  const rankStyle = (i: number) =>
-    i === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-amber-950 shadow-sm shadow-amber-500/30'
-      : i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-400 text-slate-800 shadow-sm'
-        : i === 2 ? 'bg-gradient-to-br from-orange-400 to-amber-600 text-orange-950 shadow-sm shadow-orange-500/20'
-          : 'bg-slate-100 text-slate-600';
+  // —— Pick official vs practice ——
+  if (view === 'pick') {
+    return (
+      <div className="space-y-3">
+        <button type="button" className="text-sm font-semibold text-blue-600" onClick={() => setView('exams')}>← All exams</button>
+        <div>
+          <h1 className="text-lg font-bold tracking-tight">{selectedExam?.title || 'Exam'}</h1>
+          <p className="text-[11px] text-slate-500 mt-0.5">Choose result type</p>
+        </div>
+        <button type="button" className={card + ' p-4 w-full text-left hover:border-blue-300'} onClick={() => { setView('official'); setShowAll(false); }}>
+          <div className="font-semibold text-sm">📌 Official Exam Results</div>
+          <div className="text-[11px] text-slate-500 mt-0.5">{official.length} submission{official.length === 1 ? '' : 's'} · counts for leaderboard</div>
+        </button>
+        <button type="button" className={card + ' p-4 w-full text-left hover:border-blue-300'} onClick={() => { setView('practice'); setShowAll(false); }}>
+          <div className="font-semibold text-sm">🔁 Practice Results</div>
+          <div className="text-[11px] text-slate-500 mt-0.5">{practice.length} attempt{practice.length === 1 ? '' : 's'} · with attempt number</div>
+        </button>
+      </div>
+    );
+  }
 
-  const maxScore = list.length ? Math.max(...list.map((a) => a.score || 0)) : 0;
-
+  // —— Official or practice list ——
   return (
     <div className="space-y-3">
+      <button type="button" className="text-sm font-semibold text-blue-600" onClick={() => setView('pick')}>← {selectedExam?.title || 'Back'}</button>
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h1 className="text-lg font-bold tracking-tight text-slate-900">Results</h1>
-          <p className="text-[11px] text-slate-500 mt-0.5">Official only · Rank - Name - Marks</p>
+          <h1 className="text-lg font-bold tracking-tight">{view === 'official' ? 'Official results' : 'Practice results'}</h1>
+          <p className="text-[11px] text-slate-500">{selectedExam?.title} · Rank - Name - Marks</p>
         </div>
-        <button type="button" className={btnS + ' !py-1.5 text-[11px]'} onClick={copyText}><IconCopy className="w-3.5 h-3.5" /> Copy text</button>
       </div>
-
-      <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><IconFilter className="w-3.5 h-3.5" /></span>
-        <select className={inp + ' !py-1.5 pl-9 appearance-none pr-9'} value={examId} onChange={(e) => { setExamId(e.target.value); setShowAll(false); }}>
-          <option value="">All exams</option>
-          {exams.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}
-        </select>
-        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconChevronDown className="w-3.5 h-3.5" /></span>
+      <div className="flex gap-2">
+        <button type="button" className={btnS + ' flex-1 !py-1.5 text-[11px]'} onClick={copyText}><IconCopy className="w-3.5 h-3.5" /> Copy text</button>
+        <button type="button" className={btnS + ' flex-1 !py-1.5 text-[11px]'} onClick={exportCsv}><IconDownload className="w-3.5 h-3.5" /> Export CSV</button>
       </div>
-
-      <button type="button" className={btnS + ' w-full !py-1.5 text-[11px]'} onClick={exportCsv}><IconDownload className="w-3.5 h-3.5" /> Export CSV</button>
-
       <div className="space-y-1.5">
-        {list.length === 0 && <div className={card + ' p-5 text-center text-sm text-slate-500'}>No official results yet</div>}
+        {list.length === 0 && <div className={card + ' p-6 text-center text-sm text-slate-500'}>No results yet</div>}
         {visible.map((a, i) => {
           const stu = findStudent(a);
-          const barPct = maxScore ? Math.round((a.score / maxScore) * 100) : 0;
+          const handle = stu?.telegramUsername;
           return (
-            <div key={a.id} className={card + ' p-2 flex items-center gap-2 relative overflow-hidden hover:shadow-md hover:shadow-slate-200/60 transition'}>
-              <div className="absolute inset-x-0 bottom-0 h-0.5 bg-slate-100">
-                <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500" style={{ width: `${barPct}%` }} />
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => openDetail(a.id)}
+              className={card + ' p-2.5 w-full text-left flex items-center gap-2 hover:border-blue-300'}
+            >
+              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold shrink-0">{a.rank || i + 1}</div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-sm truncate text-blue-700">👤 {a.studentName}</div>
+                <div className="text-[11px] text-slate-500 truncate">
+                  {handle ? `💬 ${handle}` : '💬 No username'} · {a.score} marks
+                  {view === 'practice' && a.attemptNumber ? ` · Attempt #${a.attemptNumber}` : ''}
+                </div>
               </div>
-              <div className={`w-7 h-7 rounded-full ${rankStyle(i)} flex items-center justify-center text-[11px] font-bold shrink-0 ring-1 ring-white shadow-sm`}>{a.rank || i + 1}</div>
-              <button type="button" onClick={() => openDetail(a.id)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
-                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[11px] font-bold shrink-0 ring-1 ring-white">{initials(a.studentName)}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-[13px] text-slate-900 truncate">{a.studentName}</div>
-                  <div className="text-[10px] text-slate-500 truncate flex items-center gap-1">
-                    <IconMessage className="w-2.5 h-2.5 shrink-0" />{stu?.telegramUsername || '—'} · {a.score} marks
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="inline-flex items-center gap-1 text-[13px] font-bold text-blue-600"><IconStar className="w-3 h-3 text-amber-500" />{a.percentage}%</span>
-                </div>
-              </button>
-              <button type="button" className="text-[9px] font-bold text-slate-500 px-2 py-1 border border-slate-200 rounded-md shrink-0 hover:bg-slate-50" onClick={() => msgStudent(a)}><IconSend className="w-2.5 h-2.5" /> Msg</button>
-            </div>
+              <div className="font-bold text-sm text-blue-600 shrink-0">{a.percentage}%</div>
+            </button>
           );
         })}
       </div>
       {list.length > 10 && (
-        <button type="button" className={btnS + ' w-full !py-1.5 text-[11px]'} onClick={() => setShowAll((v) => !v)}>
+        <button type="button" className={btnS + ' w-full !py-2 text-xs'} onClick={() => setShowAll((v) => !v)}>
           {showAll ? 'Show top 10' : `Show more (${list.length - 10} more)`}
         </button>
       )}
+
       {detail && (
         <Sheet title={detail.attempt?.studentName || 'Detail'} onClose={() => setDetail(null)}>
           <div className="space-y-3 text-sm">
-            <div className={card + ' p-3.5 space-y-2 relative overflow-hidden'}>
-              <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-blue-50" />
-              <div className="relative grid grid-cols-1 gap-1.5 text-[13px]">
-                <div className="flex items-center gap-2"><IconUser className="w-3.5 h-3.5 text-slate-400" /><strong>{detail.attempt.studentName}</strong></div>
-                <div className="flex items-center gap-2 text-slate-600"><IconMessage className="w-3.5 h-3.5 text-slate-400" />{findStudent(detail.attempt)?.telegramUsername || '—'}</div>
-                <div className="flex items-center gap-2 text-slate-600"><IconHash className="w-3.5 h-3.5 text-slate-400" />{detail.attempt.studentId}</div>
-                <div className="flex items-center gap-2 text-slate-600"><IconFileText className="w-3.5 h-3.5 text-slate-400" />{detail.exam?.title}</div>
-                <div className="flex items-center gap-2"><IconStar className="w-3.5 h-3.5 text-amber-500" />{detail.attempt.score}/{detail.attempt.maxScore} ({detail.attempt.percentage}%)</div>
-                <div className="flex items-center gap-2 text-slate-600"><IconTimer className="w-3.5 h-3.5 text-slate-400" />{Math.floor(detail.attempt.timeTakenSeconds / 60)}m {detail.attempt.timeTakenSeconds % 60}s</div>
-              </div>
-              <button type="button" className={btnP + ' w-full text-xs mt-1 relative'}>
-                <IconMessage className="w-3.5 h-3.5" /> Message on Telegram
-              </button>
+            <div className={card + ' p-3 space-y-1'}>
+              <div>👤 <strong>{detail.attempt.studentName}</strong></div>
+              <div>💬 {findStudent(detail.attempt)?.telegramUsername || 'No Telegram username'}</div>
+              <div>🆔 {detail.attempt.studentId}</div>
+              <div>📝 {detail.exam?.title}</div>
+              {detail.attempt.isOfficial === false && (
+                <div>🔁 Practice{detail.attempt.attemptNumber ? ` · Attempt #${detail.attempt.attemptNumber}` : ''}</div>
+              )}
+              <div>⭐ {detail.attempt.score}/{detail.attempt.maxScore} ({detail.attempt.percentage}%)</div>
+              <div>⏱️ {Math.floor(detail.attempt.timeTakenSeconds / 60)}m {detail.attempt.timeTakenSeconds % 60}s</div>
             </div>
-            <div className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">Question-wise</div>
-            <div className="space-y-1.5 max-h-[35vh] overflow-y-auto pr-0.5">
+
+            {(detail.attempt.telegramUserId || findStudent(detail.attempt)?.telegramUserId) && (
+              <div className={card + ' p-3 space-y-2'}>
+                <div className="font-bold text-xs text-slate-600">Send message via bot</div>
+                <textarea
+                  className={inp + ' min-h-[72px] text-sm'}
+                  value={dmText}
+                  onChange={(e) => setDmText(e.target.value)}
+                  placeholder="Type a message to this student…"
+                />
+                <button
+                  type="button"
+                  className={btnP + ' w-full text-xs'}
+                  disabled={dmBusy}
+                  onClick={() => sendDm(Number(detail.attempt.telegramUserId || findStudent(detail.attempt)?.telegramUserId))}
+                >
+                  {dmBusy ? 'Sending…' : 'Send by bot'}
+                </button>
+              </div>
+            )}
+
+            <div className="font-bold text-xs">Question-wise</div>
+            <div className="space-y-1.5 max-h-[30vh] overflow-y-auto">
               {(detail.breakdown || []).map((b: any) => (
-                <div key={b.questionId} className={`rounded-lg border p-2 text-[11px] ${b.status === 'correct' ? 'border-emerald-200 bg-emerald-50' : b.status === 'wrong' ? 'border-red-200 bg-red-50' : 'border-slate-200'}`}>
-                  <div className="font-bold text-slate-500 flex items-center gap-1.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${b.status === 'correct' ? 'bg-emerald-500' : b.status === 'wrong' ? 'bg-red-500' : 'bg-slate-300'}`} />
-                    Q{b.index} · {b.status}
-                  </div>
-                  <div className="font-medium text-[13px] text-slate-800 mt-0.5">{b.question}</div>
+                <div key={b.questionId} className={`border rounded-lg p-2 text-xs ${b.status === 'correct' ? 'border-emerald-200 bg-emerald-50' : b.status === 'wrong' ? 'border-red-200 bg-red-50' : 'border-slate-200'}`}>
+                  <div className="font-bold text-slate-500">Q{b.index} · {b.status}</div>
+                  <div className="font-medium text-sm">{b.question}</div>
                 </div>
               ))}
             </div>
             <div className="flex gap-2">
-              <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-lg py-2'} onClick={() => removeAttempt(detail.attempt.id)}>Remove result</button>
+              <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-xl py-2.5'} onClick={() => removeAttempt(detail.attempt.id)}>Remove result</button>
               {findStudent(detail.attempt) && (
-                <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-lg py-2'} onClick={() => removeStudent(findStudent(detail.attempt)!.id)}>Delete student</button>
+                <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-xl py-2.5'} onClick={() => removeStudent(findStudent(detail.attempt)!.id)}>Delete student</button>
               )}
             </div>
           </div>
