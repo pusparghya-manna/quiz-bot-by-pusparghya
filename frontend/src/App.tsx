@@ -1436,8 +1436,9 @@ function Settings({ settings, logs, onRefresh }: { settings: SystemSettings; log
   const save = async () => {
     setBusy(true);
     try {
-      let res = await api('/api/settings', { method: 'PUT', body: JSON.stringify(form) });
-      if (!res.ok) res = await api('/api/settings', { method: 'POST', body: JSON.stringify(form) });
+      const payload = { ...form, botActive: true };
+      let res = await api('/api/settings', { method: 'PUT', body: JSON.stringify(payload) });
+      if (!res.ok) res = await api('/api/settings', { method: 'POST', body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('Save failed');
       onRefresh();
       alert('Saved');
@@ -1469,14 +1470,10 @@ function Settings({ settings, logs, onRefresh }: { settings: SystemSettings; log
     <div className="space-y-3">
       <h1 className="text-lg font-bold tracking-tight text-slate-900">Settings</h1>
 
-      <SectionTitle icon={<IconSettings className="w-3.5 h-3.5" />} title="General" sub="System notice & exam intake" />
+      <SectionTitle icon={<IconSettings className="w-3.5 h-3.5" />} title="General" sub="System notice shown in the bot" />
       <div className={card + ' p-3.5 space-y-2.5'}>
         <p className="text-[11px] text-slate-500 flex items-start gap-1.5"><IconInfo className="w-3 h-3 mt-0.5 shrink-0" />Bot token & username are set by the developer and cannot be changed here.</p>
         <Field label="System notice"><textarea className={inp} value={form.systemNotice} onChange={(e) => setForm({ ...form, systemNotice: e.target.value })} /></Field>
-        <label className={`flex items-center justify-between gap-2 text-[13px] cursor-pointer rounded-lg border px-3 py-2.5 transition ${form.botActive ? 'border-emerald-200 bg-emerald-50/50 text-emerald-800' : 'border-slate-200 hover:border-slate-300'}`}>
-          <span>Accept new exam attempts</span>
-          <input type="checkbox" checked={form.botActive} onChange={(e) => setForm({ ...form, botActive: e.target.checked })} className="accent-emerald-600" style={{ width: 18, height: 18 }} />
-        </label>
         <button type="button" className={btnP + ' w-full !py-2'} disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
 
