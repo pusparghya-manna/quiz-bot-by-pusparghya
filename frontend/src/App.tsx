@@ -571,7 +571,6 @@ function Home({ exams, live, submissions, students, attempts, examList, onExams 
 
   if (profile) {
     const list = studentAttempts(profile);
-    const msg = tgLink(profile);
     return (
       <div className="space-y-3">
         <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 hover:text-blue-700" onClick={() => setProfile(null)}>
@@ -589,11 +588,6 @@ function Home({ exams, live, submissions, students, attempts, examList, onExams 
               </div>
             </div>
           </div>
-          {msg && (
-            <a href={msg} target="_blank" rel="noreferrer" className={btnP + ' w-full mt-2.5 text-xs no-underline relative'}>
-              <IconMessage className="w-3.5 h-3.5" /> Message on Telegram
-            </a>
-          )}
         </div>
         <SectionTitle icon={<IconResults className="w-3.5 h-3.5" />} title="Exams & results" />
         {list.length === 0 && <div className={card + ' p-5 text-center text-sm text-slate-500'}>No attempts yet</div>}
