@@ -155,17 +155,35 @@ function Badge({ s }: { s: string }) {
 }
 
 function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  // Lock body scroll while open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg max-h-[92vh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl safe-pb">
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-slate-100 bg-white/95 backdrop-blur px-4 py-2.5 rounded-t-3xl sm:rounded-t-2xl">
-          <h2 className="text-sm font-bold text-slate-900 truncate">{title}</h2>
-          <button type="button" onClick={onClose} className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 shrink-0 hover:bg-slate-200" aria-label="Close">
-            <IconClose className="w-3.5 h-3.5" />
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      <div className="absolute inset-0 bg-slate-900/50" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }} />
+      <div
+        className="relative w-full sm:max-w-lg flex flex-col bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        style={{ maxHeight: 'min(90dvh, 90vh)', marginBottom: 'max(4.5rem, env(safe-area-inset-bottom, 0px))' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-white px-3 py-3 rounded-t-2xl shrink-0">
+          <h2 className="text-sm font-bold text-slate-900 truncate pr-2">{title}</h2>
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+            className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 shrink-0 active:bg-slate-200"
+            aria-label="Close"
+          >
+            <IconClose className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-3.5 pb-6">{children}</div>
+        <div className="p-3.5 overflow-y-auto flex-1 overscroll-contain" style={{ paddingBottom: '1.5rem' }}>
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -1280,7 +1298,9 @@ function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; atte
   if (view === 'pick') {
     return (
       <div className="space-y-3">
-        <button type="button" className="text-sm font-semibold text-blue-600" onClick={() => setView('exams')}>← All exams</button>
+        <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 py-2 pr-3" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setView('exams'); }}>
+          <IconArrowLeft className="w-4 h-4" /> All exams
+        </button>
         <div>
           <h1 className="text-lg font-bold tracking-tight">{selectedExam?.title || 'Exam'}</h1>
           <p className="text-[11px] text-slate-500 mt-0.5">Choose result type</p>
@@ -1300,7 +1320,9 @@ function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; atte
   // —— Official or practice list ——
   return (
     <div className="space-y-3">
-      <button type="button" className="text-sm font-semibold text-blue-600" onClick={() => setView('pick')}>← {selectedExam?.title || 'Back'}</button>
+      <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 py-2 pr-3" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setView('pick'); }}>
+        <IconArrowLeft className="w-4 h-4" /> Back
+      </button>
       <div className="flex items-center justify-between gap-2">
         <div>
           <h1 className="text-lg font-bold tracking-tight">{view === 'official' ? 'Official results' : 'Practice results'}</h1>
@@ -1359,12 +1381,22 @@ function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; atte
 
             {(detail.attempt.telegramUserId || findStudent(detail.attempt)?.telegramUserId) && (
               <div className={card + ' p-3 space-y-2'}>
-                <div className="font-bold text-xs text-slate-600">Send message via bot</div>
+                <div className="font-bold text-xs text-slate-600">Message student</div>
+                {findStudent(detail.attempt)?.telegramUsername && (
+                  <a
+                    href={`https://t.me/${(findStudent(detail.attempt)!.telegramUsername || '').replace(/^@/, '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={btnS + ' w-full text-xs no-underline'}
+                  >
+                    <IconMessage className="w-3.5 h-3.5" /> Open in Telegram
+                  </a>
+                )}
                 <textarea
                   className={inp + ' min-h-[72px] text-sm'}
                   value={dmText}
                   onChange={(e) => setDmText(e.target.value)}
-                  placeholder="Type a message to this student…"
+                  placeholder="Type a message to send via bot…"
                 />
                 <button
                   type="button"
