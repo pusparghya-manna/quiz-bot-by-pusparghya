@@ -9,7 +9,8 @@ Telegram quiz / exam bot with a multi-teacher dashboard.
 | **Database** | Turso | libSQL |
 | **OCR** | Google Gemini | Photo → questions JSON |
 
-Bot: [@quizbotbypusparghya_bot](https://t.me/quizbotbypusparghya_bot)
+Bot: [@quizbotbypusparghya_bot](https://t.me/quizbotbypusparghya_bot)  
+Teacher Dashboard: https://quiz-bot-by-pusparghya.vercel.app/
 
 ---
 
