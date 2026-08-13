@@ -11,7 +11,6 @@ Telegram quiz / exam bot with a multi-teacher dashboard.
 
 Bot: [@quizbotbypusparghya_bot](https://t.me/quizbotbypusparghya_bot)
 
-Teacher Dashboard: https://quiz-bot-by-pusparghya.vercel.app/
 ---
 
 ## Environment variables
