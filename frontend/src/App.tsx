@@ -304,7 +304,7 @@ function Login({ onOk }: { onOk: () => void }) {
       <div className="relative w-full max-w-sm">
         <div className="text-center mb-5">
           <div className="mx-auto w-14 h-14 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/30 ring-1 ring-white/40 ring-offset-2 ring-offset-slate-100 mb-3">
-            <IconBot className="w-7 h-7" />
+            <img src="/favicon.png" alt="" className="w-7 h-7 object-contain" />
           </div>
           <h1 className="text-xl font-bold tracking-tight text-slate-900">Quiz Bot by Pusparghya</h1>
           <p className="text-xs text-slate-500 mt-0.5">Teacher Dashboard</p>
@@ -443,7 +443,7 @@ export default function App() {
         <div className="max-w-3xl mx-auto px-4 h-12 flex items-center justify-between">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-blue-600/20 ring-1 ring-white/40 ring-offset-1 ring-offset-slate-100">
-              <IconBot className="w-[18px] h-[18px]" />
+              <img src="/favicon.png" alt="" className="w-[18px] h-[18px] object-contain" />
             </div>
             <div className="min-w-0">
               <div className="font-bold text-[13px] text-slate-900 leading-tight">Quiz Bot by Pusparghya</div>
