@@ -1,4 +1,9 @@
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+/**
+ * Always use same-origin `/api` in the browser so Vercel rewrites
+ * proxy to Railway. Avoids "Failed to fetch" on Wi‑Fi that blocks railway.app.
+ * Local dev: vite proxy still forwards /api → localhost:3000.
+ */
+const API_BASE = '';
 
 export const getToken = () => localStorage.getItem('quiz_token') || '';
 export const setToken = (t: string) => localStorage.setItem('quiz_token', t);
@@ -15,15 +20,19 @@ export async function api(path: string, options: RequestInit = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   try {
     const res = await fetch(url, { ...options, headers });
-    if (res.status === 401 && !path.includes('/auth/login') && !path.includes('/auth/register')) {
+    if (
+      res.status === 401 &&
+      !path.includes('/auth/login') &&
+      !path.includes('/auth/register')
+    ) {
       clearToken();
     }
     return res;
   } catch (err: any) {
-    // Re-throw with clearer message for UI
-    const msg = err?.message === 'Failed to fetch'
-      ? 'Cannot reach server. Check your internet or try again.'
-      : (err?.message || 'Network error');
+    const msg =
+      err?.message === 'Failed to fetch'
+        ? 'Cannot reach server on this network. Try mobile data or another Wi‑Fi.'
+        : err?.message || 'Network error';
     throw new Error(msg);
   }
 }
