@@ -96,6 +96,9 @@ function isExamTimeEnded(exam: Exam): boolean {
 
 // Format timer remaining string
 
+/** Users who tapped "Set your name" — next text message becomes their display name */
+const pendingNameUsers = new Set<number>();
+
 function formatInIST(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   if (isNaN(d.getTime())) return '—';
@@ -197,8 +200,6 @@ function renderMainMenu(student: Student): SimulatorResponse {
 
 ` : '') +
       `You are registered as *${student.name}*.
-` +
-      `✏️ Change display name: \`/setname Your Full Name\`
 
 ` +
       `Teachers share a special link for each exam. Open that link to start.`,
@@ -206,7 +207,8 @@ function renderMainMenu(student: Student): SimulatorResponse {
       inline_keyboard: [
         [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
         [{ text: '📊 My Results', callback_data: 'btn_results' }],
-        [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }]
+        [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }],
+        [{ text: '✏️ Set your name', callback_data: 'btn_setname' }]
       ]
     },
     type: 'editMessageText'
@@ -228,7 +230,26 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
 
     // 1. Navigation / List Exams
     if (data === 'btn_home' || data === 'btn_menu') {
+      pendingNameUsers.delete(user.id);
       response = renderMainMenu(student);
+    } else if (data === 'btn_setname') {
+      pendingNameUsers.add(user.id);
+      response = {
+        chatId: user.id,
+        text: `✏️ *Set your name*
+
+Please *type your full name* and send it as a message.
+
+Example: \`Rahul Sharma\`
+
+This name will appear on results and the leaderboard.`,
+        replyMarkup: {
+          inline_keyboard: [
+            [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
+          ]
+        },
+        type: 'editMessageText'
+      };
     } else if (data === 'btn_exams') {
       response = renderExamsList(student);
     } else if (data === 'btn_results') {
