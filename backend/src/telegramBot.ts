@@ -240,8 +240,6 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
 
 Please *type your full name* and send it as a message.
 
-Example: \`Rahul Sharma\`
-
 This name will appear on results and the leaderboard.`,
         replyMarkup: {
           inline_keyboard: [
