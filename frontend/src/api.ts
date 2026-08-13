@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 export const getToken = () => localStorage.getItem('quiz_token') || '';
 export const setToken = (t: string) => localStorage.setItem('quiz_token', t);
@@ -11,7 +11,19 @@ export async function api(path: string, options: RequestInit = {}) {
   }
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (res.status === 401 && !path.includes('/auth/login')) clearToken();
-  return res;
+
+  const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
+  try {
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401 && !path.includes('/auth/login') && !path.includes('/auth/register')) {
+      clearToken();
+    }
+    return res;
+  } catch (err: any) {
+    // Re-throw with clearer message for UI
+    const msg = err?.message === 'Failed to fetch'
+      ? 'Cannot reach server. Check your internet or try again.'
+      : (err?.message || 'Network error');
+    throw new Error(msg);
+  }
 }
