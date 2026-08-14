@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { Exam, Attempt, Student } from '../types';
 import { card, btnP } from '../styles/ui';
 import { SectionTitle } from '../components/ui/SectionTitle';
-import { dedupeStudents, initials, avatarColor } from '../lib/students';
+import { dedupeStudents } from '../lib/students';
 import {
   IconPlus, IconArrowLeft, IconMessage, IconHash, IconResults, IconStar, IconClock,
   IconUsers, IconLive, IconExam, IconRefresh, IconTag, IconTrophy
@@ -27,11 +27,6 @@ export function Home({ exams, live, submissions, students, attempts, examList, o
     attempts.filter(a =>
       (a.telegramUserId && s.telegramUserId && a.telegramUserId === s.telegramUserId) || a.studentId === s.studentId
     ).slice().sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime());
-  const tgLink = (s: Student) => {
-    if (s.telegramUsername) return `https://t.me/${s.telegramUsername.replace(/^@/, '')}`;
-    if (s.telegramUserId) return `tg://user?id=${s.telegramUserId}`;
-    return null;
-  };
 
   const initials = (name: string) =>
     name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || '?';
@@ -155,5 +150,3 @@ export function Home({ exams, live, submissions, students, attempts, examList, o
     </div>
   );
 }
-
-/* ─── EXAMS (questions inside exam) ─── */
