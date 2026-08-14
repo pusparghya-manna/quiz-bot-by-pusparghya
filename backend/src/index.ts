@@ -1,28 +1,33 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { env, corsOriginDelegate } from './config/env.js';
+import { rateLimit } from './middleware/rateLimit.js';
+import { clampStr } from './middleware/validate.js';
 import { initDb } from './db.js';
 import { loginTeacher, registerTeacher, authMiddleware, ensureTeachersTable } from './auth.js';
 import { store } from './store.js';
-import { processTelegramUpdate, updateExamRanks, calculateAttemptScore, sendTelegramResponse } from './telegramBot.js';
-import { startTelegramPolling } from './telegramPolling.js';
-import { parseQuestionsFromMedia } from './geminiOcr.js';
+import { processTelegramUpdate, updateExamRanks, calculateAttemptScore, sendTelegramResponse } from './telegram/bot.js';
+import { startTelegramPolling } from './telegram/polling.js';
+import { parseQuestionsFromMedia } from './services/geminiOcr.js';
 import { Exam, Question, Student } from './types.js';
 dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = env.port;
 
-  app.use(cors({ origin: true, credentials: true }));
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  app.use(cors({ origin: corsOriginDelegate, credentials: true }));
+  app.use(express.json({ limit: '12mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '12mb' }));
+  app.disable('x-powered-by');
 
   // Health
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
-  // Auth
-  app.post('/api/auth/login', async (req, res) => {
+  // Auth (rate-limited)
+  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, keyFn: (req) => `auth:${req.ip}` });
+  app.post('/api/auth/login', authLimiter, async (req, res) => {
     try {
       const { username, password } = req.body || {};
       if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
@@ -33,7 +38,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/register', async (req, res) => {
+  app.post('/api/auth/register', authLimiter, async (req, res) => {
     try {
       const { username, password, name } = req.body || {};
       if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
@@ -89,11 +94,17 @@ async function startServer() {
       students = [];
     }
     // Shared bot settings (token from env preferred)
-    const settings = { ...store.getSettings() };
-    if (process.env.TELEGRAM_BOT_TOKEN) settings.telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    const rawSettings = store.getSettings();
+    const settings = {
+      ...rawSettings,
+      // Never expose full bot token to the browser
+      telegramBotToken: rawSettings.telegramBotToken ? '••••••••' : '',
+      botUsername: rawSettings.botUsername || '@quizbotbypusparghya_bot',
+      botActive: true
+    };
     res.json({
       exams,
-      questions: [], // question bank not shared across teachers
+      questions: [],
       students,
       attempts,
       settings,
@@ -102,6 +113,9 @@ async function startServer() {
   });
 
   app.post('/api/reseed', (req, res) => {
+    if (!env.enableDangerousReseed) {
+      return res.status(403).json({ error: 'Reseed disabled. Set ENABLE_RESEED=true to allow.' });
+    }
     const fresh = store.resetToSeed();
     store.addAuditLog('SYSTEM_RESEEDED', 'Reseeded database to clean state');
     res.json(fresh);
@@ -316,6 +330,12 @@ async function startServer() {
   app.post('/api/ocr/parse', async (req, res) => {
     try {
       const { fileBase64, mimeType } = req.body;
+      if (!fileBase64 || typeof fileBase64 !== 'string') {
+        return res.status(400).json({ error: 'fileBase64 required' });
+      }
+      if (fileBase64.length > env.maxOcrBase64Chars) {
+        return res.status(413).json({ error: 'Image too large' });
+      }
       if (!fileBase64) {
         return res.status(400).json({ error: 'fileBase64 string is required.' });
       }
@@ -507,7 +527,8 @@ async function startServer() {
 
   // 9. Settings & Audit Logs
   app.get('/api/settings', (req, res) => {
-    res.json(store.getSettings());
+    const s = store.getSettings();
+    res.json({ ...s, telegramBotToken: s.telegramBotToken ? '••••••••' : '', botActive: true });
   });
 
   
@@ -515,7 +536,7 @@ async function startServer() {
   app.post('/api/message', async (req, res) => {
     const teacherId = (req as any).teacher?.username as string | undefined;
     if (!teacherId) return res.status(401).json({ error: 'Unauthorized' });
-    const message = String(req.body?.message || '').trim();
+    const message = clampStr(req.body?.message, env.maxMessageLength);
     const telegramUserId = Number(req.body?.telegramUserId);
     if (!message) return res.status(400).json({ error: 'Message required' });
     if (!telegramUserId) return res.status(400).json({ error: 'telegramUserId required' });
@@ -540,7 +561,7 @@ async function startServer() {
   });
 
   app.post('/api/broadcast', async (req, res) => {
-    const message = String(req.body?.message || '').trim();
+    const message = clampStr(req.body?.message, env.maxMessageLength);
     if (!message) return res.status(400).json({ error: 'Message required' });
     const teacherId = (req as any).teacher?.username as string | undefined;
     if (!teacherId) return res.status(401).json({ error: 'Unauthorized' });
@@ -597,6 +618,9 @@ async function startServer() {
   });
 
   app.post('/api/seed', (req, res) => {
+    if (!env.enableDangerousReseed) {
+      return res.status(403).json({ error: 'Seed/reset disabled' });
+    }
     const fresh = store.resetToSeed();
     store.addAuditLog('SYSTEM_RESEEDED', 'Reseeded database to default state');
     res.json(fresh);

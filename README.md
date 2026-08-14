@@ -32,6 +32,10 @@ Root directory: `backend`
 | `TEACHER_USERNAME` | No | Seed one teacher on first boot (optional) |
 | `TEACHER_PASSWORD` | No | Password for seeded teacher (min 6 chars) |
 | `TEACHER_NAME` | No | Display name for seeded teacher |
+| `ALLOWED_ORIGINS` | No | Comma-separated CORS origins |
+| `ENABLE_RESEED` | No | `true` to allow destructive data reset APIs |
+| `MAX_MESSAGE_LENGTH` | No | Max bot broadcast/DM length (default 3500) |
+| `MAX_OCR_BASE64_CHARS` | No | Max OCR upload size (default 10M chars) |
 
 **Notes**
 - Never commit real secrets. Use Railway **Variables** only.
@@ -137,3 +141,32 @@ npm run dev            # Vite proxies /api → localhost:3000
 ## License / ownership
 
 Project: **Quiz Bot by Pusparghya**
+
+
+---
+
+## Project structure
+
+```text
+quiz-bot-by-pusparghya/
+├── backend/
+│   ├── src/
+│   │   ├── config/          # env, CORS allowlist
+│   │   ├── middleware/      # rate limit, validation helpers
+│   │   ├── services/        # Gemini OCR
+│   │   ├── telegram/        # bot handlers + polling
+│   │   ├── auth.ts          # teachers, JWT, bcrypt
+│   │   ├── db.ts            # Turso client
+│   │   ├── store.ts         # app data persistence
+│   │   ├── types.ts
+│   │   └── index.ts         # HTTP routes + bootstrap
+│   └── .env.example
+├── frontend/
+│   ├── public/favicon.png
+│   ├── src/                 # React teacher dashboard
+│   └── vercel.json          # /api proxy → Railway
+├── SECURITY.md
+└── README.md
+```
+
+See [SECURITY.md](./SECURITY.md) for security hardening details.
