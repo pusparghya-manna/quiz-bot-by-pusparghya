@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: quizbot
+      POSTGRES_USER: quizbot
+      POSTGRES_PASSWORD: quizbot
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+  api:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      DATABASE_URL: jdbc:postgresql://db:5432/quizbot
+      DATABASE_USERNAME: quizbot
+      DATABASE_PASSWORD: quizbot
+      JWT_SECRET: local-dev-jwt-secret-change-me-32c
+      TELEGRAM_POLLING_ENABLED: "false"
+      APP_PRODUCTION: "false"
+    depends_on: [db]
+volumes:
+  pgdata:

@@ -1,0 +1,36 @@
+server:
+  port: ${PORT:8080}
+spring:
+  application:
+    name: quiz-bot
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/quizbot}
+    username: ${DATABASE_USERNAME:quizbot}
+    password: ${DATABASE_PASSWORD:quizbot}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+app:
+  production: ${APP_PRODUCTION:false}
+  jwt:
+    secret: ${JWT_SECRET:dev-only-jwt-secret-change-me-32chars}
+    ttl-seconds: 604800
+  cors:
+    allowed-origins: ${ALLOWED_ORIGINS:https://quiz-bot-by-pusparghya.vercel.app,http://localhost:5173}
+  telegram:
+    bot-token: ${TELEGRAM_BOT_TOKEN:}
+    webhook-secret: ${TELEGRAM_WEBHOOK_SECRET:}
+    polling-enabled: ${TELEGRAM_POLLING_ENABLED:true}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-flash-latest}
+  ocr:
+    max-base64-chars: ${MAX_OCR_BASE64_CHARS:10000000}
