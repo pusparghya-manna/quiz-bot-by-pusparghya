@@ -39,11 +39,39 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
   const copyLink = async (id: string) => {
     const link = examLink(id);
     setShareLink(link);
+    // System share sheet (WhatsApp, Telegram, etc.) when the browser supports it
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        await navigator.share({
+          title: 'Exam link — Quiz Bot by Pusparghya',
+          text: 'Join this exam:',
+          url: link,
+        });
+      }
+    } catch {
+      /* user cancelled system share — panel still available */
+    }
     try {
       await navigator.clipboard.writeText(link);
-      toastSuccess('Link copied — share panel below');
+      toastSuccess('Link ready below (also copied)');
     } catch {
-      toast('Link ready below — select and copy');
+      toast('Link ready below — use Copy or Share');
+    }
+  };
+
+  const systemShare = async (link: string) => {
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        await navigator.share({
+          title: 'Exam link — Quiz Bot by Pusparghya',
+          text: 'Join this exam:',
+          url: link,
+        });
+        return;
+      }
+      toast('System share not supported on this device — use Copy link');
+    } catch {
+      /* cancelled */
     }
   };
 
@@ -254,6 +282,13 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
               }}
             >
               <IconCopy className="w-3.5 h-3.5" /> Copy link
+            </button>
+            <button
+              type="button"
+              className={btnS + ' flex-1 !py-1.5 text-[11px]'}
+              onClick={() => systemShare(shareLink)}
+            >
+              <IconShare className="w-3.5 h-3.5" /> Share via apps
             </button>
           </div>
           <p className="text-[10px] text-blue-700/80 flex items-center gap-1"><IconInfo className="w-3 h-3 shrink-0" />Share this with students. Only this link starts the exam.</p>
