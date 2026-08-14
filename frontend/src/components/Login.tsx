@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { api, setToken } from '../api';
 import { inp, btnP, card } from '../styles/ui';
-import { IconEye, IconEyeOff, IconUser } from '../icons';
+import { Field } from './ui/Field';
+import { IconEye, IconEyeOff, IconUser, IconHash, IconAlert } from '../icons';
 
 export function Login({ onOk }: { onOk: () => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -93,5 +94,3 @@ export function Login({ onOk }: { onOk: () => void }) {
     </div>
   );
 }
-
-/* ─── empty question ─── */
