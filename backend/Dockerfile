@@ -1,15 +1,14 @@
-FROM node:20-slim AS builder
+FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-RUN npm run build
+COPY pom.xml .
+COPY src ./src
+RUN apk add --no-cache maven && mvn -q -DskipTests package
 
-FROM node:20-slim
+FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
-COPY package*.json ./
-RUN npm install --omit=dev
-COPY --from=builder /app/dist ./dist
-ENV NODE_ENV=production
-EXPOSE 3000
-CMD ["node", "dist/index.js"]
+RUN adduser -D appuser
+COPY --from=build /app/target/quiz-bot-*.jar app.jar
+USER appuser
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+ENTRYPOINT ["java","-XX:+UseContainerSupport","-jar","/app/app.jar"]

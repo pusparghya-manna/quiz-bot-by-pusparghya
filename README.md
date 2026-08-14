@@ -1,80 +1,65 @@
 # Quiz Bot by Pusparghya
 
-Telegram quiz / exam bot with a multi-teacher dashboard.
+Professional multi-teacher Telegram quiz platform.
 
-| Layer | Host | Stack |
-|--------|------|--------|
-| **Frontend** | Vercel | React + Vite + Tailwind |
-| **Backend (production)** | Railway | **Java 21 + Spring Boot** |
-| **Database (production)** | Railway PostgreSQL | Flyway migrations |
-| **OCR** | Google Gemini | Photo → questions JSON |
+| Component | Technology |
+|-----------|------------|
+| **API** | Java 21 · Spring Boot 3 · Spring Security · JPA |
+| **Database** | PostgreSQL · Flyway |
+| **Bot** | Telegram Bot API |
+| **Dashboard** | React · TypeScript · Vite · Tailwind |
+| **OCR** | Google Gemini (optional) |
 
-**Docs:** [ENTERPRISE.md](./ENTERPRISE.md) · [SECURITY.md](./SECURITY.md) · [LICENSE](./LICENSE)  
-**Cutover from legacy Turso:** [scripts/migrate-turso-to-postgres.md](./scripts/migrate-turso-to-postgres.md)
+## Repository layout
 
-Bot: [@quizbotbypusparghya_bot](https://t.me/quizbotbypusparghya_bot)  
-Teacher Dashboard: https://quiz-bot-by-pusparghya.vercel.app/
-
----
-
-## Production backend: `backend-spring/`
-
-Root directory on Railway: **`backend-spring`** (Dockerfile).
-
-### Required environment variables
-
-See also `backend-spring/.env.example`.
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | **Yes** | JDBC URL, e.g. `jdbc:postgresql://…/quizbot` |
-| `DATABASE_USERNAME` | **Yes** | Postgres user |
-| `DATABASE_PASSWORD` | **Yes** | Postgres password |
-| `JWT_SECRET` | **Yes** | ≥24 random characters |
-| `TELEGRAM_BOT_TOKEN` | **Yes** | From [@BotFather](https://t.me/BotFather) |
-| `TELEGRAM_WEBHOOK_SECRET` | **Yes in production** | Shared secret for webhook header |
-| `APP_PRODUCTION` | **Yes in production** | Set to `true` |
-| `ALLOWED_ORIGINS` | **Yes** | e.g. `https://quiz-bot-by-pusparghya.vercel.app` |
-| `PORT` | No | Default `8080` (Railway sets this) |
-| `TELEGRAM_POLLING_ENABLED` | No | Default `true` |
-| `GEMINI_API_KEY` | No | OCR |
-| `GEMINI_MODEL` | No | Default `gemini-flash-latest` |
-
-Production **refuses to start** if `JWT_SECRET` is weak or `TELEGRAM_WEBHOOK_SECRET` is blank when `APP_PRODUCTION=true`.
-
-### Deploy (Railway)
-1. Attach **PostgreSQL**.
-2. Deploy from branch with root **`backend-spring`**.
-3. Set variables from the table above.
-4. Confirm `GET /health` → `{"ok":true}`.
-
-### Frontend (Vercel)
-- Root: `frontend`
-- Proxy `/api` → Railway (see `frontend/vercel.json`)
-- Auth uses **httpOnly cookies** (`credentials: 'include'`)
-
----
-
-## Legacy Node backend (deprecated)
-
-The directory **`backend/`** (Node + Express + Turso) is **legacy**. Do **not** deploy it for production.
-
-See `backend/README.md` for archival notes. One-time data move: `scripts/migrate-turso-to-postgres.md`.
-
----
-
-## Local Spring development
-
-```bash
-cd backend-spring
-docker compose up -d db   # optional Postgres
-# set DATABASE_* and JWT_SECRET
-./mvnw spring-boot:run    # or: mvn spring-boot:run
+```text
+backend/     Spring Boot API (production)
+frontend/    Teacher dashboard (Vercel)
+LICENSE
+SECURITY.md
 ```
 
+## Quick start
+
+### Backend
+
 ```bash
-cd frontend && npm install && npm run dev
+cd backend
+cp .env.example .env   # fill secrets
+docker compose up -d db
+mvn spring-boot:run
 ```
+
+Health: `GET http://localhost:8080/health`
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## Production
+
+**API (Railway)**  
+- Root directory: `backend`  
+- Builder: Dockerfile  
+- Attach PostgreSQL  
+- Environment: see `backend/.env.example`
+
+**Dashboard (Vercel)**  
+- Root directory: `frontend`  
+- Proxy `/api` → Railway URL in `frontend/vercel.json`
+
+## Security
+
+See [SECURITY.md](./SECURITY.md).
+
+- JWT in httpOnly cookie  
+- Tenant isolation per teacher  
+- Production fails boot without `JWT_SECRET` and `TELEGRAM_WEBHOOK_SECRET`
 
 ## License
-MIT — see [LICENSE](./LICENSE).
+
+MIT — [LICENSE](./LICENSE)
