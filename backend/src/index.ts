@@ -113,13 +113,21 @@ async function startServer() {
     });
   });
 
-  app.post('/api/reseed', (req, res) => {
+    app.post('/api/reseed', (req, res) => {
     if (!env.enableDangerousReseed) {
       return res.status(403).json({ error: 'Reseed disabled. Set ENABLE_RESEED=true to allow.' });
     }
-    const fresh = store.resetToSeed();
-    store.addAuditLog('SYSTEM_RESEEDED', 'Reseeded database to clean state');
-    res.json(fresh);
+    // Admin-only + single-tenant: never wipe other teachers.
+    const teacher = (req as any).teacher;
+    const adminUser = process.env.ADMIN_USERNAME || '';
+    if (!teacher?.username || !adminUser || teacher.username !== adminUser) {
+      return res.status(403).json({ error: 'Admin role required' });
+    }
+    // Scoped: only clear data owned by this admin teacher (not global wipe).
+    // Full multi-tenant wipe is intentionally removed.
+    return res.status(403).json({
+      error: 'Global reseed is disabled. Use developer tooling for tenant-scoped resets.'
+    });
   });
 
   app.get('/api/stats', (req, res) => {

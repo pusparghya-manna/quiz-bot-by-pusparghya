@@ -36,7 +36,7 @@ public class SecurityConfig {
         .cors(Customizer.withDefaults())
         .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(auth -> auth
-            .requestMatchers("/health", "/actuator/health", "/api/auth/login", "/api/auth/register").permitAll()
+            .requestMatchers("/health", "/actuator/health", "/api/auth/login", "/api/auth/register", "/api/auth/logout").permitAll()
             .requestMatchers(HttpMethod.POST, "/api/telegram/webhook").permitAll()
             .requestMatchers("/api/telegram/simulate").hasRole("TEACHER")
             .anyRequest().authenticated())
@@ -53,6 +53,7 @@ public class SecurityConfig {
     cfg.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList());
     cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
     cfg.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+    cfg.setExposedHeaders(List.of("Set-Cookie"));
     cfg.setAllowCredentials(true);
     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
     source.registerCorsConfiguration("/**", cfg);

@@ -25,7 +25,7 @@ export function Login({ onOk }: { onOk: () => void }) {
       const res = await api(path, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || (mode === 'login' ? 'Invalid credentials' : 'Registration failed'));
-      setToken(data.token);
+      setToken(data.token || '1');
       onOk();
     } catch (e: any) {
       setErr(e.message || 'Failed');

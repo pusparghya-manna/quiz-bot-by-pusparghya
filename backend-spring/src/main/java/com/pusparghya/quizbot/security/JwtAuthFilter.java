@@ -3,6 +3,7 @@ package com.pusparghya.quizbot.security;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
@@ -17,6 +18,8 @@ import java.util.List;
 
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
+  public static final String COOKIE_NAME = "quiz_session";
+
   private final JwtService jwt;
 
   public JwtAuthFilter(JwtService jwt) {
@@ -26,10 +29,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
   @Override
   protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
       throws ServletException, IOException {
-    String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-    if (header != null && header.startsWith("Bearer ")) {
+    String token = extractToken(request);
+    if (token != null && !token.isBlank()) {
       try {
-        Claims claims = jwt.parse(header.substring(7));
+        Claims claims = jwt.parse(token);
         TeacherPrincipal principal = new TeacherPrincipal(claims.getSubject(), String.valueOf(claims.get("name")));
         var auth = new UsernamePasswordAuthenticationToken(
             principal, null, List.of(new SimpleGrantedAuthority("ROLE_TEACHER")));
@@ -39,5 +42,22 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       }
     }
     chain.doFilter(request, response);
+  }
+
+  private String extractToken(HttpServletRequest request) {
+    // Prefer httpOnly cookie (XSS-resistant)
+    if (request.getCookies() != null) {
+      for (Cookie c : request.getCookies()) {
+        if (COOKIE_NAME.equals(c.getName()) && c.getValue() != null && !c.getValue().isBlank()) {
+          return c.getValue();
+        }
+      }
+    }
+    // Transition: still accept Authorization Bearer
+    String header = request.getHeader(HttpHeaders.AUTHORIZATION);
+    if (header != null && header.startsWith("Bearer ")) {
+      return header.substring(7);
+    }
+    return null;
   }
 }

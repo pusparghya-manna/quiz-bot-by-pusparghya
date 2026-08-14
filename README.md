@@ -5,122 +5,76 @@ Telegram quiz / exam bot with a multi-teacher dashboard.
 | Layer | Host | Stack |
 |--------|------|--------|
 | **Frontend** | Vercel | React + Vite + Tailwind |
-| **Backend** | Railway | Node + Express + Telegram polling |
-| **Database** | Turso | libSQL |
+| **Backend (production)** | Railway | **Java 21 + Spring Boot** |
+| **Database (production)** | Railway PostgreSQL | Flyway migrations |
 | **OCR** | Google Gemini | Photo → questions JSON |
+
+**Docs:** [ENTERPRISE.md](./ENTERPRISE.md) · [SECURITY.md](./SECURITY.md) · [LICENSE](./LICENSE)  
+**Cutover from legacy Turso:** [scripts/migrate-turso-to-postgres.md](./scripts/migrate-turso-to-postgres.md)
 
 Bot: [@quizbotbypusparghya_bot](https://t.me/quizbotbypusparghya_bot)  
 Teacher Dashboard: https://quiz-bot-by-pusparghya.vercel.app/
 
 ---
 
-## Environment variables
+## Production backend: `backend-spring/`
 
-### Backend (Railway) — set these on the **backend** service
+Root directory on Railway: **`backend-spring`** (Dockerfile).
 
-Root directory: `backend`
+### Required environment variables
+
+See also `backend-spring/.env.example`.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | **Yes** | Token from [@BotFather](https://t.me/BotFather) |
-| `TURSO_DATABASE_URL` | **Yes** | Turso DB URL (`libsql://…` or `https://…`) |
-| `TURSO_AUTH_TOKEN` | **Yes** | Turso auth token |
-| `GEMINI_API_KEY` | **Yes** | Google AI / Gemini API key (photo OCR) |
-| `JWT_SECRET` | **Yes** | Long random string for teacher login tokens |
-| `PORT` | No | HTTP port (Railway usually sets this; default `3000`) |
-| `GEMINI_MODEL` | No | Model id (default: `gemini-flash-latest`) |
-| `TEACHER_USERNAME` | No | Seed one teacher on first boot (optional) |
-| `TEACHER_PASSWORD` | No | Password for seeded teacher (min 6 chars) |
-| `TEACHER_NAME` | No | Display name for seeded teacher |
-| `ALLOWED_ORIGINS` | No | Comma-separated CORS origins |
-| `ENABLE_RESEED` | No | `true` to allow destructive data reset APIs |
-| `MAX_MESSAGE_LENGTH` | No | Max bot broadcast/DM length (default 3500) |
-| `MAX_OCR_BASE64_CHARS` | No | Max OCR upload size (default 10M chars) |
+| `DATABASE_URL` | **Yes** | JDBC URL, e.g. `jdbc:postgresql://…/quizbot` |
+| `DATABASE_USERNAME` | **Yes** | Postgres user |
+| `DATABASE_PASSWORD` | **Yes** | Postgres password |
+| `JWT_SECRET` | **Yes** | ≥24 random characters |
+| `TELEGRAM_BOT_TOKEN` | **Yes** | From [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_WEBHOOK_SECRET` | **Yes in production** | Shared secret for webhook header |
+| `APP_PRODUCTION` | **Yes in production** | Set to `true` |
+| `ALLOWED_ORIGINS` | **Yes** | e.g. `https://quiz-bot-by-pusparghya.vercel.app` |
+| `PORT` | No | Default `8080` (Railway sets this) |
+| `TELEGRAM_POLLING_ENABLED` | No | Default `true` |
+| `GEMINI_API_KEY` | No | OCR |
+| `GEMINI_MODEL` | No | Default `gemini-flash-latest` |
 
-**Notes**
-- Never commit real secrets. Use Railway **Variables** only.
-- `TEACHER_*` only creates an account if that username does not already exist in Turso.
-- Teachers can also **Register** from the dashboard login page.
-- Bot token & bot username are **developer-only** (not editable in the teacher UI).
+Production **refuses to start** if `JWT_SECRET` is weak or `TELEGRAM_WEBHOOK_SECRET` is blank when `APP_PRODUCTION=true`.
+
+### Deploy (Railway)
+1. Attach **PostgreSQL**.
+2. Deploy from branch with root **`backend-spring`**.
+3. Set variables from the table above.
+4. Confirm `GET /health` → `{"ok":true}`.
 
 ### Frontend (Vercel)
-
-Root directory: `frontend`
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VITE_API_URL` | **No** | Leave **empty / unset** in production |
-
-**Important:** The app calls same-origin `/api/…`. Vercel rewrites (see `frontend/vercel.json`) proxy those requests to Railway. Setting `VITE_API_URL` to the Railway URL can break login on some Wi‑Fi networks.
-
-If you ever need a direct API URL (e.g. special setup), you would set:
-
-```env
-VITE_API_URL=https://YOUR-SERVICE.up.railway.app
-```
-
-For the standard deploy, **do not set** `VITE_API_URL`.
-
-Update the proxy target in `frontend/vercel.json` if your Railway public URL changes:
-
-```json
-{
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://YOUR-SERVICE.up.railway.app/api/:path*"
-    },
-    {
-      "source": "/health",
-      "destination": "https://YOUR-SERVICE.up.railway.app/health"
-    }
-  ]
-}
-```
+- Root: `frontend`
+- Proxy `/api` → Railway (see `frontend/vercel.json`)
+- Auth uses **httpOnly cookies** (`credentials: 'include'`)
 
 ---
 
-## Deploy steps
+## Legacy Node backend (deprecated)
 
-### 1. Backend — Railway
-1. New project → deploy from GitHub repo  
-2. **Root directory:** `backend`  
-3. Add all **required** variables from the table above  
-4. Deploy and copy the public HTTPS URL (e.g. `https://….up.railway.app`)  
-5. Confirm `GET /health` returns `{"ok":true}`
+The directory **`backend/`** (Node + Express + Turso) is **legacy**. Do **not** deploy it for production.
 
-### 2. Frontend — Vercel
-1. Import the same GitHub repo  
-2. **Root directory:** `frontend`  
-3. Do **not** set `VITE_API_URL` (use `vercel.json` proxy)  
-4. Ensure `vercel.json` destination matches your Railway URL  
-5. Deploy  
-
-### 3. Teacher access
-- Open the Vercel URL → **Register** a teacher account, **or**  
-- Use `TEACHER_USERNAME` / `TEACHER_PASSWORD` seeded on Railway  
+See `backend/README.md` for archival notes. One-time data move: `scripts/migrate-turso-to-postgres.md`.
 
 ---
 
-## Local development
+## Local Spring development
 
 ```bash
-# Backend
-cd backend
-cp .env.example .env   # fill in values
-npm install
-npm run dev
-
-# Frontend (separate terminal)
-cd frontend
-npm install
-npm run dev            # Vite proxies /api → localhost:3000
+cd backend-spring
+docker compose up -d db   # optional Postgres
+# set DATABASE_* and JWT_SECRET
+./mvnw spring-boot:run    # or: mvn spring-boot:run
 ```
 
----
+```bash
+cd frontend && npm install && npm run dev
+```
 
-## License / ownership
-
-Project: **Quiz Bot by Pusparghya**
-
-See [SECURITY.md](./SECURITY.md) for security hardening details.
+## License
+MIT — see [LICENSE](./LICENSE).

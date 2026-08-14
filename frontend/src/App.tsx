@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { api, getToken, clearToken } from './api';
+import { api, getToken, setToken, clearToken, logoutApi } from './api';
 import type { Exam, Attempt, SystemSettings, AuditLog, Student } from './types';
 import {
   IconHome, IconExam, IconResults, IconSettings, IconBell, IconLogout
@@ -17,7 +17,8 @@ import { NotifyHost } from './components/NotifyHost';
 type Tab = 'home' | 'exams' | 'results' | 'settings';
 
 export default function App() {
-  const [authed, setAuthed] = useState(!!getToken());
+  const [authed, setAuthed] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [tab, setTab] = useState<Tab>('home');
   const [loading, setLoading] = useState(false);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -51,6 +52,31 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api('/api/auth/me');
+        if (!cancelled && res.ok) {
+          setToken('1');
+          setAuthed(true);
+        } else if (!cancelled) {
+          clearToken();
+          setAuthed(false);
+        }
+      } catch {
+        if (!cancelled) {
+          clearToken();
+          setAuthed(false);
+        }
+      } finally {
+        if (!cancelled) setAuthReady(true);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -128,7 +154,7 @@ export default function App() {
             </div>
             <button
               type="button"
-              onClick={() => { clearToken(); setAuthed(false); }}
+              onClick={async () => { await logoutApi(); setAuthed(false); }}
               className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition"
               aria-label="Logout"
             >
