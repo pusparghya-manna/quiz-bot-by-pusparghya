@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { api, setToken } from '../api';
-import { inp, btnP } from '../styles/ui';
+import { inp, btnP, card } from '../styles/ui';
 import { IconEye, IconEyeOff, IconUser } from '../icons';
 
 export function Login({ onOk }: { onOk: () => void }) {
