@@ -163,8 +163,16 @@ quiz-bot-by-pusparghya/
 │   └── .env.example
 ├── frontend/
 │   ├── public/favicon.png
-│   ├── src/                 # React teacher dashboard
-│   └── vercel.json          # /api proxy → Railway
+│   ├── src/
+│   │   ├── App.tsx              # shell: auth, nav, layout
+│   │   ├── api.ts               # fetch helper
+│   │   ├── types.ts
+│   │   ├── icons.tsx
+│   │   ├── styles/ui.ts         # shared CSS class tokens
+│   │   ├── lib/                 # pure helpers (time, notifs, students)
+│   │   ├── components/          # Login, NotifPanel, ui/*
+│   │   └── pages/               # Home, Exams, Results, Settings
+│   └── vercel.json
 ├── SECURITY.md
 └── README.md
 ```
