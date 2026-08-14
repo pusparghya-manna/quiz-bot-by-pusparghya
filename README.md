@@ -43,25 +43,6 @@ Root directory: `backend`
 - Teachers can also **Register** from the dashboard login page.
 - Bot token & bot username are **developer-only** (not editable in the teacher UI).
 
-Example (`backend/.env.example`):
-
-```env
-PORT=3000
-TELEGRAM_BOT_TOKEN=
-TURSO_DATABASE_URL=
-TURSO_AUTH_TOKEN=
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-flash-latest
-JWT_SECRET=change-this-to-a-long-random-string
-
-# Optional seed teacher (Railway secrets only)
-TEACHER_USERNAME=
-TEACHER_PASSWORD=
-TEACHER_NAME=
-```
-
----
-
 ### Frontend (Vercel)
 
 Root directory: `frontend`
