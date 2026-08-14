@@ -142,39 +142,4 @@ npm run dev            # Vite proxies /api → localhost:3000
 
 Project: **Quiz Bot by Pusparghya**
 
-
----
-
-## Project structure
-
-```text
-quiz-bot-by-pusparghya/
-├── backend/
-│   ├── src/
-│   │   ├── config/          # env, CORS allowlist
-│   │   ├── middleware/      # rate limit, validation helpers
-│   │   ├── services/        # Gemini OCR
-│   │   ├── telegram/        # bot handlers + polling
-│   │   ├── auth.ts          # teachers, JWT, bcrypt
-│   │   ├── db.ts            # Turso client
-│   │   ├── store.ts         # app data persistence
-│   │   ├── types.ts
-│   │   └── index.ts         # HTTP routes + bootstrap
-│   └── .env.example
-├── frontend/
-│   ├── public/favicon.png
-│   ├── src/
-│   │   ├── App.tsx              # shell: auth, nav, layout
-│   │   ├── api.ts               # fetch helper
-│   │   ├── types.ts
-│   │   ├── icons.tsx
-│   │   ├── styles/ui.ts         # shared CSS class tokens
-│   │   ├── lib/                 # pure helpers (time, notifs, students)
-│   │   ├── components/          # Login, NotifPanel, ui/*
-│   │   └── pages/               # Home, Exams, Results, Settings
-│   └── vercel.json
-├── SECURITY.md
-└── README.md
-```
-
 See [SECURITY.md](./SECURITY.md) for security hardening details.
