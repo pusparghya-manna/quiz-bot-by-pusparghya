@@ -7,6 +7,7 @@ import { Sheet } from '../components/ui/Sheet';
 import { Badge } from '../components/ui/Badge';
 import { toDatetimeLocalIST, fromDatetimeLocalIST, formatIST } from '../lib/time';
 import { emptyQuestion } from '../lib/exam';
+import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconUpload, IconShare, IconInfo,
   IconCalendar, IconCopy, IconFileText, IconSparkles, IconClose, IconSearch,
@@ -39,16 +40,10 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
     const link = examLink(id);
     setShareLink(link);
     try {
-      if (navigator.share) {
-        await navigator.share({ title: 'Exam link', text: 'Join this exam:', url: link });
-        return;
-      }
-    } catch { /* user cancelled share */ }
-    try {
       await navigator.clipboard.writeText(link);
-      alert('Exam link copied!\n\n' + link);
+      toastSuccess('Link copied — share panel below');
     } catch {
-      prompt('Copy this exam link for students:', link);
+      toast('Link ready below — select and copy');
     }
   };
 
@@ -88,8 +83,8 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
   };
 
   const saveExam = async () => {
-    if (!form.title.trim()) return alert('Title required');
-    if (qs.length === 0) return alert('Add at least one question');
+    if (!form.title.trim()) return toastError('Title required');
+    if (qs.length === 0) return toastError('Add at least one question');
     setSaving(true);
     try {
       const body = {
@@ -124,14 +119,14 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
         setTimeout(() => copyLink(String(newId)), 300);
       }
     } catch (e: any) {
-      alert(e.message || 'Failed to save');
+      toastError(e.message || 'Failed to save');
     } finally {
       setSaving(false);
     }
   };
 
   const delExam = async (id: string) => {
-    if (!confirm('Delete this exam?')) return;
+    if (!(await confirmAsync('Delete this exam?'))) return;
     await api(`/api/exams/${id}`, { method: 'DELETE' });
     onRefresh();
   };
@@ -143,7 +138,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
   };
 
   const saveManualQ = () => {
-    if (!editQ || !editQ.question.trim()) return alert('Question text required');
+    if (!editQ || !editQ.question.trim()) return toastError('Question text required');
     setQs((prev) => {
       const i = prev.findIndex((x) => x.id === editQ.id);
       if (i >= 0) { const n = [...prev]; n[i] = editQ; return n; }
@@ -173,7 +168,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
       setToast(`Added ${mapped.length} questions`);
       setTimeout(() => setToast(''), 2000);
     } catch {
-      alert('Invalid JSON');
+      toastError('Invalid JSON');
     }
   };
 
@@ -209,7 +204,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
       setToast(`OCR added ${mapped.length} questions — please review`);
       setTimeout(() => setToast(''), 3000);
     } catch (e: any) {
-      alert(e.message || 'OCR failed');
+      toastError(e.message || 'OCR failed');
     } finally {
       setOcrBusy(false);
     }
@@ -237,12 +232,31 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
         )}
       </div>
       {shareLink && (
-        <div className="rounded-xl bg-blue-50 border border-blue-100 p-3 text-xs">
-          <div className="flex items-center gap-1.5 font-semibold text-blue-800 mb-1">
-            <IconShare className="w-3.5 h-3.5" /> Student exam link
+        <div className="rounded-xl bg-blue-50 border border-blue-100 p-3 text-xs space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 font-semibold text-blue-800">
+              <IconShare className="w-3.5 h-3.5" /> Student exam link
+            </div>
+            <button type="button" className="text-[10px] font-bold text-slate-500 px-2 py-1 rounded-md hover:bg-white/80" onClick={() => setShareLink('')}>Close</button>
           </div>
-          <a href={shareLink} className="text-blue-600 underline break-all" target="_blank" rel="noreferrer">{shareLink}</a>
-          <p className="text-[10px] text-blue-700/80 mt-1 flex items-center gap-1"><IconInfo className="w-3 h-3 shrink-0" />Share this with students. Only this link starts the exam.</p>
+          <div className="bg-white rounded-lg border border-blue-100 px-2.5 py-2 break-all text-blue-700 font-medium select-all">{shareLink}</div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={btnP + ' flex-1 !py-1.5 text-[11px]'}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(shareLink);
+                  toastSuccess('Copied to clipboard');
+                } catch {
+                  toastError('Could not copy — select the link and copy manually');
+                }
+              }}
+            >
+              <IconCopy className="w-3.5 h-3.5" /> Copy link
+            </button>
+          </div>
+          <p className="text-[10px] text-blue-700/80 flex items-center gap-1"><IconInfo className="w-3 h-3 shrink-0" />Share this with students. Only this link starts the exam.</p>
         </div>
       )}
 

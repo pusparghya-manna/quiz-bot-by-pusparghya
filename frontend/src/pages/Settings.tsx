@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { SystemSettings, AuditLog } from '../types';
 import { api } from '../api';
+import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import { inp, btnP, card } from '../styles/ui';
 import { Field } from '../components/ui/Field';
 import { SectionTitle } from '../components/ui/SectionTitle';
@@ -22,26 +23,26 @@ export function Settings({ settings, logs, onRefresh }: { settings: SystemSettin
       if (!res.ok) res = await api('/api/settings', { method: 'POST', body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('Save failed');
       onRefresh();
-      alert('Saved');
+      toastSuccess('Saved');
     } catch (e: any) {
-      alert(e.message || 'Failed');
+      toastError(e.message || 'Failed');
     } finally {
       setBusy(false);
     }
   };
 
   const sendBroadcast = async () => {
-    if (!broadcast.trim()) return alert('Enter a message');
-    if (!confirm('Send to all students via the bot?')) return;
+    if (!broadcast.trim()) return toastError('Enter a message');
+    if (!(await confirmAsync('Send to all students via the bot?'))) return;
     setBcastBusy(true);
     try {
       const res = await api('/api/broadcast', { method: 'POST', body: JSON.stringify({ message: broadcast.trim() }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
-      alert(`Sent to ${data.sent} students` + (data.failed ? ` (${data.failed} failed)` : ''));
+      toastSuccess(`Sent to ${data.sent} students` + (data.failed ? ` (${data.failed} failed)` : ''));
       setBroadcast('');
     } catch (e: any) {
-      alert(e.message || 'Broadcast failed');
+      toastError(e.message || 'Broadcast failed');
     } finally {
       setBcastBusy(false);
     }

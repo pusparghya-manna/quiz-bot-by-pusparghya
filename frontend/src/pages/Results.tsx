@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Exam, Attempt, Student } from '../types';
 import { api } from '../api';
+import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import { inp, btnP, btnS, btnD, card } from '../styles/ui';
 import { Sheet } from '../components/ui/Sheet';
 import {
@@ -38,18 +39,18 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
     const res = await api(`/api/attempts/${attemptId}/detail`);
     const data = await res.json();
     if (res.ok) { setDetail(data); setDmText(''); }
-    else alert(data.error || 'Failed');
+    else toastError(data.error || 'Failed');
   };
 
   const removeAttempt = async (id: string) => {
-    if (!confirm('Remove from results?')) return;
+    if (!(await confirmAsync('Remove from results?'))) return;
     await api(`/api/attempts/${id}`, { method: 'DELETE' });
     setDetail(null);
     onRefresh();
   };
 
   const removeStudent = async (studentId: string) => {
-    if (!confirm('Delete student and all attempts?')) return;
+    if (!(await confirmAsync('Delete student and all attempts?'))) return;
     await api(`/api/students/${studentId}`, { method: 'DELETE' });
     setDetail(null);
     onRefresh();
@@ -64,9 +65,9 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
     const text = lines.join('\n');
     try {
       await navigator.clipboard.writeText(text);
-      alert('Copied results text');
+      toastSuccess('Copied results text');
     } catch {
-      prompt('Copy:', text);
+      toastError('Could not copy automatically');
     }
   };
 
@@ -98,16 +99,16 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   };
 
   const sendDm = async (telegramUserId: number) => {
-    if (!dmText.trim()) return alert('Enter a message');
+    if (!dmText.trim()) return toastError('Enter a message');
     setDmBusy(true);
     try {
       const res = await api('/api/message', { method: 'POST', body: JSON.stringify({ telegramUserId, message: dmText.trim() }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Send failed');
-      alert('Message sent via bot');
+      toastSuccess('Message sent via bot');
       setDmText('');
     } catch (e: any) {
-      alert(e.message || 'Failed');
+      toastError(e.message || 'Failed');
     } finally {
       setDmBusy(false);
     }

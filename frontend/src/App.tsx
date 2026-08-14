@@ -12,6 +12,7 @@ import { Results } from './pages/Results';
 import { Settings } from './pages/Settings';
 import { buildNotifications } from './lib/notifications';
 import { dedupeStudents } from './lib/students';
+import { NotifyHost } from './components/NotifyHost';
 
 type Tab = 'home' | 'exams' | 'results' | 'settings';
 
@@ -87,6 +88,7 @@ export default function App() {
 
   return (
     <div className="min-h-full flex flex-col">
+      <NotifyHost />
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200/80">
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
         <div className="max-w-3xl mx-auto px-4 h-12 flex items-center justify-between">
