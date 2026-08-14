@@ -11,16 +11,22 @@ function required(name: string, fallback?: string): string {
 
 const isProd = process.env.NODE_ENV === 'production' || !!process.env.RAILWAY_ENVIRONMENT;
 
-/** JWT secret — weak default only allowed outside production */
+/** JWT secret — production refuses to start without a strong secret */
 export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET || '';
   if (secret.length >= 24) return secret;
   if (isProd) {
-    console.error('[security] JWT_SECRET must be set to a long random string in production');
-    // Still run but use a process-unique secret so tokens don't work across restarts with empty env
-    return `unsafe-prod-${process.pid}-${Date.now()}`;
+    console.error('[security] FATAL: JWT_SECRET must be set to a long random string (≥24 chars) in production');
+    process.exit(1);
   }
   return secret || 'dev-only-jwt-secret-change-me';
+}
+
+/** Call at boot so production fails fast before accepting traffic */
+export function assertSecureConfig(): void {
+  if (isProd) {
+    getJwtSecret(); // exits if invalid
+  }
 }
 
 export const env = {
@@ -44,6 +50,7 @@ export const env = {
   maxOcrBase64Chars: Number(process.env.MAX_OCR_BASE64_CHARS) || 10_000_000,
   maxMessageLength: Number(process.env.MAX_MESSAGE_LENGTH) || 3500,
   enableDangerousReseed: process.env.ENABLE_RESEED === 'true',
+  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || '',
 };
 
 export function corsOriginDelegate(

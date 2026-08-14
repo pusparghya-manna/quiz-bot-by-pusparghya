@@ -6,6 +6,8 @@ export interface Question {
   id: string;
   examId?: string;
   bankId?: string;
+  /** Owning teacher for question-bank items */
+  teacherId?: string;
   question: string;
   options: string[];
   answer: number | null;

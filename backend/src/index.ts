@@ -1,9 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { env, corsOriginDelegate } from './config/env.js';
+import { env, corsOriginDelegate, assertSecureConfig } from './config/env.js';
 import { rateLimit } from './middleware/rateLimit.js';
-import { clampStr } from './middleware/validate.js';
+import { clampStr, csvCell } from './middleware/validate.js';
+import { requireTeacher, getOwnedExam, ownsExam, studentBelongsToTeacher, attemptBelongsToTeacher, questionBelongsToTeacher } from './middleware/ownership.js';
 import { initDb } from './db.js';
 import { loginTeacher, registerTeacher, authMiddleware, ensureTeachersTable } from './auth.js';
 import { store } from './store.js';
@@ -122,7 +123,9 @@ async function startServer() {
   });
 
   app.get('/api/stats', (req, res) => {
-    const exams = store.getExams();
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    const exams = store.getExams().filter((e: any) => e.teacherId === teacherId);
     const students = store.getStudents();
     const attempts = store.getAttempts();
 
@@ -150,7 +153,9 @@ async function startServer() {
 
   // 2. Exams Management
   app.get('/api/exams', (req, res) => {
-    let exams = store.getExams();
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    let exams = store.getExams().filter((e: any) => e.teacherId === teacherId);
     const { className, status } = req.query;
 
     if (className) {
@@ -164,7 +169,9 @@ async function startServer() {
   });
 
   app.get('/api/exams/:id', (req, res) => {
-    const exam = store.getExamById(req.params.id);
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    const exam = getOwnedExam(req.params.id, teacherId);
     if (!exam) {
       return res.status(404).json({ error: 'Exam not found' });
     }
@@ -172,14 +179,16 @@ async function startServer() {
     res.json({ exam, attempts });
   });
 
-  app.post('/api/exams', (req, res) => {
+  app.post('/api/exams', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const data = req.body;
     const now = new Date().toISOString();
 
     const teacher = (req as any).teacher;
     const newExam: Exam = {
       id: `EXAM_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      teacherId: teacher?.username || data.teacherId,
+      teacherId,
       title: data.title || 'Untitled Examination',
       subject: data.subject || 'General',
       className: data.className || 'Class 10-A Biology',
@@ -199,56 +208,54 @@ async function startServer() {
       updatedAt: now
     };
 
-    store.saveExam(newExam);
-    store.addAuditLog('EXAM_CREATED', `Created exam "${newExam.title}" for ${newExam.className}`);
+    await store.saveExam(newExam);
+    await store.addAuditLog('EXAM_CREATED', `Created exam "${newExam.title}" for ${newExam.className}`, teacherId);
     res.json(newExam);
   });
 
-  app.put('/api/exams/:id', (req, res) => {
+  app.put('/api/exams/:id', async (req, res) => {
     const exam = store.getExamById(req.params.id);
     if (!exam) {
       return res.status(404).json({ error: 'Exam not found' });
     }
-    const teacher = (req as any).teacher;
-    if (exam.teacherId && teacher?.username && exam.teacherId !== teacher.username) {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    if (exam.teacherId && exam.teacherId !== teacherId) {
       return res.status(403).json({ error: 'Not your exam' });
     }
 
     const updated: Exam = {
       ...exam,
       ...req.body,
-      teacherId: exam.teacherId || (req as any).teacher?.username,
+      teacherId: exam.teacherId || teacherId,
+      id: exam.id,
       totalQuestions: req.body.questions ? req.body.questions.length : exam.totalQuestions,
       updatedAt: new Date().toISOString()
     };
 
-    store.saveExam(updated);
-    store.addAuditLog('EXAM_UPDATED', `Updated exam "${updated.title}" (${updated.status})`);
+    await store.saveExam(updated);
+    await store.addAuditLog('EXAM_UPDATED', `Updated exam "${updated.title}" (${updated.status})`, teacherId);
     res.json(updated);
   });
 
-  app.delete('/api/exams/:id', (req, res) => {
-    const exam = store.getExamById(req.params.id);
-    if (exam) {
-      const teacher = (req as any).teacher;
-      if (exam.teacherId && teacher?.username && exam.teacherId !== teacher.username) {
-        return res.status(403).json({ error: 'Not your exam' });
-      }
-      store.deleteExam(req.params.id);
-      store.addAuditLog('EXAM_DELETED', `Deleted exam "${exam.title}"`);
-      return res.json({ success: true });
-    }
-    res.status(404).json({ error: 'Exam not found' });
+  app.delete('/api/exams/:id', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    const exam = getOwnedExam(req.params.id, teacherId);
+    if (!exam) return res.status(404).json({ error: 'Exam not found' });
+    await store.deleteExam(req.params.id);
+    await store.addAuditLog('EXAM_DELETED', `Deleted exam "${exam.title}"`, teacherId);
+    return res.json({ success: true });
   });
 
-  app.post('/api/exams/:id/recalculate', (req, res) => {
-    const exam = store.getExamById(req.params.id);
-    if (!exam) {
-      return res.status(404).json({ error: 'Exam not found' });
-    }
+  app.post('/api/exams/:id/recalculate', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    const exam = getOwnedExam(req.params.id, teacherId);
+    if (!exam) return res.status(404).json({ error: 'Exam not found' });
 
     const attempts = store.getAttempts(exam.id);
-    attempts.forEach((att) => {
+    for (const att of attempts) {
       const stats = calculateAttemptScore(exam, att.answers, att.timeTakenSeconds);
       att.score = stats.score;
       att.maxScore = stats.maxScore;
@@ -256,23 +263,29 @@ async function startServer() {
       att.correctCount = stats.correctCount;
       att.wrongCount = stats.wrongCount;
       att.skippedCount = stats.skippedCount;
-      store.saveAttempt(att);
-    });
+      await store.saveAttempt(att);
+    }
 
     updateExamRanks(exam.id);
-    store.addAuditLog('EXAM_RECALCULATED', `Recalculated scores and rankings for ${exam.title}`);
+    await store.addAuditLog('EXAM_RECALCULATED', `Recalculated scores and rankings for ${exam.title}`, teacherId);
     res.json({ success: true, count: attempts.length });
   });
 
   // 3. Question Bank
   app.get('/api/questions', (req, res) => {
-    res.json(store.getQuestionBank());
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    const qs = store.getQuestionBank().filter((q: any) => q.teacherId === teacherId);
+    res.json(qs);
   });
 
-  app.post('/api/questions', (req, res) => {
+  app.post('/api/questions', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const qData = req.body;
     const newQuestion: Question = {
       id: `QB_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      teacherId,
       question: qData.question,
       options: qData.options || ['Option A', 'Option B', 'Option C', 'Option D'],
       answer: qData.answer !== undefined ? qData.answer : null,
@@ -282,35 +295,45 @@ async function startServer() {
       explanation: qData.explanation
     };
 
-    store.saveQuestion(newQuestion);
-    store.addAuditLog('QUESTION_ADDED', `Added question to bank: "${newQuestion.question.substring(0, 40)}..."`);
+    await store.saveQuestion(newQuestion);
+    await store.addAuditLog('QUESTION_ADDED', `Added question to bank: "${newQuestion.question.substring(0, 40)}..."`, teacherId);
     res.json(newQuestion);
   });
 
-  app.put('/api/questions/:id', (req, res) => {
+  app.put('/api/questions/:id', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const q = store.getQuestionBank().find(item => item.id === req.params.id);
-    if (!q) return res.status(404).json({ error: 'Question not found' });
-    const updated = { ...q, ...req.body };
-    store.saveQuestion(updated);
+    if (!q || !questionBelongsToTeacher(q, teacherId)) return res.status(404).json({ error: 'Question not found' });
+    const updated = { ...q, ...req.body, teacherId, id: q.id };
+    await store.saveQuestion(updated);
     res.json(updated);
   });
 
-  app.delete('/api/questions/:id', (req, res) => {
-    store.deleteQuestion(req.params.id);
+  app.delete('/api/questions/:id', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    const q = store.getQuestionBank().find(item => item.id === req.params.id);
+    if (!q || !questionBelongsToTeacher(q, teacherId)) return res.status(404).json({ error: 'Question not found' });
+    await store.deleteQuestion(req.params.id);
     res.json({ success: true });
   });
 
   // 4. JSON Import
-  app.post('/api/questions/import-json', (req, res) => {
+  app.post('/api/questions/import-json', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const { questions } = req.body;
     if (!Array.isArray(questions)) {
       return res.status(400).json({ error: 'Payload must contain a "questions" array.' });
     }
 
     const imported: Question[] = [];
-    questions.forEach((q: any, idx: number) => {
+    for (let idx = 0; idx < questions.length; idx++) {
+      const q = questions[idx];
       const formatted: Question = {
         id: `QB_${Date.now()}_${idx}_${Math.floor(Math.random() * 1000)}`,
+        teacherId,
         question: q.question || `Question ${idx + 1}`,
         options: Array.isArray(q.options) ? q.options : ['Option A', 'Option B', 'Option C', 'Option D'],
         answer: q.answer !== undefined && q.answer !== null ? Number(q.answer) : null,
@@ -318,16 +341,17 @@ async function startServer() {
         negativeMarks: Number(q.negativeMarks) || 0,
         subject: q.subject || 'General'
       };
-      store.saveQuestion(formatted);
+      await store.saveQuestion(formatted);
       imported.push(formatted);
-    });
+    }
 
-    store.addAuditLog('JSON_IMPORTED', `Imported ${imported.length} questions via JSON format`);
+    await store.addAuditLog('JSON_IMPORTED', `Imported ${imported.length} questions via JSON format`, teacherId);
     res.json({ success: true, count: imported.length, questions: imported });
   });
 
   // 5. OCR Import via Gemini 3.6 Flash
-  app.post('/api/ocr/parse', async (req, res) => {
+  const ocrLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, keyFn: (req) => `ocr:${(req as any).teacher?.username || req.ip}` });
+  app.post('/api/ocr/parse', ocrLimiter, async (req, res) => {
     try {
       const { fileBase64, mimeType } = req.body;
       if (!fileBase64 || typeof fileBase64 !== 'string') {
@@ -381,7 +405,9 @@ async function startServer() {
     res.json(students);
   });
 
-  app.post('/api/students', (req, res) => {
+  app.post('/api/students', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const data = req.body;
     const newStudent: Student = {
       id: `STU_${Date.now()}`,
@@ -391,47 +417,56 @@ async function startServer() {
       telegramUserId: data.telegramUserId ? Number(data.telegramUserId) : null,
       telegramUsername: data.telegramUsername || null,
       linkCode: `LINK-${Math.floor(10000 + Math.random() * 90000)}`,
-      status: data.telegramUserId ? 'linked' : 'unlinked'
+      status: data.telegramUserId ? 'linked' : 'unlinked',
+      teacherIds: [teacherId]
     };
 
-    store.saveStudent(newStudent);
-    store.addAuditLog('STUDENT_CREATED', `Added student ${newStudent.name} (${newStudent.studentId})`);
+    await store.saveStudent(newStudent);
+    await store.addAuditLog('STUDENT_CREATED', `Added student ${newStudent.name} (${newStudent.studentId})`, teacherId);
     res.json(newStudent);
   });
 
-  app.put('/api/students/:id', (req, res) => {
+  app.put('/api/students/:id', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const student = store.getStudentById(req.params.id);
-    if (!student) return res.status(404).json({ error: 'Student not found' });
-    const updated = { ...student, ...req.body };
-    store.saveStudent(updated);
+    if (!student || !studentBelongsToTeacher(student, teacherId)) return res.status(404).json({ error: 'Student not found' });
+    const updated = { ...student, ...req.body, id: student.id, teacherIds: student.teacherIds };
+    await store.saveStudent(updated);
     res.json(updated);
   });
 
-  app.delete('/api/students/:id', (req, res) => {
+  app.delete('/api/students/:id', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const student = store.getStudentById(req.params.id);
-    if (!student) return res.status(404).json({ error: 'Student not found' });
-    // collect exam ids for re-rank
+    if (!student || !studentBelongsToTeacher(student, teacherId)) return res.status(404).json({ error: 'Student not found' });
+    const myExamIds = new Set(store.getExams().filter((e: any) => e.teacherId === teacherId).map((e: any) => e.id));
     const examIds = [...new Set(store.getAttempts().filter(a =>
-      a.studentId === student.studentId || a.telegramUserId === student.telegramUserId
+      myExamIds.has(a.examId) && (a.studentId === student.studentId || a.telegramUserId === student.telegramUserId)
     ).map(a => a.examId))];
-    store.deleteStudent(student.id);
+    await store.deleteStudent(student.id);
     examIds.forEach(id => updateExamRanks(id));
-    store.addAuditLog('STUDENT_DELETED', `Removed student ${student.name}`);
+    await store.addAuditLog('STUDENT_DELETED', `Removed student ${student.name}`, teacherId);
     res.json({ success: true });
   });
 
-  app.delete('/api/attempts/:id', (req, res) => {
+  app.delete('/api/attempts/:id', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const att = store.getAttempts().find(a => a.id === req.params.id);
-    if (!att) return res.status(404).json({ error: 'Attempt not found' });
-    store.deleteAttempt(att.id);
+    if (!att || !attemptBelongsToTeacher(att, teacherId)) return res.status(404).json({ error: 'Attempt not found' });
+    await store.deleteAttempt(att.id);
     updateExamRanks(att.examId);
-    store.addAuditLog('ATTEMPT_DELETED', `Removed attempt ${att.id} for ${att.studentName}`);
+    await store.addAuditLog('ATTEMPT_DELETED', `Removed attempt ${att.id} for ${att.studentName}`, teacherId);
     res.json({ success: true });
   });
 
   app.get('/api/attempts/:id/detail', (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const att = store.getAttempts().find(a => a.id === req.params.id);
-    if (!att) return res.status(404).json({ error: 'Attempt not found' });
+    if (!att || !attemptBelongsToTeacher(att, teacherId)) return res.status(404).json({ error: 'Attempt not found' });
     const exam = store.getExamById(att.examId);
     const breakdown = (exam?.questions || []).map((q, idx) => {
       const selected = att.answers[q.id];
@@ -455,26 +490,35 @@ async function startServer() {
     res.json({ attempt: att, exam: exam ? { id: exam.id, title: exam.title, totalQuestions: exam.totalQuestions } : null, breakdown });
   });
 
-  app.post('/api/students/:id/reset-attempt', (req, res) => {
+  app.post('/api/students/:id/reset-attempt', async (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const { examId } = req.body;
     const student = store.getStudentById(req.params.id);
-    if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (!student || !studentBelongsToTeacher(student, teacherId)) return res.status(404).json({ error: 'Student not found' });
+    if (examId && !getOwnedExam(String(examId), teacherId)) return res.status(404).json({ error: 'Exam not found' });
 
-    const attempts = store.getAttempts(examId).filter(a => a.studentId === student.studentId);
-    attempts.forEach(att => store.deleteAttempt(att.id));
+    const attempts = store.getAttempts(examId).filter(a =>
+      a.studentId === student.studentId || a.telegramUserId === student.telegramUserId
+    );
+    for (const att of attempts) await store.deleteAttempt(att.id);
 
     if (examId) updateExamRanks(examId);
 
-    store.addAuditLog('ATTEMPT_RESET', `Reset attempt for student ${student.name} on exam ${examId || 'all'}`);
+    await store.addAuditLog('ATTEMPT_RESET', `Reset attempt for student ${student.name} on exam ${examId || 'all'}`, teacherId);
     res.json({ success: true, resetCount: attempts.length });
   });
 
   // 7. Results & CSV Export
   app.get('/api/results', (req, res) => {
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
     const { examId, className } = req.query;
-    let attempts = store.getAttempts();
+    const myExamIds = new Set(store.getExams().filter((e: any) => e.teacherId === teacherId).map((e: any) => e.id));
+    let attempts = store.getAttempts().filter(a => myExamIds.has(a.examId));
 
     if (examId) {
+      if (!myExamIds.has(String(examId))) return res.status(404).json({ error: 'Exam not found' });
       attempts = attempts.filter(a => a.examId === examId);
     }
     if (className) {
@@ -492,6 +536,7 @@ async function startServer() {
     );
     let attempts = store.getAttempts().filter(a => myExamIds.has(a.examId));
     if (examId) {
+      if (!myExamIds.has(String(examId))) return res.status(404).json({ error: 'Exam not found' });
       attempts = attempts.filter(a => a.examId === String(examId));
     }
 
@@ -503,7 +548,22 @@ async function startServer() {
     attempts.forEach((a, i) => {
       const stu = store.getStudents().find(s => s.studentId === a.studentId || s.telegramUserId === a.telegramUserId);
       const tg = stu?.telegramUsername || '';
-      csv += `"${a.rank || i + 1}","${a.studentId}","${a.studentName}","${a.studentClass}","${tg}","${a.status}",${a.score},${a.maxScore},${a.percentage},${a.correctCount},${a.wrongCount},${a.skippedCount},${a.timeTakenSeconds},"${a.submittedAt || ''}"\n`;
+      csv += [
+        csvCell(a.rank || i + 1),
+        csvCell(a.studentId),
+        csvCell(a.studentName),
+        csvCell(a.studentClass),
+        csvCell(tg),
+        csvCell(a.status),
+        csvCell(a.score),
+        csvCell(a.maxScore),
+        csvCell(a.percentage),
+        csvCell(a.correctCount),
+        csvCell(a.wrongCount),
+        csvCell(a.skippedCount),
+        csvCell(a.timeTakenSeconds),
+        csvCell(a.submittedAt || '')
+      ].join(',') + '\n';
     });
 
     res.setHeader('Content-Type', 'text/csv');
@@ -628,6 +688,9 @@ async function startServer() {
 
   // 10. Telegram Webhook & In-Dashboard Simulator
   app.post('/api/telegram/simulate', async (req, res) => {
+    if (env.isProd) {
+      return res.status(403).json({ error: 'Simulator disabled in production' });
+    }
     try {
       const update = req.body;
       const result = await processTelegramUpdate(update);
@@ -640,6 +703,12 @@ async function startServer() {
 
   app.post('/api/telegram/webhook', async (req, res) => {
     try {
+      if (env.telegramWebhookSecret) {
+        const hdr = String(req.headers['x-telegram-bot-api-secret-token'] || '');
+        if (hdr !== env.telegramWebhookSecret) {
+          return res.status(401).json({ error: 'Invalid webhook secret' });
+        }
+      }
       const update = req.body;
       const result = await processTelegramUpdate(update);
       if (result) {
@@ -648,7 +717,7 @@ async function startServer() {
       res.json({ ok: true });
     } catch (err: any) {
       console.error('Telegram webhook error:', err);
-      res.status(200).json({ ok: true }); // Return 200 OK to Telegram webhook always
+      res.status(200).json({ ok: true });
     }
   });
 
@@ -659,6 +728,7 @@ async function startServer() {
 }
 
 async function main() {
+  assertSecureConfig();
   await initDb();
   await ensureTeachersTable();
   await store.init();

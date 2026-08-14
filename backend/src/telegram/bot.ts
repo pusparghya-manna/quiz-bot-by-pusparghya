@@ -1,4 +1,5 @@
 import { store } from '../store.js';
+import { escapeMd } from '../middleware/validate.js';
 import {
   TelegramUpdate,
   TelegramUser,
@@ -512,8 +513,14 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
     };
   }
 
-  // Bind student to this exam's teacher (multi-tenant isolation)
-  linkStudentToTeacher(student, exam.teacherId);
+  // Require a valid teacher-owned exam (blocks orphaned / unauthorized exams)
+  if (!exam.teacherId) {
+    return {
+      chatId: user.id,
+      text: `❌ This exam is not available.`,
+      type: 'sendMessage'
+    };
+  }
 
   const startDate = new Date(exam.startDate);
   if (now < startDate) {
@@ -531,6 +538,9 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
       type: 'sendMessage'
     };
   }
+
+  // Enroll only when student is allowed past the lock checks (authorized access)
+  linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   const allMine = store.getStudentAttempts(examId, student.telegramUserId!);
@@ -620,6 +630,9 @@ function handleOptionSelect(examId: string, qIdx: number, optIdx: number, studen
     return { chatId: user.id, text: '❌ Examination not found. Please type /exams to see available tests.', type: 'sendMessage' };
   }
 
+  // Enroll only when student is allowed past the lock checks (authorized access)
+  linkStudentToTeacher(student, exam.teacherId);
+
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
     const startRes = handleStartOrResumeExam(examId, student, user);
@@ -654,6 +667,9 @@ function renderQuestionView(examId: string, qIdx: number, student: Student, user
   if (!exam) {
     return { chatId: user.id, text: '❌ Examination not found. Please type /exams to see available tests.', type: 'sendMessage' };
   }
+
+  // Enroll only when student is allowed past the lock checks (authorized access)
+  linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
@@ -733,6 +749,9 @@ function renderQuestionGrid(examId: string, student: Student, user: TelegramUser
   if (!exam) {
     return { chatId: user.id, text: '❌ Examination not found.', type: 'sendMessage' };
   }
+
+  // Enroll only when student is allowed past the lock checks (authorized access)
+  linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
