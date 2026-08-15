@@ -103,6 +103,8 @@ public class TursoImportController {
     }
 
     int examCount = 0, questionCount = 0;
+    // wipe prior imported exam questions so options are fully replaced
+    jdbc.update("DELETE FROM questions WHERE teacher_id = ?", teacher);
     JsonNode exams = byKey.get("default|exams");
     if (exams != null && exams.isArray()) {
       for (JsonNode e : exams) {

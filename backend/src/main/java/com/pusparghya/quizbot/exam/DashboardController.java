@@ -1,5 +1,6 @@
 package com.pusparghya.quizbot.exam;
 
+import com.pusparghya.quizbot.question.QuestionEntity;
 import com.pusparghya.quizbot.question.QuestionRepository;
 import com.pusparghya.quizbot.security.TeacherPrincipal;
 import com.pusparghya.quizbot.settings.SystemSettingsService;
@@ -22,12 +23,18 @@ public class DashboardController {
   private final ExamService examService;
   private final AttemptRepository attempts;
   private final StudentRepository students;
+  private final QuestionRepository questions;
   private final SystemSettingsService settings;
 
   public DashboardController(ExamRepository exams, ExamService examService, AttemptRepository attempts,
-                             StudentRepository students, SystemSettingsService settings) {
-    this.exams = exams; this.examService = examService; this.attempts = attempts;
-    this.students = students; this.settings = settings;
+                             StudentRepository students, QuestionRepository questions,
+                             SystemSettingsService settings) {
+    this.exams = exams;
+    this.examService = examService;
+    this.attempts = attempts;
+    this.students = students;
+    this.questions = questions;
+    this.settings = settings;
   }
 
   @GetMapping("/data")
@@ -41,15 +48,36 @@ public class DashboardController {
         .filter(s -> (s.getTeacherIds() != null && s.getTeacherIds().contains(teacherId))
             || (s.getTelegramUserId() != null && tg.contains(s.getTelegramUserId())))
         .toList();
-    // dedupe by telegram
     Map<String, StudentEntity> dedup = new LinkedHashMap<>();
     for (StudentEntity s : stus) {
       String key = s.getTelegramUserId() != null ? "tg:" + s.getTelegramUserId() : "id:" + s.getId();
       dedup.putIfAbsent(key, s);
     }
+
+    List<Map<String, Object>> examMaps = new ArrayList<>();
+    List<Map<String, Object>> allQMaps = new ArrayList<>();
+    for (ExamEntity e : examList) {
+      List<QuestionEntity> qs = questions.findByExamIdOrderBySortOrderAsc(e.getId());
+      examMaps.add(examService.toMap(e, qs));
+      for (QuestionEntity q : qs) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", q.getId());
+        m.put("examId", q.getExamId());
+        m.put("teacherId", q.getTeacherId());
+        m.put("question", q.getQuestion());
+        m.put("options", q.getOptions() != null ? q.getOptions() : List.of());
+        m.put("answer", q.getAnswer());
+        m.put("marks", q.getMarks());
+        m.put("negativeMarks", q.getNegativeMarks());
+        m.put("explanation", q.getExplanation());
+        m.put("subject", q.getSubject());
+        allQMaps.add(m);
+      }
+    }
+
     Map<String, Object> out = new LinkedHashMap<>();
-    out.put("exams", examList.stream().map(e -> examService.toMap(e, List.of())).toList());
-    out.put("questions", List.of());
+    out.put("exams", examMaps);
+    out.put("questions", allQMaps);
     out.put("students", dedup.values().stream().map(this::studentMap).toList());
     out.put("attempts", att);
     out.put("settings", settings.publicView());
