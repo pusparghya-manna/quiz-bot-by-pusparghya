@@ -1,22 +1,28 @@
 /**
- * Same-origin `/api` so Vercel rewrites proxy to Railway.
- * Auth uses httpOnly cookie (`quiz_session`) set by the backend.
- * credentials: 'include' is required for cookie sessions.
+ * Same-origin `/api` — Vercel rewrites proxy to Railway.
+ * Primary auth: Bearer JWT in sessionStorage (works through the proxy).
+ * Optional: httpOnly cookie when the backend sets one (credentials: include).
  */
 const API_BASE = '';
+const TOKEN_KEY = 'quiz_token';
+const AUTH_FLAG = 'quiz_authed';
 
-/** @deprecated Prefer cookie session; kept only for transitional UI state (logged-in flag). */
 export const getToken = () => {
   try {
-    return sessionStorage.getItem('quiz_authed') || '';
+    return sessionStorage.getItem(TOKEN_KEY) || '';
   } catch {
     return '';
   }
 };
 
-export const setToken = (_t: string) => {
+export const setToken = (t: string) => {
   try {
-    sessionStorage.setItem('quiz_authed', '1');
+    if (t && t !== '1') {
+      sessionStorage.setItem(TOKEN_KEY, t);
+    }
+    sessionStorage.setItem(AUTH_FLAG, '1');
+    // clear legacy localStorage copy
+    localStorage.removeItem('quiz_token');
   } catch {
     /* ignore */
   }
@@ -24,8 +30,9 @@ export const setToken = (_t: string) => {
 
 export const clearToken = () => {
   try {
-    sessionStorage.removeItem('quiz_authed');
-    localStorage.removeItem('quiz_token'); // migrate away from legacy storage
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_FLAG);
+    localStorage.removeItem('quiz_token');
   } catch {
     /* ignore */
   }
@@ -36,6 +43,8 @@ export async function api(path: string, options: RequestInit = {}) {
   if (!(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   try {
@@ -65,7 +74,7 @@ export async function logoutApi() {
   try {
     await api('/api/auth/logout', { method: 'POST' });
   } catch {
-    /* ignore network errors on logout */
+    /* ignore */
   }
   clearToken();
 }

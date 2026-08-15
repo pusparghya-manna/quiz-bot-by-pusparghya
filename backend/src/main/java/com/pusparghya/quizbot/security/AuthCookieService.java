@@ -26,7 +26,7 @@ public class AuthCookieService {
         .secure(production) // Secure in production (HTTPS)
         .path("/")
         .maxAge(Duration.ofSeconds(ttlSeconds))
-        .sameSite("Strict")
+        .sameSite("Lax")
         .build();
     response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
   }
@@ -37,7 +37,7 @@ public class AuthCookieService {
         .secure(production)
         .path("/")
         .maxAge(Duration.ZERO)
-        .sameSite("Strict")
+        .sameSite("Lax")
         .build();
     response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
   }

@@ -59,13 +59,28 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await api('/api/auth/me');
-        if (!cancelled && res.ok) {
-          setToken('1');
-          setAuthed(true);
-        } else if (!cancelled) {
-          clearToken();
-          setAuthed(false);
+        const existing = getToken();
+        if (!existing) {
+          if (!cancelled) {
+            setAuthed(false);
+            setAuthReady(true);
+          }
+          return;
+        }
+        // Validate session: prefer /api/auth/me, fall back to /api/data
+        let ok = false;
+        const me = await api('/api/auth/me');
+        if (me.ok) ok = true;
+        else {
+          const data = await api('/api/data');
+          ok = data.ok;
+        }
+        if (!cancelled) {
+          if (ok) setAuthed(true);
+          else {
+            clearToken();
+            setAuthed(false);
+          }
         }
       } catch {
         if (!cancelled) {
