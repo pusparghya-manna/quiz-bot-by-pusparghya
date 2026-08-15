@@ -338,7 +338,7 @@ public class TelegramUpdateService {
 
     int nextNum = prior.stream().mapToInt(AttemptEntity::getAttemptNumber).max().orElse(0) + 1;
     AttemptEntity att = new AttemptEntity();
-    att.setId(Ids.newId("ATT"));
+    att.setId(Ids.attempt());
     att.setExamId(examId);
     att.setStudentId(student.getStudentCode());
     att.setTelegramUserId(student.getTelegramUserId());
