@@ -34,3 +34,4 @@ app:
     model: ${GEMINI_MODEL:gemini-flash-latest}
   ocr:
     max-base64-chars: ${MAX_OCR_BASE64_CHARS:10000000}
+  import-secret: ${IMPORT_SECRET:}

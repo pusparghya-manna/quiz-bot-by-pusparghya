@@ -36,7 +36,7 @@ public class SecurityConfig {
         .cors(Customizer.withDefaults())
         .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(auth -> auth
-            .requestMatchers("/health", "/actuator/health", "/api/auth/login", "/api/auth/register", "/api/auth/logout").permitAll()
+            .requestMatchers("/health", "/actuator/health", "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/admin/import-turso").permitAll()
             .requestMatchers(HttpMethod.POST, "/api/telegram/webhook").permitAll()
             .requestMatchers("/api/telegram/simulate").hasRole("TEACHER")
             .anyRequest().authenticated())

@@ -1,0 +1,220 @@
+package com.pusparghya.quizbot.admin;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.*;
+
+/**
+ * One-time Turso JSON blob → Postgres import.
+ * Disable by unsetting IMPORT_SECRET after use.
+ */
+@RestController
+@RequestMapping("/api/admin")
+public class TursoImportController {
+  private final JdbcTemplate jdbc;
+  private final ObjectMapper mapper;
+  private final PasswordEncoder encoder;
+  private final String importSecret;
+
+  public TursoImportController(
+      JdbcTemplate jdbc,
+      ObjectMapper mapper,
+      PasswordEncoder encoder,
+      @Value("${app.import-secret:}") String importSecret) {
+    this.jdbc = jdbc;
+    this.mapper = mapper;
+    this.encoder = encoder;
+    this.importSecret = importSecret == null ? "" : importSecret;
+  }
+
+  @PostMapping("/import-turso")
+  @Transactional
+  public ResponseEntity<?> importTurso(
+      @RequestHeader(value = "X-Import-Secret", required = false) String secret,
+      @RequestBody JsonNode body) throws Exception {
+    if (importSecret.isBlank() || secret == null || !importSecret.equals(secret)) {
+      return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Forbidden"));
+    }
+
+    List<JsonNode> rows = new ArrayList<>();
+    if (body.isArray()) {
+      body.forEach(rows::add);
+    } else if (body.has("rows") && body.get("rows").isArray()) {
+      body.get("rows").forEach(rows::add);
+    } else {
+      return ResponseEntity.badRequest().body(Map.of("error", "Expected JSON array of {teacher_id,key,data}"));
+    }
+
+    Map<String, JsonNode> byKey = new HashMap<>();
+    for (JsonNode r : rows) {
+      String tid = r.path("teacher_id").asText("");
+      String key = r.path("key").asText("");
+      String dataStr = r.path("data").asText("null");
+      JsonNode data = mapper.readTree(dataStr);
+      byKey.put(tid + "|" + key, data);
+    }
+
+    final String teacher = "TinkoriSir";
+    String hash = encoder.encode("OnlineQuiz@123");
+    jdbc.update(
+        "INSERT INTO teachers (username, name, password_hash) VALUES (?,?,?) "
+            + "ON CONFLICT (username) DO UPDATE SET name = EXCLUDED.name",
+        teacher, "Tinkori Sir", hash);
+
+    Map<String, JsonNode> students = new LinkedHashMap<>();
+    for (String k : List.of("default|students", "TCH_TINKORI|students")) {
+      JsonNode arr = byKey.get(k);
+      if (arr != null && arr.isArray()) {
+        for (JsonNode s : arr) students.put(s.path("id").asText(), s);
+      }
+    }
+    int studentCount = 0;
+    for (JsonNode s : students.values()) {
+      String id = s.path("id").asText();
+      String code = textOr(s, "studentId", id);
+      String name = textOr(s, "name", "Student");
+      String className = textOr(s, "className", null);
+      Long tgId = s.has("telegramUserId") && !s.get("telegramUserId").isNull()
+          ? s.get("telegramUserId").asLong() : null;
+      String tgUser = textOr(s, "telegramUsername", null);
+      String link = textOr(s, "linkCode", code);
+      String status = textOr(s, "status", "linked");
+      String linkedAt = textOr(s, "linkedAt", null);
+      List<String> tids = new ArrayList<>();
+      if (s.has("teacherIds") && s.get("teacherIds").isArray()) {
+        s.get("teacherIds").forEach(n -> tids.add(n.asText()));
+      }
+      if (!tids.contains(teacher)) tids.add(teacher);
+      String tidsJson = mapper.writeValueAsString(tids);
+      jdbc.update(
+          "INSERT INTO students (id, student_code, name, class_name, telegram_user_id, telegram_username, link_code, status, linked_at, teacher_ids) "
+              + "VALUES (?,?,?,?,?,?,?,?,CAST(? AS timestamptz),CAST(? AS jsonb)) "
+              + "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, telegram_username = EXCLUDED.telegram_username, teacher_ids = EXCLUDED.teacher_ids",
+          id, code, name, className, tgId, tgUser, link, status, linkedAt, tidsJson);
+      studentCount++;
+    }
+
+    int examCount = 0, questionCount = 0;
+    JsonNode exams = byKey.get("default|exams");
+    if (exams != null && exams.isArray()) {
+      for (JsonNode e : exams) {
+        String eid = e.path("id").asText();
+        jdbc.update(
+            "INSERT INTO exams (id, teacher_id, title, subject, class_name, test_number, total_questions, start_date, duration_minutes, total_marks, "
+                + "negative_marking, randomize_questions, randomize_options, result_visibility, leaderboard_visibility, status, created_at, updated_at) "
+                + "VALUES (?,?,?,?,?,?,?,CAST(? AS timestamptz),?,?,?,?,?,?,?,?,CAST(? AS timestamptz),CAST(? AS timestamptz)) "
+                + "ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, status = EXCLUDED.status, teacher_id = EXCLUDED.teacher_id",
+            eid, teacher,
+            textOr(e, "title", "Exam"),
+            textOr(e, "subject", null),
+            textOr(e, "className", null),
+            textOr(e, "testNumber", null),
+            e.path("totalQuestions").asInt(e.path("questions").size()),
+            textOr(e, "startDate", "2026-01-01T00:00:00Z"),
+            e.path("durationMinutes").asInt(60),
+            e.path("totalMarks").asInt(0),
+            e.path("negativeMarking").asDouble(0),
+            e.path("randomizeQuestions").asBoolean(false),
+            e.path("randomizeOptions").asBoolean(false),
+            textOr(e, "resultVisibility", "PUBLISHED"),
+            textOr(e, "leaderboardVisibility", "PUBLISHED"),
+            textOr(e, "status", "DRAFT"),
+            textOr(e, "createdAt", null),
+            textOr(e, "updatedAt", null));
+        examCount++;
+        int order = 0;
+        for (JsonNode q : e.path("questions")) {
+          String qid = q.path("id").asText();
+          String opts = mapper.writeValueAsString(
+              mapper.convertValue(q.path("options"), new TypeReference<List<String>>() {}));
+          Integer answer = q.has("answer") && !q.get("answer").isNull() ? q.get("answer").asInt() : null;
+          jdbc.update(
+              "INSERT INTO questions (id, exam_id, teacher_id, question, options, answer, marks, negative_marks, explanation, subject, sort_order) "
+                  + "VALUES (?,?,?,?,CAST(? AS jsonb),?,?,?,?,?,?) "
+                  + "ON CONFLICT (id) DO UPDATE SET question = EXCLUDED.question, options = EXCLUDED.options, answer = EXCLUDED.answer",
+              qid, eid, teacher,
+              textOr(q, "question", ""),
+              opts,
+              answer,
+              q.path("marks").asDouble(1),
+              q.path("negativeMarks").asDouble(0),
+              textOr(q, "explanation", ""),
+              textOr(q, "subject", null),
+              order++);
+          questionCount++;
+        }
+      }
+    }
+
+    int attemptCount = 0;
+    JsonNode attempts = byKey.get("default|attempts");
+    if (attempts != null && attempts.isArray()) {
+      for (JsonNode a : attempts) {
+        String answers = mapper.writeValueAsString(a.path("answers"));
+        Integer rank = a.has("rank") && !a.get("rank").isNull() ? a.get("rank").asInt() : null;
+        jdbc.update(
+            "INSERT INTO attempts (id, exam_id, student_id, telegram_user_id, student_name, student_class, started_at, expires_at, submitted_at, status, "
+                + "answers, current_question_index, score, max_score, percentage, correct_count, wrong_count, skipped_count, time_taken_seconds, rank, is_official, attempt_number) "
+                + "VALUES (?,?,?,?,?,?,CAST(? AS timestamptz),CAST(? AS timestamptz),CAST(? AS timestamptz),?,CAST(? AS jsonb),?,?,?,?,?,?,?,?,?,?,?) "
+                + "ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, score = EXCLUDED.score, answers = EXCLUDED.answers, submitted_at = EXCLUDED.submitted_at",
+            a.path("id").asText(),
+            a.path("examId").asText(),
+            textOr(a, "studentId", null),
+            a.path("telegramUserId").asLong(),
+            textOr(a, "studentName", null),
+            textOr(a, "studentClass", null),
+            textOr(a, "startedAt", "2026-01-01T00:00:00Z"),
+            textOr(a, "expiresAt", "2026-01-01T01:00:00Z"),
+            textOr(a, "submittedAt", null),
+            textOr(a, "status", "IN_PROGRESS"),
+            answers,
+            a.path("currentQuestionIndex").asInt(0),
+            a.path("score").asDouble(0),
+            a.path("maxScore").asDouble(0),
+            a.path("percentage").asDouble(0),
+            a.path("correctCount").asInt(0),
+            a.path("wrongCount").asInt(0),
+            a.path("skippedCount").asInt(0),
+            a.path("timeTakenSeconds").asInt(0),
+            rank,
+            a.path("isOfficial").asBoolean(true),
+            a.path("attemptNumber").asInt(1));
+        attemptCount++;
+      }
+    }
+
+    JsonNode settings = byKey.getOrDefault("default|settings", byKey.get("TCH_TINKORI|settings"));
+    if (settings != null && settings.isObject()) {
+      jdbc.update(
+          "UPDATE system_settings SET bot_username = ?, system_notice = ?, bot_active = ?, auto_publish_results = ? WHERE id = 1",
+          textOr(settings, "botUsername", "@quizbotbypusparghya_bot"),
+          textOr(settings, "systemNotice", ""),
+          settings.path("botActive").asBoolean(true),
+          settings.path("autoPublishResults").asBoolean(true));
+    }
+
+    return ResponseEntity.ok(Map.of(
+        "ok", true,
+        "teacher", teacher,
+        "students", studentCount,
+        "exams", examCount,
+        "questions", questionCount,
+        "attempts", attemptCount));
+  }
+
+  private static String textOr(JsonNode n, String field, String fallback) {
+    JsonNode v = n.get(field);
+    if (v == null || v.isNull()) return fallback;
+    String s = v.asText();
+    return s == null || s.isBlank() || "null".equals(s) ? fallback : s;
+  }
+}
