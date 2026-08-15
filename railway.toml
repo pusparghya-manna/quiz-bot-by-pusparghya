@@ -1,0 +1,12 @@
+# Prefer deploying with Root Directory = "backend" in Railway UI.
+# This root file is a fallback for monorepo deploys.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+startCommand = "java -XX:+UseContainerSupport -jar /app/app.jar"
