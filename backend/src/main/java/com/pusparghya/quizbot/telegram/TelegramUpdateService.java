@@ -275,11 +275,8 @@ public class TelegramUpdateService {
           List.of(List.of(btn("🏠 Main menu", "btn_home"))));
       return;
     }
-    if (exam.getStatus() == ExamStatus.DRAFT) {
-      sendOrEdit(chatId, messageId, "🔒 This exam is not open yet.",
-          List.of(List.of(btn("🏠 Main menu", "btn_home"))));
-      return;
-    }
+    // Status is automatic from schedule — no manual DRAFT gate
+
     if (exam.getTeacherId() == null || exam.getTeacherId().isBlank()) {
       sendOrEdit(chatId, messageId, "❌ This exam is not available.",
           List.of(List.of(btn("🏠 Main menu", "btn_home"))));

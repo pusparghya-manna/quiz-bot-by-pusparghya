@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -27,6 +28,18 @@ public class ExamService {
                      ScoringService scoring, RankingService ranking) {
     this.exams = exams; this.questions = questions; this.attempts = attempts;
     this.scoring = scoring; this.ranking = ranking;
+  }
+
+
+  /** Status is time-driven — not manually set by teachers. */
+  public static ExamStatus effectiveStatus(ExamEntity e) {
+    Instant start = e.getStartDate();
+    if (start == null) return ExamStatus.SCHEDULED;
+    Instant now = Instant.now();
+    Instant end = start.plus(Duration.ofMinutes(Math.max(1, e.getDurationMinutes())));
+    if (now.isBefore(start)) return ExamStatus.SCHEDULED;
+    if (now.isBefore(end)) return ExamStatus.LIVE;
+    return ExamStatus.RESULTS_PUBLISHED;
   }
 
   public List<ExamEntity> list(String teacherId) {
@@ -53,6 +66,7 @@ public class ExamService {
     e.setId(Ids.exam());
     e.setTeacherId(teacherId);
     apply(e, data, true);
+    e.setStatus(effectiveStatus(e));
     e.setCreatedAt(Instant.now());
     e.setUpdatedAt(Instant.now());
     exams.save(e);
@@ -141,7 +155,8 @@ public class ExamService {
     if (data.get("negativeMarking") != null) e.setNegativeMarking(Double.parseDouble(String.valueOf(data.get("negativeMarking"))));
     if (data.get("randomizeQuestions") != null) e.setRandomizeQuestions(Boolean.parseBoolean(String.valueOf(data.get("randomizeQuestions"))));
     if (data.get("randomizeOptions") != null) e.setRandomizeOptions(Boolean.parseBoolean(String.valueOf(data.get("randomizeOptions"))));
-    if (data.get("status") != null) e.setStatus(ExamStatus.valueOf(String.valueOf(data.get("status"))));
+    // status is automatic from startDate + duration — ignore client overrides
+    e.setStatus(effectiveStatus(e));
   }
 
   public Map<String, Object> toMap(ExamEntity e, List<QuestionEntity> qs) {
@@ -161,7 +176,8 @@ public class ExamService {
     m.put("randomizeOptions", e.isRandomizeOptions());
     m.put("resultVisibility", e.getResultVisibility().name());
     m.put("leaderboardVisibility", e.getLeaderboardVisibility().name());
-    m.put("status", e.getStatus().name());
+    m.put("status", effectiveStatus(e).name());
+    m.put("storedStatus", e.getStatus() != null ? e.getStatus().name() : null);
     m.put("createdAt", e.getCreatedAt().toString());
     m.put("updatedAt", e.getUpdatedAt().toString());
     m.put("questions", qs.stream().map(this::qMap).toList());

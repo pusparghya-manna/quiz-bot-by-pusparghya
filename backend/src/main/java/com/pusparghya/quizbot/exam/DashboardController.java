@@ -89,7 +89,7 @@ public class DashboardController {
   public Map<String, Object> stats(@AuthenticationPrincipal TeacherPrincipal p) {
     List<ExamEntity> examList = exams.findByTeacherIdOrderByCreatedAtDesc(p.username());
     List<String> ids = examList.stream().map(ExamEntity::getId).toList();
-    long live = examList.stream().filter(e -> e.getStatus() == ExamStatus.LIVE).count();
+    long live = examList.stream().filter(e -> ExamService.effectiveStatus(e) == ExamStatus.LIVE).count();
     long att = ids.isEmpty() ? 0 : attempts.findByExamIdIn(ids).size();
     return Map.of("exams", examList.size(), "live", live, "attempts", att);
   }

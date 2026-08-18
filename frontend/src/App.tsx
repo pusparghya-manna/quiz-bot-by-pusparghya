@@ -12,6 +12,7 @@ import { Results } from './pages/Results';
 import { Settings } from './pages/Settings';
 import { buildNotifications } from './lib/notifications';
 import { dedupeStudents } from './lib/students';
+import { effectiveExamStatus } from './lib/examStatus';
 import { NotifyHost } from './components/NotifyHost';
 
 type Tab = 'home' | 'exams' | 'results' | 'settings';
@@ -113,7 +114,7 @@ export default function App() {
     try { localStorage.setItem('quiz_notif_seen', now); } catch {}
   };
 
-  const live = exams.filter((e) => e.status === 'LIVE').length;
+  const live = exams.filter((e) => effectiveExamStatus(e) === 'LIVE').length;
   const done = attempts.filter(
     (a) => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'
   ).length;
