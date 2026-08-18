@@ -12,6 +12,7 @@ import { processTelegramUpdate, updateExamRanks, calculateAttemptScore, sendTele
 import { startTelegramPolling } from './telegram/polling.js';
 import { parseQuestionsFromMedia } from './services/geminiOcr.js';
 import { Exam, Question, Student } from './types.js';
+import { effectiveExamStatus, withEffectiveStatus } from './examStatus.js';
 dotenv.config();
 
 async function startServer() {
@@ -71,6 +72,7 @@ async function startServer() {
     } else {
       exams = [];
     }
+    exams = exams.map((e: any) => withEffectiveStatus(e));
     const examIds = new Set(exams.map((e: any) => e.id));
     const attempts = store.getAttempts().filter((a: any) => examIds.has(a.examId));
     // Students linked to this teacher only
@@ -129,7 +131,7 @@ async function startServer() {
     const students = store.getStudents();
     const attempts = store.getAttempts();
 
-    const activeExamsCount = exams.filter(e => e.status === 'LIVE' || e.status === 'SCHEDULED').length;
+    const activeExamsCount = exams.filter(e => { const s = effectiveExamStatus(e); return s === 'LIVE' || s === 'SCHEDULED'; }).length;
     const completedAttemptsCount = attempts.filter(a => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED').length;
     
     let totalPctSum = 0;
@@ -162,8 +164,9 @@ async function startServer() {
       exams = exams.filter(e => e.className === className);
     }
     if (status) {
-      exams = exams.filter(e => e.status === status);
+      exams = exams.filter(e => effectiveExamStatus(e) === status);
     }
+    exams = exams.map(e => withEffectiveStatus(e));
 
     res.json(exams);
   });
@@ -202,7 +205,7 @@ async function startServer() {
       randomizeOptions: !!data.randomizeOptions,
       resultVisibility: data.resultVisibility || 'PUBLISHED',
       leaderboardVisibility: data.leaderboardVisibility || 'PUBLISHED',
-      status: data.status || 'DRAFT',
+      status: effectiveExamStatus({ startDate: data.startDate || now, durationMinutes: Number(data.durationMinutes) || 60 }),
       questions: data.questions || [],
       createdAt: now,
       updatedAt: now
@@ -210,7 +213,7 @@ async function startServer() {
 
     await store.saveExam(newExam);
     await store.addAuditLog('EXAM_CREATED', `Created exam "${newExam.title}" for ${newExam.className}`, teacherId);
-    res.json(newExam);
+    res.json(withEffectiveStatus(newExam));
   });
 
   app.put('/api/exams/:id', async (req, res) => {
@@ -232,10 +235,11 @@ async function startServer() {
       totalQuestions: req.body.questions ? req.body.questions.length : exam.totalQuestions,
       updatedAt: new Date().toISOString()
     };
+    updated.status = effectiveExamStatus(updated);
 
     await store.saveExam(updated);
     await store.addAuditLog('EXAM_UPDATED', `Updated exam "${updated.title}" (${updated.status})`, teacherId);
-    res.json(updated);
+    res.json(withEffectiveStatus(updated));
   });
 
   app.delete('/api/exams/:id', async (req, res) => {
@@ -307,7 +311,7 @@ async function startServer() {
     if (!q || !questionBelongsToTeacher(q, teacherId)) return res.status(404).json({ error: 'Question not found' });
     const updated = { ...q, ...req.body, teacherId, id: q.id };
     await store.saveQuestion(updated);
-    res.json(updated);
+    res.json(withEffectiveStatus(updated));
   });
 
   app.delete('/api/questions/:id', async (req, res) => {
@@ -433,7 +437,7 @@ async function startServer() {
     if (!student || !studentBelongsToTeacher(student, teacherId)) return res.status(404).json({ error: 'Student not found' });
     const updated = { ...student, ...req.body, id: student.id, teacherIds: student.teacherIds };
     await store.saveStudent(updated);
-    res.json(updated);
+    res.json(withEffectiveStatus(updated));
   });
 
   app.delete('/api/students/:id', async (req, res) => {
@@ -670,7 +674,7 @@ async function startServer() {
     delete body.webhookUrl;
     const updated = store.updateSettings(body);
     store.addAuditLog('SETTINGS_UPDATED', 'Updated teacher settings');
-    res.json(updated);
+    res.json(withEffectiveStatus(updated));
   });
 
   app.get('/api/audit-logs', (req, res) => {

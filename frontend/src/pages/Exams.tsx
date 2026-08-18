@@ -6,6 +6,7 @@ import { Field } from '../components/ui/Field';
 import { Sheet } from '../components/ui/Sheet';
 import { Badge } from '../components/ui/Badge';
 import { toDatetimeLocalIST, fromDatetimeLocalIST, formatIST } from '../lib/time';
+import { effectiveExamStatus } from '../lib/examStatus';
 import { emptyQuestion } from '../lib/exam';
 import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import {
@@ -123,7 +124,6 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
         startDate: form.startDate ? fromDatetimeLocalIST(form.startDate) : new Date().toISOString(),
         durationMinutes: Number(form.durationMinutes),
         negativeMarking: Number(form.negativeMarking),
-        status: form.status,
         randomizeQuestions: form.randomizeQuestions,
         randomizeOptions: form.randomizeOptions,
         resultVisibility: 'PUBLISHED',
@@ -314,7 +314,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
                   <span className="inline-flex items-center gap-1"><IconClock className="w-3 h-3" />{exam.durationMinutes}m</span>
                 </div>
                 <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1"><IconCalendar className="w-3 h-3" />Starts: {formatIST(exam.startDate)}</div>
-                <div className="mt-1.5"><Badge s={exam.status} /></div>
+                <div className="mt-1.5"><Badge s={effectiveExamStatus(exam)} /></div>
               </div>
               <div className="flex flex-col gap-1 shrink-0">
                 <button type="button" className="inline-flex items-center gap-1 px-2 h-8 rounded-lg border border-blue-100 text-blue-600 hover:bg-blue-50 text-[9px] font-bold" onClick={() => copyLink(exam.id)} aria-label="Share">
@@ -363,14 +363,6 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
                 <Field label="Duration (minutes)"><input type="number" className={inp} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: +e.target.value })} /></Field>
                 <Field label="Negative marking"><input type="number" step="0.25" className={inp} value={form.negativeMarking} onChange={(e) => setForm({ ...form, negativeMarking: +e.target.value })} /></Field>
               </div>
-              <Field label="Status">
-                <div className="relative">
-                  <select className={inp + ' appearance-none pr-9'} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ExamStatus })}>
-                    {['DRAFT', 'SCHEDULED', 'LIVE', 'ENDED', 'RESULTS_PUBLISHED'].map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-                  </select>
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconChevronDown className="w-3.5 h-3.5" /></span>
-                </div>
-              </Field>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[13px] pt-0.5">
                 <label className={`flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2.5 transition ${form.randomizeQuestions ? 'border-blue-300 bg-blue-50/50 text-blue-700' : 'border-slate-200 hover:border-slate-300'}`}>
                   <input type="checkbox" checked={form.randomizeQuestions} onChange={(e) => setForm({ ...form, randomizeQuestions: e.target.checked })} className="accent-blue-600" />
@@ -495,7 +487,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
               <div className={card + ' p-3.5 space-y-1 text-sm'}>
                 <div className="font-bold text-base">{form.title || '(Untitled)'}</div>
                 <div className="text-[12px] text-slate-500">{form.subject} · {form.className} · {form.durationMinutes} min</div>
-                <div className="pt-1"><Badge s={form.status} /></div>
+                <div className="pt-1"><Badge s={effectiveExamStatus({ startDate: form.startDate ? fromDatetimeLocalIST(form.startDate) : new Date().toISOString(), durationMinutes: form.durationMinutes })} /></div>
                 <div className="text-[12px] text-slate-600 pt-1.5 flex items-center gap-1.5"><IconFileText className="w-3.5 h-3.5 text-blue-500" />{qs.length} questions · {qs.reduce((s, q) => s + (Number(q.marks) || 1), 0)} total marks</div>
               </div>
               <div className="space-y-1.5 max-h-[40vh] overflow-y-auto pr-0.5">
@@ -515,7 +507,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
                   </div>
                 ))}
               </div>
-              <p className="text-[11px] text-slate-500 flex items-center gap-1"><IconInfo className="w-3 h-3 shrink-0" />Check every answer is correct before setting LIVE.</p>
+              <p className="text-[11px] text-slate-500 flex items-center gap-1"><IconInfo className="w-3 h-3 shrink-0" />Status is automatic: Scheduled before start, Live during the window, Results published after it ends.</p>
               <div className="flex gap-2">
                 <button type="button" className={btnS + ' flex-1'} onClick={() => setStep('questions')}>← Edit questions</button>
                 <button type="button" className={btnP + ' flex-1'} disabled={saving} onClick={saveExam}>

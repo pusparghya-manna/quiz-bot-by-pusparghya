@@ -91,7 +91,6 @@ function isExamWindowOpen(exam: Exam, now = Date.now()): boolean {
 }
 
 function isExamTimeEnded(exam: Exam): boolean {
-  if (exam.status === 'ENDED' || exam.status === 'RESULTS_PUBLISHED') return true;
   return Date.now() >= getExamWindow(exam).end;
 }
 
@@ -505,13 +504,7 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
     };
   }
 
-  if (exam.status === 'DRAFT') {
-    return {
-      chatId: user.id,
-      text: `🔒 This exam is not open yet.`,
-      type: 'sendMessage'
-    };
-  }
+  // Status is automatic from schedule — no manual DRAFT gate
 
   // Require a valid teacher-owned exam (blocks orphaned / unauthorized exams)
   if (!exam.teacherId) {
