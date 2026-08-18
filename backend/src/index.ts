@@ -311,7 +311,7 @@ async function startServer() {
     if (!q || !questionBelongsToTeacher(q, teacherId)) return res.status(404).json({ error: 'Question not found' });
     const updated = { ...q, ...req.body, teacherId, id: q.id };
     await store.saveQuestion(updated);
-    res.json(withEffectiveStatus(updated));
+    res.json(updated);
   });
 
   app.delete('/api/questions/:id', async (req, res) => {
@@ -437,7 +437,7 @@ async function startServer() {
     if (!student || !studentBelongsToTeacher(student, teacherId)) return res.status(404).json({ error: 'Student not found' });
     const updated = { ...student, ...req.body, id: student.id, teacherIds: student.teacherIds };
     await store.saveStudent(updated);
-    res.json(withEffectiveStatus(updated));
+    res.json(updated);
   });
 
   app.delete('/api/students/:id', async (req, res) => {
