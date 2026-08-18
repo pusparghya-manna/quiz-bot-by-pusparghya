@@ -674,7 +674,7 @@ async function startServer() {
     delete body.webhookUrl;
     const updated = store.updateSettings(body);
     store.addAuditLog('SETTINGS_UPDATED', 'Updated teacher settings');
-    res.json(withEffectiveStatus(updated));
+    res.json(updated);
   });
 
   app.get('/api/audit-logs', (req, res) => {
