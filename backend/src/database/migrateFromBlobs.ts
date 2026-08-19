@@ -278,16 +278,3 @@ export async function runBlobMigration(): Promise<MigrationReport> {
 
   return report;
 }
-
-// CLI
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('migrateFromBlobs.ts')) {
-  runBlobMigration()
-    .then((r) => {
-      console.log(JSON.stringify(r, null, 2));
-      process.exit(r.verified ? 0 : 1);
-    })
-    .catch((e) => {
-      console.error(e);
-      process.exit(1);
-    });
-}
