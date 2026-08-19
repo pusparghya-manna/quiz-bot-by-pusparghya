@@ -16,17 +16,17 @@ import { effectiveExamStatus, withEffectiveStatus } from './examStatus.js';
 import { enqueueBroadcast } from './jobs/broadcastQueue.js';
 dotenv.config();
 
-async function startServer() {
-  const app = express();
-  const PORT = env.port;
+async function startServer(app?: import('express').Express) {
+  const owned = !app;
+  app = app || express();
 
   app.use(cors({ origin: corsOriginDelegate, credentials: true }));
   app.use(express.json({ limit: '12mb' }));
   app.use(express.urlencoded({ extended: true, limit: '12mb' }));
   app.disable('x-powered-by');
 
-  // Health
-  app.get('/health', (_req, res) => res.json({ ok: true }));
+  // Health (also registered early in main when app is shared)
+  app.get('/health', (_req, res) => res.status(200).json({ ok: true, service: 'quiz-bot-api' }));
 
   // Auth (rate-limited)
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, keyFn: (req) => `auth:${req.ip}` });
@@ -705,18 +705,47 @@ async function startServer() {
     }
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Quiz Bot API running on port ${PORT}`);
-    startTelegramPolling();
-  });
+  // Routes registered; caller starts listen + polling
+  return app;
 }
 
 async function main() {
+  // Fail fast on missing JWT in production (before bind)
   assertSecureConfig();
-  await initDb();
-  await ensureTeachersTable();
-  await store.init();
-  await startServer();
+
+  const PORT = env.port;
+  const app = express();
+
+  // Health MUST respond before any DB work so Railway healthchecks succeed
+  app.get('/health', (_req, res) => {
+    res.status(200).json({ ok: true, service: 'quiz-bot-api' });
+  });
+  app.get('/', (_req, res) => {
+    res.status(200).json({ ok: true, service: 'quiz-bot-api' });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Quiz Bot API listening on 0.0.0.0:${PORT} (health ready)`);
+      resolve();
+    });
+    server.on('error', reject);
+  });
+
+  // Heavy init after port is open
+  try {
+    await initDb();
+    await ensureTeachersTable();
+    await store.init();
+  } catch (e) {
+    console.error('[boot] DB/store init error (server still up for /health):', e);
+  }
+
+  // Mount full API on same app (Express allows post-listen route registration)
+  await startServer(app);
+
+  startTelegramPolling();
+  console.log('Quiz Bot API fully ready');
 }
 main().catch(err => {
   console.error(err);
