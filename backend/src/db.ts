@@ -1,3 +1,4 @@
+import { ensureSchema } from './database/migrateFromBlobs.js';
 import { createClient, Client } from '@libsql/client';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -21,19 +22,12 @@ export const db: Client = createClient({
 });
 
 export async function initDb() {
+  // Schema is also ensured in store.init via ensureSchema()
   const maxAttempts = 5;
   for (let i = 1; i <= maxAttempts; i++) {
     try {
-      await db.execute(`
-        CREATE TABLE IF NOT EXISTS app_data (
-          teacher_id TEXT NOT NULL,
-          key TEXT NOT NULL,
-          data TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          PRIMARY KEY (teacher_id, key)
-        )
-      `);
-      console.log("Turso app_data table ready");
+      await ensureSchema();
+      console.log("Turso schema ready (normalized + app_data)");
       return;
     } catch (err: any) {
       console.error(`Turso init attempt ${i}/${maxAttempts} failed:`, err?.message || err);

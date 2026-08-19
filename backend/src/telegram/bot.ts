@@ -1,6 +1,7 @@
 import { store } from '../store.js';
 import { escapeMd } from '../middleware/validate.js';
 import {
+import { sendSafeTelegramMessage } from './safeSend.js';
   TelegramUpdate,
   TelegramUser,
   InlineKeyboardButton,
@@ -1073,62 +1074,14 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
   const token = process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken;
   if (!token) return;
 
-  try {
-    let endpoint = resp.type === 'editMessageText' && resp.messageId ? 'editMessageText' : 'sendMessage';
-
-    const payload: any = {
-      chat_id: resp.chatId,
-      text: resp.text,
-      parse_mode: 'Markdown'
-    };
-
-    if (endpoint === 'editMessageText' && resp.messageId) {
-      payload.message_id = resp.messageId;
-    }
-
-    if (resp.replyMarkup) {
-      payload.reply_markup = resp.replyMarkup;
-    }
-
-    const res = await fetch(`https://api.telegram.org/bot${token}/${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    const data: any = await res.json().catch(() => ({}));
-    if (!data.ok) {
-      const desc = String(data.description || '');
-      // "message is not modified" is fine — ignore
-      if (desc.toLowerCase().includes('message is not modified')) return;
-
-      console.warn(`[Telegram API] ${endpoint} failed (${desc}). Retrying without Markdown...`);
-      delete payload.parse_mode;
-
-      // Prefer re-editing the same message (single-screen UI). Only send new if edit is impossible.
-      if (endpoint === 'editMessageText' && resp.messageId) {
-        payload.message_id = resp.messageId;
-        const retry = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const retryData: any = await retry.json().catch(() => ({}));
-        if (retryData.ok || String(retryData.description || '').toLowerCase().includes('message is not modified')) {
-          return;
-        }
-        // Last resort: send new only if message can't be edited (deleted/too old)
-        delete payload.message_id;
-      }
-
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    }
-  } catch (err) {
-    console.error('Failed to send Telegram response via Telegram Bot API:', err);
+  const preferEdit = resp.type === 'editMessageText' && !!resp.messageId;
+  const result = await sendSafeTelegramMessage(token, resp.chatId, resp.text || '', {
+    parseMode: 'Markdown',
+    replyMarkup: resp.replyMarkup,
+    messageId: resp.messageId,
+    preferEdit,
+  });
+  if (!result.ok) {
+    console.warn('[Telegram] send failed:', result.error);
   }
 }
-

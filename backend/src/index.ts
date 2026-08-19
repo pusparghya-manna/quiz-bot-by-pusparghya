@@ -13,6 +13,7 @@ import { startTelegramPolling } from './telegram/polling.js';
 import { parseQuestionsFromMedia } from './services/geminiOcr.js';
 import { Exam, Question, Student } from './types.js';
 import { effectiveExamStatus, withEffectiveStatus } from './examStatus.js';
+import { enqueueBroadcast } from './jobs/broadcastQueue.js';
 dotenv.config();
 
 async function startServer() {
@@ -625,46 +626,22 @@ async function startServer() {
   });
 
   app.post('/api/broadcast', async (req, res) => {
-    const message = clampStr(req.body?.message, env.maxMessageLength);
+    const teacherId = requireTeacher(req, res);
+    if (!teacherId) return;
+    const message = String(req.body?.message || '').trim();
     if (!message) return res.status(400).json({ error: 'Message required' });
-    const teacherId = (req as any).teacher?.username as string | undefined;
-    if (!teacherId) return res.status(401).json({ error: 'Unauthorized' });
+    if (message.length > 3500) return res.status(400).json({ error: 'Message too long (max 3500)' });
 
-    // Only students belonging to this teacher
     const myExamIds = new Set(store.getExams().filter((e: any) => e.teacherId === teacherId).map((e: any) => e.id));
-    const myAttempts = store.getAttempts().filter((a: any) => myExamIds.has(a.examId));
-    const tgIds = new Set<number>();
-    for (const a of myAttempts) {
-      if (a.telegramUserId) tgIds.add(Number(a.telegramUserId));
-    }
     const students = store.getStudents().filter((s: any) => {
       if (Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId)) return true;
-      return s.telegramUserId && tgIds.has(Number(s.telegramUserId));
+      return store.getAttempts().some((a: any) => myExamIds.has(a.examId) && a.telegramUserId === s.telegramUserId);
     });
-    const seen = new Set<number>();
-    const unique = students.filter((s: any) => {
-      const id = Number(s.telegramUserId);
-      if (!id || seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
+    const unique = [...new Set(students.map((s: any) => s.telegramUserId).filter(Boolean))] as number[];
 
-    let sent = 0;
-    let failed = 0;
-    for (const s of unique) {
-      try {
-        await sendTelegramResponse({
-          chatId: s.telegramUserId!,
-          text: '📢 *Message from teacher*\n\n' + message,
-          type: 'sendMessage'
-        });
-        sent++;
-      } catch {
-        failed++;
-      }
-    }
-    store.addAuditLog('BROADCAST', `Teacher ${teacherId} broadcast to ${sent} students`, teacherId);
-    res.json({ sent, failed, total: unique.length });
+    const jobId = `BCAST_${Date.now()}`;
+    enqueueBroadcast({ id: jobId, teacherId, message, recipients: unique });
+    res.json({ ok: true, jobId, queued: unique.length, message: 'Broadcast queued — sending in background' });
   });
 
   app.put('/api/settings', (req, res) => {
