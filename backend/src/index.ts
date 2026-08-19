@@ -467,14 +467,17 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get('/api/attempts/:id/detail', (req, res) => {
+  app.get('/api/attempts/:id/detail', async (req, res) => {
     const teacherId = requireTeacher(req, res);
     if (!teacherId) return;
     const att = store.getAttempts().find(a => a.id === req.params.id);
     if (!att || !attemptBelongsToTeacher(att, teacherId)) return res.status(404).json({ error: 'Attempt not found' });
+    if (!att.answers || Object.keys(att.answers).length === 0) {
+      await store.loadAttemptAnswers(att.id);
+    }
     const exam = store.getExamById(att.examId);
     const breakdown = (exam?.questions || []).map((q, idx) => {
-      const selected = att.answers[q.id];
+      const selected = att.answers?.[q.id];
       const has = selected !== undefined && selected !== null;
       let status: 'correct' | 'wrong' | 'skipped' = 'skipped';
       if (has) {

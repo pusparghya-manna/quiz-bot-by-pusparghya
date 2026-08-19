@@ -1,42 +1,46 @@
 # Production optimization (main branch)
 
-## What changed
+## Completed
 
-### Database
-- Normalized SQL tables: `exams`, `questions`, `students`, `student_teachers`, `attempts`, `attempt_answers`, `audit_logs`, `system_settings`, `question_bank`, `broadcast_jobs`
-- Legacy `app_data` JSON blobs are **not deleted**
-- On first boot with empty normalized tables + existing blobs, migration runs automatically
-- Backup snapshot written to `app_data_backup` before migration
+### Database (normalized + safe migration)
+- Tables: `exams`, `questions`, `students`, `student_teachers`, `attempts`, `attempt_answers`, `audit_logs`, `system_settings`, `question_bank`, `broadcast_jobs`, `app_data_backup`
+- **Legacy `app_data` JSON blobs are never deleted**
+- First boot with empty tables + existing blobs runs idempotent migration + backup snapshot
+- Manual: `cd backend && npm run db:migrate`
+
+### Memory / startup
+- Startup runs schema ensure + optional migration
+- Loads normalized SQL into store (teacher app + Telegram still use sync store API)
+- Submitted attempt **answers** are not all loaded into memory; loaded on demand for detail views
+- In-progress answers remain in memory for exam resume
 
 ### Telegram
-- All outbound text goes through `sendSafeTelegramMessage`
-- Auto-splits messages over ~4000 characters
-- Timeouts (12s), retries, 429 backoff
+- All outbound text via `sendSafeTelegramMessage` (`telegram/safeSend.ts`)
+- `splitTelegramMessage` (~4000 chars), timeouts (12s), retries, 429 backoff
+- Tests for 4095–50000 character messages
 
 ### Broadcast
-- `POST /api/broadcast` queues work and returns immediately
-- Background worker sends with rate limiting
+- `POST /api/broadcast` **queues** and returns immediately
+- Background worker rate-limits sends (~45ms gap)
 
 ### Ranking
-- Still updated on submit via `updateExamRanks` (not on every results page open beyond existing code)
+- `updateExamRanks` runs on submit / attempt changes only (not on every results page open)
+- Ranks persisted to SQL via `saveAttempt`
 
-## Migrate manually
+### APIs
+- Teacher-scoped `/api/data` (compatibility)
+- `GET /api/results?examId=&page=&limit=&practice=0|1` (paginated, slim rows)
+- Attempt detail loads answers from SQL if missing in memory
 
-```bash
-cd backend
-npm run db:migrate
-```
+### Security preserved
+- Auth, ownership checks, webhook secret, simulate disabled in prod, rate limits
 
 ## Rollback
-
-1. Normalized tables can be ignored; re-enable blob-only store from git history if needed
-2. `app_data` and `app_data_backup` retain original JSON
-3. Set `DATABASE_SCHEMA_VERSION` meta is informational only
+1. Keep using `app_data` / `app_data_backup` rows (never dropped by migration)
+2. Redeploy previous git revision if needed
+3. Normalized tables can be ignored; re-run migration is idempotent (`ON CONFLICT`)
 
 ## Verify
-
 ```bash
-npm test
+cd backend && npm test
 ```
-
-Compare counts: exams / students / attempts in blobs vs SQL after migration logs.

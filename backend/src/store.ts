@@ -63,35 +63,37 @@ class Store {
     }
   }
 
-  private async loadFromSql() {
-    // Settings
-    try {
-      const sres = await db.execute('SELECT * FROM system_settings WHERE id = 1');
-      if (sres.rows.length) {
-        const r = sres.rows[0] as any;
-        this.data.settings = {
-          telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
-          webhookUrl: r.webhook_url || '',
-          botUsername: r.bot_username || '@quizbotbypusparghya_bot',
-          botActive: Number(r.bot_active) !== 0,
-          autoPublishResults: Number(r.auto_publish_results) !== 0,
-          systemNotice: r.system_notice || '',
-        };
-      }
-    } catch { /* empty */ }
 
-    // Exams + questions
-    const eres = await db.execute('SELECT * FROM exams ORDER BY created_at DESC');
+  private async loadFromSql() {
+    const [sres, eres, sstud, ares, lres, qb] = await Promise.all([
+      db.execute('SELECT * FROM system_settings WHERE id = 1'),
+      db.execute('SELECT * FROM exams ORDER BY created_at DESC'),
+      db.execute('SELECT * FROM students'),
+      db.execute('SELECT * FROM attempts'),
+      db.execute('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 200'),
+      db.execute('SELECT * FROM question_bank'),
+    ]);
+
+    if (sres.rows.length) {
+      const r = sres.rows[0] as any;
+      this.data.settings = {
+        telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || r.telegram_bot_token || '',
+        webhookUrl: r.webhook_url || '',
+        botUsername: r.bot_username || '@quizbotbypusparghya_bot',
+        botActive: Boolean(r.bot_active),
+        autoPublishResults: Boolean(r.auto_publish_results),
+        systemNotice: r.system_notice || '',
+      };
+    }
+
     const exams: Exam[] = [];
     for (const r of eres.rows as any[]) {
       const qres = await db.execute({
         sql: 'SELECT * FROM questions WHERE exam_id = ? ORDER BY sort_order ASC',
         args: [r.id],
       });
-      const questions: Question[] = (qres.rows as any[]).map((q) => ({
+      const questions = (qres.rows as any[]).map((q) => ({
         id: String(q.id),
-        examId: String(q.exam_id),
-        teacherId: q.teacher_id || undefined,
         question: q.question,
         options: JSON.parse(String(q.options_json || '[]')),
         answer: q.answer === null || q.answer === undefined ? null : Number(q.answer),
@@ -120,15 +122,13 @@ class Store {
         questions,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
-      });
+      } as Exam);
     }
     this.data.exams = exams;
 
-    // Students
-    const sres = await db.execute('SELECT * FROM students');
     const students: Student[] = [];
-    for (const r of sres.rows as any[]) {
-      const tids = await db.execute({
+    for (const r of sstud.rows as any[]) {
+      const tres = await db.execute({
         sql: 'SELECT teacher_id FROM student_teachers WHERE student_id = ?',
         args: [r.id],
       });
@@ -137,26 +137,31 @@ class Store {
         studentId: r.student_code,
         name: r.name,
         className: r.class_name || 'ALL',
-        telegramUserId: r.telegram_user_id == null ? null : Number(r.telegram_user_id),
-        telegramUsername: r.telegram_username || null,
-        linkCode: r.link_code || '',
-        status: (r.status || 'unlinked') as any,
+        telegramUserId: r.telegram_user_id != null ? Number(r.telegram_user_id) : undefined,
+        telegramUsername: r.telegram_username || undefined,
+        linkCode: r.link_code || undefined,
+        status: (r.status || 'linked') as any,
         linkedAt: r.linked_at || undefined,
-        teacherIds: (tids.rows as any[]).map((t) => String(t.teacher_id)),
-      });
+        teacherIds: (tres.rows as any[]).map((x) => String(x.teacher_id)),
+      } as Student);
     }
     this.data.students = students;
 
-    // Attempts + answers
-    const ares = await db.execute('SELECT * FROM attempts');
     const attempts: Attempt[] = [];
     for (const r of ares.rows as any[]) {
-      const ans = await db.execute({
-        sql: 'SELECT question_id, option_index FROM attempt_answers WHERE attempt_id = ?',
-        args: [r.id],
-      });
-      const answers: Record<string, number> = {};
-      for (const a of ans.rows as any[]) answers[String(a.question_id)] = Number(a.option_index);
+      const status = String(r.status);
+      let answers: Record<string, number> = {};
+      // Load answer maps only for in-progress attempts (needed for resume).
+      // Submitted attempts load answers on demand in detail endpoints.
+      if (status === 'IN_PROGRESS') {
+        const ans = await db.execute({
+          sql: 'SELECT question_id, option_index FROM attempt_answers WHERE attempt_id = ?',
+          args: [r.id],
+        });
+        for (const a of ans.rows as any[]) {
+          answers[String(a.question_id)] = Number(a.option_index);
+        }
+      }
       attempts.push({
         id: String(r.id),
         examId: String(r.exam_id),
@@ -166,8 +171,8 @@ class Store {
         studentClass: r.student_class || '',
         startedAt: r.started_at,
         expiresAt: r.expires_at,
-        submittedAt: r.submitted_at || null,
-        status: r.status,
+        submittedAt: r.submitted_at || undefined,
+        status: status as any,
         answers,
         currentQuestionIndex: Number(r.current_question_index || 0),
         score: Number(r.score || 0),
@@ -178,38 +183,48 @@ class Store {
         skippedCount: Number(r.skipped_count || 0),
         timeTakenSeconds: Number(r.time_taken_seconds || 0),
         rank: r.rank == null ? undefined : Number(r.rank),
-        isOfficial: Number(r.is_official) !== 0,
+        isOfficial: r.is_official === undefined ? true : Boolean(r.is_official),
         attemptNumber: Number(r.attempt_number || 1),
-      });
+      } as Attempt);
     }
     this.data.attempts = attempts;
 
-    // Audit (cap)
-    const lres = await db.execute('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 500');
     this.data.auditLogs = (lres.rows as any[]).map((r) => ({
       id: String(r.id),
       timestamp: r.timestamp,
       action: r.action,
       details: r.details || '',
-      actor: r.actor || '',
+      actor: r.actor || 'system',
     }));
 
-    // Question bank
-    const qb = await db.execute('SELECT * FROM question_bank');
     this.data.questionBank = (qb.rows as any[]).map((q) => ({
       id: String(q.id),
-      teacherId: q.teacher_id,
+      teacherId: q.teacher_id || undefined,
       question: q.question,
       options: JSON.parse(String(q.options_json || '[]')),
-      answer: q.answer == null ? null : Number(q.answer),
+      answer: q.answer === null || q.answer === undefined ? null : Number(q.answer),
       marks: Number(q.marks ?? 1),
       negativeMarks: Number(q.negative_marks ?? 0),
       explanation: q.explanation || undefined,
       subject: q.subject || undefined,
     }));
-
-    this.schemaVersion = '2-normalized';
   }
+
+  /** Load answers for an attempt from SQL (for detail / scoring). */
+  async loadAttemptAnswers(attemptId: string): Promise<Record<string, number>> {
+    const ans = await db.execute({
+      sql: 'SELECT question_id, option_index FROM attempt_answers WHERE attempt_id = ?',
+      args: [attemptId],
+    });
+    const answers: Record<string, number> = {};
+    for (const a of ans.rows as any[]) {
+      answers[String(a.question_id)] = Number(a.option_index);
+    }
+    const att = this.data.attempts.find((x) => x.id === attemptId);
+    if (att) att.answers = answers;
+    return answers;
+  }
+
 
   private async persistExam(exam: Exam) {
     const status = effectiveExamStatus(exam);
@@ -290,12 +305,16 @@ class Store {
         attempt.isOfficial === false ? 0 : 1, attempt.attemptNumber || 1,
       ],
     });
-    await db.execute({ sql: 'DELETE FROM attempt_answers WHERE attempt_id = ?', args: [attempt.id] });
-    for (const [qid, opt] of Object.entries(attempt.answers || {})) {
-      await db.execute({
-        sql: 'INSERT OR REPLACE INTO attempt_answers (attempt_id, question_id, option_index) VALUES (?,?,?)',
-        args: [attempt.id, qid, Number(opt)],
-      });
+    const answers = attempt.answers || {};
+    // Only rewrite answer rows when we have answer payload (avoid wiping on rank-only saves)
+    if (Object.keys(answers).length > 0 || attempt.status === 'IN_PROGRESS') {
+      await db.execute({ sql: 'DELETE FROM attempt_answers WHERE attempt_id = ?', args: [attempt.id] });
+      for (const [qid, opt] of Object.entries(answers)) {
+        await db.execute({
+          sql: 'INSERT OR REPLACE INTO attempt_answers (attempt_id, question_id, option_index) VALUES (?,?,?)',
+          args: [attempt.id, qid, Number(opt)],
+        });
+      }
     }
   }
 
@@ -353,6 +372,11 @@ class Store {
   getAttempt(examId: string, telegramUserId: number) {
     const mine = this.getStudentAttempts(examId, telegramUserId);
     return mine.find((a) => a.status === 'IN_PROGRESS') || mine[mine.length - 1];
+  }
+  async deleteAttempt(id: string) {
+    this.data.attempts = this.data.attempts.filter((a) => a.id !== id);
+    await db.execute({ sql: 'DELETE FROM attempt_answers WHERE attempt_id = ?', args: [id] });
+    await db.execute({ sql: 'DELETE FROM attempts WHERE id = ?', args: [id] });
   }
   async saveAttempt(attempt: Attempt) {
     const idx = this.data.attempts.findIndex((a) => a.id === attempt.id);

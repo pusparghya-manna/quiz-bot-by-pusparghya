@@ -1,7 +1,7 @@
 import { store } from '../store.js';
 import { escapeMd } from '../middleware/validate.js';
-import {
 import { sendSafeTelegramMessage } from './safeSend.js';
+import {
   TelegramUpdate,
   TelegramUser,
   InlineKeyboardButton,
