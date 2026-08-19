@@ -5,15 +5,16 @@ dotenv.config();
 
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
-
-if (!url) {
-  console.warn('TURSO_DATABASE_URL missing');
-}
+const isProd = process.env.NODE_ENV === 'production' || !!process.env.RAILWAY_ENVIRONMENT;
 
 let dbUrl = url || 'file:local.db';
-// Turso HTTP API prefers https:// over libsql://
 if (dbUrl.startsWith('libsql://')) {
   dbUrl = 'https://' + dbUrl.slice('libsql://'.length);
+}
+
+if (isProd && !url) {
+  console.error('[db] FATAL: TURSO_DATABASE_URL is required in production');
+  process.exit(1);
 }
 
 export const db: Client = createClient({
@@ -21,21 +22,27 @@ export const db: Client = createClient({
   authToken: authToken || undefined,
 });
 
-export async function initDb() {
-  // Schema is also ensured in store.init via ensureSchema()
-  const maxAttempts = 5;
+/** Ensure Turso is reachable and schema exists. Throws in production on failure. */
+export async function initDb(): Promise<void> {
+  const maxAttempts = isProd ? 8 : 5;
+  let lastErr: unknown;
   for (let i = 1; i <= maxAttempts; i++) {
     try {
+      await db.execute('SELECT 1');
       await ensureSchema();
-      console.log("Turso schema ready (normalized + app_data)");
+      console.log('[db] Turso connected; schema ready');
       return;
     } catch (err: any) {
-      console.error(`Turso init attempt ${i}/${maxAttempts} failed:`, err?.message || err);
-      if (i === maxAttempts) {
-        console.error("Turso unavailable after retries – continuing with in-memory only (data will not persist)");
-        return;
+      lastErr = err;
+      console.error(`[db] init attempt ${i}/${maxAttempts} failed:`, err?.message || err);
+      if (i < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 1500 * i));
       }
-      await new Promise(r => setTimeout(r, 2000 * i));
     }
   }
+  if (isProd) {
+    console.error('[db] FATAL: Could not connect to Turso after retries. Refusing to start.');
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+  console.warn('[db] Turso unavailable — continuing in development only (data may not persist)');
 }

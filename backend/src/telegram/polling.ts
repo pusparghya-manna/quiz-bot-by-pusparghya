@@ -4,7 +4,14 @@ import { processTelegramUpdate, sendTelegramResponse } from './bot.js';
 let isPollingRunning = false;
 
 export function startTelegramPolling() {
-  if (isPollingRunning) return;
+  if (isPollingRunning) {
+    console.warn('[Telegram Bot Engine] Polling already running — skip duplicate worker');
+    return;
+  }
+  if (process.env.TELEGRAM_POLLING_ENABLED === 'false') {
+    console.log('[Telegram Bot Engine] TELEGRAM_POLLING_ENABLED=false — polling disabled');
+    return;
+  }
   isPollingRunning = true;
 
   console.log('[Telegram Bot Engine] Starting live Telegram long polling service...');

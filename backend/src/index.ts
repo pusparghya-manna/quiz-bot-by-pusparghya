@@ -75,18 +75,23 @@ async function startServer(app?: import('express').Express) {
     }
     exams = exams.map((e: any) => withEffectiveStatus(e));
     const examIds = new Set(exams.map((e: any) => e.id));
+    // Single pass over attempts for this teacher
     const attempts = store.getAttempts().filter((a: any) => examIds.has(a.examId));
-    // Students linked to this teacher only
+    const attemptTgIds = new Set<number>();
+    const attemptStudentIds = new Set<string>();
+    for (const a of attempts) {
+      if (a.telegramUserId) attemptTgIds.add(Number(a.telegramUserId));
+      if (a.studentId) attemptStudentIds.add(String(a.studentId));
+    }
+    // Students linked to this teacher only — O(n) with Sets (no nested .some)
     let students = store.getStudents();
     if (teacherId) {
       students = students.filter((s: any) => {
         if (Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId)) return true;
-        // also include if they have an attempt on this teacher's exam
-        return attempts.some((a: any) =>
-          a.studentId === s.studentId || (s.telegramUserId && a.telegramUserId === s.telegramUserId)
-        );
+        if (s.telegramUserId && attemptTgIds.has(Number(s.telegramUserId))) return true;
+        if (s.studentId && attemptStudentIds.has(String(s.studentId))) return true;
+        return false;
       });
-      // dedupe by telegram id
       const seen = new Set<string>();
       students = students.filter((s: any) => {
         const key = s.telegramUserId ? `tg:${s.telegramUserId}` : `id:${s.id}`;
@@ -710,44 +715,52 @@ async function startServer(app?: import('express').Express) {
 }
 
 async function main() {
-  // Fail fast on missing JWT in production (before bind)
+  // 1) Fail fast on missing/invalid production config
   assertSecureConfig();
+
+  // 2) Database must succeed before we accept traffic in production
+  await initDb();
+  await ensureTeachersTable();
+  await store.init();
+  if (!store.isReady()) {
+    throw new Error('Store failed to become ready');
+  }
 
   const PORT = env.port;
   const app = express();
 
-  // Health MUST respond before any DB work so Railway healthchecks succeed
+  // Liveness: process is up
   app.get('/health', (_req, res) => {
     res.status(200).json({ ok: true, service: 'quiz-bot-api' });
   });
+  // Readiness: DB + store initialized
+  app.get('/ready', (_req, res) => {
+    if (!store.isReady()) {
+      return res.status(503).json({ ok: false, ready: false });
+    }
+    return res.status(200).json({ ok: true, ready: true, service: 'quiz-bot-api' });
+  });
   app.get('/', (_req, res) => {
-    res.status(200).json({ ok: true, service: 'quiz-bot-api' });
+    res.status(200).json({ ok: true, service: 'quiz-bot-api', ready: store.isReady() });
   });
 
+  // 3) Mount API routes
+  await startServer(app);
+
+  // 4) Bind Railway PORT (never hardcode)
   await new Promise<void>((resolve, reject) => {
     const server = app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Quiz Bot API listening on 0.0.0.0:${PORT} (health ready)`);
+      console.log(`Quiz Bot API listening on 0.0.0.0:${PORT}`);
       resolve();
     });
     server.on('error', reject);
   });
 
-  // Heavy init after port is open
-  try {
-    await initDb();
-    await ensureTeachersTable();
-    await store.init();
-  } catch (e) {
-    console.error('[boot] DB/store init error (server still up for /health):', e);
-  }
-
-  // Mount full API on same app (Express allows post-listen route registration)
-  await startServer(app);
-
+  // 5) Single-instance Telegram polling
   startTelegramPolling();
   console.log('Quiz Bot API fully ready');
 }
 main().catch(err => {
-  console.error(err);
+  console.error('[boot] FATAL:', err);
   process.exit(1);
 });

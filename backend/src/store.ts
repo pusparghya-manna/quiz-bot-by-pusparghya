@@ -59,8 +59,18 @@ class Store {
       );
     } catch (e) {
       console.error('Store init error', e);
+      const isProd = process.env.NODE_ENV === 'production' || !!process.env.RAILWAY_ENVIRONMENT;
+      if (isProd) {
+        this.ready = false;
+        throw e;
+      }
+      // Dev only: allow boot without DB
       this.ready = true;
     }
+  }
+
+  isReady() {
+    return this.ready;
   }
 
 
