@@ -2,7 +2,8 @@
 FROM node:20-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# use npm install (more resilient than npm ci if lock drifts)
+RUN npm install
 COPY . .
 RUN npm run build
 RUN npm prune --omit=dev
