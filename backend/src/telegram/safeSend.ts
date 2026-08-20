@@ -1,7 +1,7 @@
 import { splitTelegramMessage } from '../utils/telegramSplit.js';
 
-const TELEGRAM_TIMEOUT_MS = 12_000;
-const MAX_RETRIES = 3;
+const TELEGRAM_TIMEOUT_MS = 8_000;
+const MAX_RETRIES = 2;
 
 export type TelegramSendResult = {
   ok: boolean;
@@ -62,10 +62,10 @@ async function callWithRetry(token: string, method: string, body: Record<string,
         return last;
       }
 
-      await sleep(200 * Math.pow(2, attempt));
+      await sleep(100 * Math.pow(2, attempt));
     } catch (e: any) {
       last = { ok: false, description: e?.name === 'AbortError' ? 'timeout' : e?.message || 'network' };
-      await sleep(200 * Math.pow(2, attempt));
+      await sleep(100 * Math.pow(2, attempt));
     }
   }
   return last;

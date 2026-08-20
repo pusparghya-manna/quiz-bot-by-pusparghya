@@ -170,12 +170,33 @@ function renderMainMenu(student: Student): SimulatorResponse {
   };
 }
 
+/** Bounded in-memory dedup — avoids a Turso round-trip on every button press. */
+const recentUpdateIds = new Set<number>();
+const RECENT_UPDATE_MAX = 4000;
+
+function rememberUpdateId(id: number) {
+  recentUpdateIds.add(id);
+  if (recentUpdateIds.size > RECENT_UPDATE_MAX) {
+    // drop oldest-ish entries (Set iteration order is insertion order)
+    const n = recentUpdateIds.size - RECENT_UPDATE_MAX + 500;
+    let i = 0;
+    for (const x of recentUpdateIds) {
+      recentUpdateIds.delete(x);
+      if (++i >= n) break;
+    }
+  }
+}
+
 export async function processTelegramUpdate(update: TelegramUpdate): Promise<SimulatorResponse | null> {
-  // Claim only after successful handling so crashes do not permanently drop updates.
   try {
+    if (update.update_id != null && recentUpdateIds.has(Number(update.update_id))) {
+      return null;
+    }
     const result = await processTelegramUpdateInner(update);
     if (update.update_id != null && result !== undefined) {
-      await store.claimTelegramUpdate(Number(update.update_id));
+      rememberUpdateId(Number(update.update_id));
+      // Persist claim in background — do not block Telegram reply
+      void store.claimTelegramUpdate(Number(update.update_id)).catch(() => {});
     }
     return result;
   } catch (err: any) {
@@ -185,18 +206,6 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
 }
 
 async function processTelegramUpdateInner(update: TelegramUpdate): Promise<SimulatorResponse | null> {
-  // Soft dedup: if already claimed from a prior successful run, skip
-  if (update.update_id != null) {
-    const { db } = await import('../database/client.js');
-    try {
-      const existing = await db.execute({
-        sql: 'SELECT 1 FROM telegram_processed_updates WHERE update_id = ? LIMIT 1',
-        args: [Number(update.update_id)],
-      });
-      if (existing.rows.length > 0) return null;
-    } catch { /* table may not exist yet */ }
-  }
-
   const now = new Date();
 
   // Handle callback queries (button clicks)
@@ -698,8 +707,8 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
     return await autoSubmitExam(exam, attempt);
   }
 
+  // Memory-only index update for snappy UI. SQL is updated on answer save / submit.
   attempt.currentQuestionIndex = qIdx;
-  store.saveAttempt(attempt);
 
   const total = exam.questions.length;
   const question = exam.questions[qIdx];
