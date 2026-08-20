@@ -276,5 +276,10 @@ export async function runBlobMigration(): Promise<MigrationReport> {
     args: [new Date().toISOString()],
   });
 
+    await db.execute({
+    sql: `INSERT INTO schema_meta (key, value) VALUES ('blob_migrated_v1', ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    args: [new Date().toISOString()],
+  });
   return report;
 }

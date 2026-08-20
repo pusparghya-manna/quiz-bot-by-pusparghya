@@ -1,5 +1,5 @@
 import { ensureSchema } from './database/migrateFromBlobs.js';
-import { createClient, Client } from '@libsql/client';
+import { createClient, Client, InArgs, Transaction } from '@libsql/client';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -22,6 +22,35 @@ export const db: Client = createClient({
   authToken: authToken || undefined,
 });
 
+export type SqlStmt = { sql: string; args?: InArgs };
+
+/** Run multiple statements atomically. Rolls back on any failure. */
+export async function withWriteTx<T>(fn: (tx: Transaction) => Promise<T>): Promise<T> {
+  const tx = await db.transaction('write');
+  try {
+    const result = await fn(tx);
+    await tx.commit();
+    return result;
+  } catch (err) {
+    try {
+      await tx.rollback();
+    } catch {
+      /* ignore rollback errors */
+    }
+    throw err;
+  }
+}
+
+/** Convenience: batch of statements in one write transaction. */
+export async function batchWrite(stmts: SqlStmt[]): Promise<void> {
+  if (stmts.length === 0) return;
+  await withWriteTx(async (tx) => {
+    for (const s of stmts) {
+      await tx.execute({ sql: s.sql, args: s.args ?? [] });
+    }
+  });
+}
+
 /** Ensure Turso is reachable and schema exists. Throws in production on failure. */
 export async function initDb(): Promise<void> {
   const maxAttempts = isProd ? 8 : 5;
@@ -34,7 +63,9 @@ export async function initDb(): Promise<void> {
       return;
     } catch (err: any) {
       lastErr = err;
-      console.error(`[db] init attempt ${i}/${maxAttempts} failed:`, err?.message || err);
+      const msg = err?.message || String(err);
+      // Never log tokens/credentials
+      console.error(`[db] init attempt ${i}/${maxAttempts} failed:`, msg.replace(/eyJ[A-Za-z0-9_-]+/g, '[redacted]'));
       if (i < maxAttempts) {
         await new Promise((r) => setTimeout(r, 1500 * i));
       }

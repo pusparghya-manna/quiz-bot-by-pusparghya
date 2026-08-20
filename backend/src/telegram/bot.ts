@@ -51,8 +51,8 @@ export function calculateAttemptScore(exam: Exam, answers: Record<string, number
 
 // Recalculate ranks for all attempts of an exam according to default ranking rules:
 // Priority: 1. Higher score -> 2. Lower time taken -> 3. Earlier submission timestamp
-export function updateExamRanks(examId: string) {
-  // Only FIRST (official) attempts count toward ranking
+export async function updateExamRanks(examId: string) {
+  // Only FIRST (official) attempts count toward ranking — rank-only SQL updates (no answer rewrite)
   const attempts = store.getAttempts(examId).filter(a =>
     (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false
   );
@@ -65,18 +65,20 @@ export function updateExamRanks(examId: string) {
     return aTime - bTime;
   });
 
-  // Clear ranks on non-official attempts
-  store.getAttempts(examId).forEach(att => {
+  const { db } = await import('../db.js');
+  for (const att of store.getAttempts(examId)) {
     if (att.isOfficial === false) {
       att.rank = undefined;
-      store.saveAttempt(att);
+      await db.execute({ sql: 'UPDATE attempts SET rank = NULL WHERE id = ?', args: [att.id] });
     }
-  });
-
-  attempts.forEach((att, idx) => {
-    att.rank = idx + 1;
-    store.saveAttempt(att);
-  });
+  }
+  for (let idx = 0; idx < attempts.length; idx++) {
+    attempts[idx].rank = idx + 1;
+    await db.execute({
+      sql: 'UPDATE attempts SET rank = ? WHERE id = ?',
+      args: [idx + 1, attempts[idx].id],
+    });
+  }
 }
 
 /** Official exam window: [startDate, startDate + durationMinutes) */
@@ -217,6 +219,14 @@ function renderMainMenu(student: Student): SimulatorResponse {
 }
 
 export async function processTelegramUpdate(update: TelegramUpdate): Promise<SimulatorResponse | null> {
+  // Idempotent: ignore already-processed Telegram updates (retries / multi-instance)
+  if (update.update_id != null) {
+    const claimed = await store.claimTelegramUpdate(Number(update.update_id));
+    if (!claimed) {
+      return null;
+    }
+  }
+
   const now = new Date();
 
   // Handle callback queries (button clicks)
@@ -259,10 +269,10 @@ This name will appear on results and the leaderboard.`,
       response = renderStudentLeaderboard(student, true);
     } else if (data.startsWith('start_exam_') || data.startsWith('resume_exam_')) {
       const examId = data.replace('start_exam_', '').replace('resume_exam_', '');
-      response = handleStartOrResumeExam(examId, student, user);
+      response = await handleStartOrResumeExam(examId, student, user);
     } else if (data.startsWith('reattempt_')) {
       const examId = data.replace('reattempt_', '');
-      response = handleStartOrResumeExam(examId, student, user, true);
+      response = await handleStartOrResumeExam(examId, student, user, true);
     } else if (data.startsWith('ans_')) {
       // ans_EXAMID_qIdx_optIdx
       const rest = data.slice(4); // Remove "ans_"
@@ -274,7 +284,7 @@ This name will appear on results and the leaderboard.`,
         if (secondLastUnderscore !== -1) {
           const qIdx = parseInt(rem.slice(secondLastUnderscore + 1), 10);
           const examId = rem.slice(0, secondLastUnderscore);
-          response = handleOptionSelect(examId, qIdx, optIdx, student, user);
+          response = await handleOptionSelect(examId, qIdx, optIdx, student, user);
         }
       }
     } else if (data.startsWith('nav_')) {
@@ -284,7 +294,7 @@ This name will appear on results and the leaderboard.`,
       if (lastUnderscore !== -1) {
         const targetIdx = parseInt(rest.slice(lastUnderscore + 1), 10);
         const examId = rest.slice(0, lastUnderscore);
-        response = renderQuestionView(examId, targetIdx, student, user);
+        response = await renderQuestionView(examId, targetIdx, student, user);
       }
     } else if (data.startsWith('grid_')) {
       // grid_EXAMID or grid_EXAMID_PAGE
@@ -299,7 +309,7 @@ This name will appear on results and the leaderboard.`,
           examId = rest.slice(0, lastUnderscore);
         }
       }
-      response = renderQuestionGrid(examId, student, user, page);
+      response = await renderQuestionGrid(examId, student, user, page);
     } else if (data.startsWith('rev_')) {
       // rev_EXAMID_sum | rev_EXAMID_PAGE
       const rest = data.slice(4);
@@ -329,7 +339,7 @@ This name will appear on results and the leaderboard.`,
       response = renderSubmitConfirmation(examId, student, user);
     } else if (data.startsWith('do_submit_')) {
       const examId = data.replace('do_submit_', '');
-      response = handleFinalSubmit(examId, student, user);
+      response = await handleFinalSubmit(examId, student, user);
     }
 
     // Single-chat UI: always edit the same message on button taps
@@ -414,7 +424,7 @@ This name will appear on results and the leaderboard.`,
       // Deep link: /start exam_<examId>
       if (payload.startsWith('exam_')) {
         const examId = payload.slice(5);
-        return handleStartOrResumeExam(examId, student, user);
+        return await handleStartOrResumeExam(examId, student, user);
       }
 
       const notice = store.getSettings().systemNotice;
@@ -528,7 +538,7 @@ function renderExamsList(student: Student): SimulatorResponse {
   };
 }
 
-function handleStartOrResumeExam(examId: string, student: Student, user: TelegramUser, forceNew = false): SimulatorResponse {
+async function handleStartOrResumeExam(examId: string, student: Student, user: TelegramUser, forceNew = false): Promise<SimulatorResponse> {
   const now = new Date();
   const exam = store.getExamById(examId);
 
@@ -583,13 +593,13 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
   // Resume in-progress
   if (!forceNew && attempt && attempt.status === 'IN_PROGRESS') {
     if (now.getTime() > new Date(attempt.expiresAt).getTime()) {
-      return autoSubmitExam(exam, attempt);
+      return await autoSubmitExam(exam, attempt);
     }
-    return renderQuestionView(exam.id, attempt.currentQuestionIndex, student, user);
+    return await renderQuestionView(exam.id, attempt.currentQuestionIndex, student, user);
   }
 
-  // Start new attempt (first or reattempt)
-  const attemptNumber = allMine.length + 1;
+  // Start new attempt (first or reattempt) — SQL-backed number for multi-instance safety
+  const attemptNumber = await store.nextAttemptNumber(examId, student.telegramUserId!);
   const windowOpen = isExamWindowOpen(exam, now.getTime());
   // Official ONLY inside [start, start+duration) and no prior official attempt
   const isOfficial = windowOpen && !officialExists;
@@ -649,10 +659,10 @@ function handleStartOrResumeExam(examId: string, student: Student, user: Telegra
     };
   }
 
-  return renderQuestionView(exam.id, 0, student, user);
+  return await renderQuestionView(exam.id, 0, student, user);
 }
 
-function handleOptionSelect(examId: string, qIdx: number, optIdx: number, student: Student, user: TelegramUser): SimulatorResponse {
+async function handleOptionSelect(examId: string, qIdx: number, optIdx: number, student: Student, user: TelegramUser): Promise<SimulatorResponse> {
   const now = new Date();
   const exam = store.getExamById(examId);
   if (!exam) {
@@ -664,7 +674,7 @@ function handleOptionSelect(examId: string, qIdx: number, optIdx: number, studen
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
-    const startRes = handleStartOrResumeExam(examId, student, user);
+    const startRes = await handleStartOrResumeExam(examId, student, user);
     attempt = store.getAttempt(examId, student.telegramUserId!);
     if (!attempt) {
       return startRes;
@@ -673,7 +683,7 @@ function handleOptionSelect(examId: string, qIdx: number, optIdx: number, studen
 
   // Check expiration
   if (now.getTime() > new Date(attempt.expiresAt).getTime()) {
-    return autoSubmitExam(exam, attempt);
+    return await autoSubmitExam(exam, attempt);
   }
 
   if (attempt.status !== 'IN_PROGRESS') {
@@ -682,15 +692,19 @@ function handleOptionSelect(examId: string, qIdx: number, optIdx: number, studen
 
   const question = exam.questions[qIdx];
   if (question) {
+    if (!attempt.answers) attempt.answers = {};
     attempt.answers[question.id] = optIdx;
     attempt.currentQuestionIndex = qIdx;
-    store.saveAttempt(attempt);
+    // Idempotent single-answer UPSERT (no full rewrite race)
+    void store.saveAnswer(attempt.id, question.id, optIdx, qIdx).catch((e) =>
+      console.error('[bot] saveAnswer failed', e?.message || e)
+    );
   }
 
-  return renderQuestionView(examId, qIdx, student, user);
+  return await renderQuestionView(examId, qIdx, student, user);
 }
 
-function renderQuestionView(examId: string, qIdx: number, student: Student, user: TelegramUser): SimulatorResponse {
+async function renderQuestionView(examId: string, qIdx: number, student: Student, user: TelegramUser): Promise<SimulatorResponse> {
   const now = new Date();
   const exam = store.getExamById(examId);
   if (!exam) {
@@ -702,7 +716,7 @@ function renderQuestionView(examId: string, qIdx: number, student: Student, user
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
-    const startRes = handleStartOrResumeExam(examId, student, user);
+    const startRes = await handleStartOrResumeExam(examId, student, user);
     attempt = store.getAttempt(examId, student.telegramUserId!);
     if (!attempt) {
       return startRes;
@@ -711,7 +725,7 @@ function renderQuestionView(examId: string, qIdx: number, student: Student, user
 
   // Expiration check
   if (now.getTime() > new Date(attempt.expiresAt).getTime()) {
-    return autoSubmitExam(exam, attempt);
+    return await autoSubmitExam(exam, attempt);
   }
 
   attempt.currentQuestionIndex = qIdx;
@@ -774,7 +788,7 @@ function renderQuestionView(examId: string, qIdx: number, student: Student, user
   };
 }
 
-function renderQuestionGrid(examId: string, student: Student, user: TelegramUser, page = 0): SimulatorResponse {
+async function renderQuestionGrid(examId: string, student: Student, user: TelegramUser, page = 0): Promise<SimulatorResponse> {
   const exam = store.getExamById(examId);
   if (!exam) {
     return { chatId: user.id, text: '❌ Examination not found.', type: 'sendMessage' };
@@ -782,7 +796,7 @@ function renderQuestionGrid(examId: string, student: Student, user: TelegramUser
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
-    handleStartOrResumeExam(examId, student, user);
+    await handleStartOrResumeExam(examId, student, user);
     attempt = store.getAttempt(examId, student.telegramUserId!);
     if (!attempt) {
       return { chatId: user.id, text: '❌ Exam session missing.', type: 'sendMessage' };
@@ -880,7 +894,7 @@ function renderSubmitConfirmation(examId: string, student: Student, user: Telegr
   };
 }
 
-function handleFinalSubmit(examId: string, student: Student, user: TelegramUser): SimulatorResponse {
+async function handleFinalSubmit(examId: string, student: Student, user: TelegramUser): Promise<SimulatorResponse> {
   const now = new Date();
   const exam = store.getExamById(examId);
   const attempt = store.getAttempt(examId, student.telegramUserId!);
@@ -908,14 +922,19 @@ function handleFinalSubmit(examId: string, student: Student, user: TelegramUser)
   attempt.skippedCount = stats.skippedCount;
   attempt.timeTakenSeconds = stats.timeTakenSeconds;
 
-  store.saveAttempt(attempt);
-  updateExamRanks(exam.id);
+  const saved = await store.submitAttemptIfInProgress(attempt);
+  if (!saved) {
+    // Already submitted (duplicate callback) — return existing summary
+    const existing = store.getAttempt(examId, student.telegramUserId!);
+    if (existing) return renderAttemptSummary(exam, existing);
+  }
+  await updateExamRanks(exam.id);
   store.addAuditLog('EXAM_SUBMITTED', `Student ${student.name} (${student.studentId}) submitted ${exam.title} with score ${attempt.score}/${attempt.maxScore}`);
 
   return renderAttemptSummary(exam, attempt);
 }
 
-function autoSubmitExam(exam: Exam, attempt: Attempt): SimulatorResponse {
+async function autoSubmitExam(exam: Exam, attempt: Attempt): Promise<SimulatorResponse> {
   const now = new Date();
   const startMs = new Date(attempt.startedAt).getTime();
   const timeTakenSecs = Math.floor((new Date(attempt.expiresAt).getTime() - startMs) / 1000);
@@ -932,8 +951,8 @@ function autoSubmitExam(exam: Exam, attempt: Attempt): SimulatorResponse {
   attempt.skippedCount = stats.skippedCount;
   attempt.timeTakenSeconds = stats.timeTakenSeconds;
 
-  store.saveAttempt(attempt);
-  updateExamRanks(exam.id);
+  await store.submitAttemptIfInProgress(attempt);
+  await updateExamRanks(exam.id);
   store.addAuditLog('EXAM_AUTO_SUBMITTED', `Exam ${exam.title} auto-submitted for ${attempt.studentName} due to time expiration`);
 
   return renderAttemptSummary(exam, attempt);

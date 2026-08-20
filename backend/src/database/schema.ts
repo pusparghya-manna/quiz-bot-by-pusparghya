@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS exams (
 );
 CREATE INDEX IF NOT EXISTS idx_exams_teacher ON exams(teacher_id);
 CREATE INDEX IF NOT EXISTS idx_exams_start ON exams(start_date);
+CREATE INDEX IF NOT EXISTS idx_exams_teacher_status ON exams(teacher_id, status);
 
 CREATE TABLE IF NOT EXISTS questions (
   id TEXT PRIMARY KEY,
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS questions (
   FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_questions_exam ON questions(exam_id);
+CREATE INDEX IF NOT EXISTS idx_questions_exam_order ON questions(exam_id, sort_order);
 
 CREATE TABLE IF NOT EXISTS question_bank (
   id TEXT PRIMARY KEY,
@@ -82,11 +84,11 @@ CREATE TABLE IF NOT EXISTS students (
   telegram_user_id INTEGER UNIQUE,
   telegram_username TEXT,
   link_code TEXT,
-  status TEXT NOT NULL DEFAULT 'unlinked',
-  linked_at TEXT
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  joined_at TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_students_tg ON students(telegram_user_id);
 CREATE INDEX IF NOT EXISTS idx_students_code ON students(student_code);
+CREATE INDEX IF NOT EXISTS idx_students_tg ON students(telegram_user_id);
 
 CREATE TABLE IF NOT EXISTS student_teachers (
   student_id TEXT NOT NULL,
@@ -116,20 +118,27 @@ CREATE TABLE IF NOT EXISTS attempts (
   time_taken_seconds INTEGER NOT NULL DEFAULT 0,
   rank INTEGER,
   is_official INTEGER NOT NULL DEFAULT 1,
-  attempt_number INTEGER NOT NULL DEFAULT 1
+  attempt_number INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_attempts_exam ON attempts(exam_id);
 CREATE INDEX IF NOT EXISTS idx_attempts_tg ON attempts(telegram_user_id);
 CREATE INDEX IF NOT EXISTS idx_attempts_exam_tg ON attempts(exam_id, telegram_user_id);
 CREATE INDEX IF NOT EXISTS idx_attempts_status ON attempts(exam_id, status, is_official);
+CREATE INDEX IF NOT EXISTS idx_attempts_exam_rank ON attempts(exam_id, is_official, status, score DESC);
+-- One in-progress attempt per exam+telegram user (partial unique via app logic + helper index)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_attempts_unique_number
+  ON attempts(exam_id, telegram_user_id, attempt_number);
 
 CREATE TABLE IF NOT EXISTS attempt_answers (
   attempt_id TEXT NOT NULL,
   question_id TEXT NOT NULL,
   option_index INTEGER NOT NULL,
+  updated_at TEXT,
   PRIMARY KEY (attempt_id, question_id),
   FOREIGN KEY (attempt_id) REFERENCES attempts(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_answers_attempt ON attempt_answers(attempt_id);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY,
@@ -140,6 +149,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   teacher_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_teacher ON audit_logs(teacher_id, timestamp);
 
 CREATE TABLE IF NOT EXISTS system_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -162,11 +172,19 @@ CREATE TABLE IF NOT EXISTS broadcast_jobs (
   created_at TEXT NOT NULL,
   finished_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_broadcast_teacher ON broadcast_jobs(teacher_id, created_at);
+
 CREATE TABLE IF NOT EXISTS broadcast_recipients (
   job_id TEXT NOT NULL,
   telegram_user_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   error TEXT,
   PRIMARY KEY (job_id, telegram_user_id)
+);
+
+-- Idempotency for Telegram webhook/polling updates
+CREATE TABLE IF NOT EXISTS telegram_processed_updates (
+  update_id INTEGER PRIMARY KEY,
+  processed_at TEXT NOT NULL
 );
 `;
