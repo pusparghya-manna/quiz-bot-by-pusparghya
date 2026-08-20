@@ -41,6 +41,7 @@ RUN apt-get update -y \
   && rm -rf /var/lib/apt/lists/*
 
 # Single small package install is reliable on Metal builders
+COPY package.json ./
 RUN npm install --no-audit --no-fund @libsql/client@0.14.0 \
   && test -d node_modules/@libsql
 

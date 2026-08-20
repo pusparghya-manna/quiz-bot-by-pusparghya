@@ -35,24 +35,38 @@ class Store {
     try {
       await ensureSchema();
 
-      // Auto-migrate blobs → tables if tables empty but blobs exist
-      const examCount = await db.execute('SELECT COUNT(*) as c FROM exams');
-      const blobExams = await db.execute({
-        sql: `SELECT data FROM app_data WHERE key = 'exams' LIMIT 1`,
-        args: [],
-      }).catch(() => ({ rows: [] as any[] }));
-
-      const nExams = Number((examCount.rows[0] as any)?.c || 0);
-      if (nExams === 0 && blobExams.rows.length > 0) {
-        console.log('[migration] Normalized tables empty — running blob → SQL migration…');
-        const report = await runBlobMigration();
-        console.log('[migration] report', JSON.stringify(report));
-      }
-
+      // Load whatever is already in normalized tables first (fast path)
       await this.loadFromSql();
       if (process.env.TELEGRAM_BOT_TOKEN) {
         this.data.settings.telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
       }
+
+      // If normalized tables empty but legacy blobs exist, migrate with a hard timeout
+      // so Railway boot is never stuck on row-by-row Turso writes forever.
+      const examCount = await db.execute('SELECT COUNT(*) as c FROM exams');
+      const nExams = Number((examCount.rows[0] as any)?.c || 0);
+      if (nExams === 0) {
+        const blobExams = await db
+          .execute({ sql: `SELECT data FROM app_data WHERE key = 'exams' LIMIT 1`, args: [] })
+          .catch(() => ({ rows: [] as any[] }));
+        if (blobExams.rows.length > 0) {
+          console.log('[migration] Normalized tables empty — blob → SQL migration (max 90s)…');
+          try {
+            const report = await Promise.race([
+              runBlobMigration(),
+              new Promise((_, rej) =>
+                setTimeout(() => rej(new Error('migration timed out after 90s')), 90_000)
+              ),
+            ]);
+            console.log('[migration] report', JSON.stringify(report));
+            await this.loadFromSql();
+          } catch (migErr: any) {
+            console.error('[migration] deferred/failed:', migErr?.message || migErr);
+            console.error('[migration] App continues; re-run npm run db:migrate offline if needed.');
+          }
+        }
+      }
+
       this.ready = true;
       console.log(
         `Store loaded from SQL: exams=${this.data.exams.length} students=${this.data.students.length} attempts=${this.data.attempts.length}`
@@ -64,7 +78,6 @@ class Store {
         this.ready = false;
         throw e;
       }
-      // Dev only: allow boot without DB
       this.ready = true;
     }
   }
