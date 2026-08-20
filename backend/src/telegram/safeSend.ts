@@ -115,15 +115,15 @@ export async function sendSafeTelegramMessage(
       data = await callWithRetry(token, method, body);
     }
 
-    // Edit failed → fall back to sendMessage
-    if (!data?.ok && useEdit) {
+    // Edit failed (too long / not modified / etc.) → fall back to sendMessage
+    if (!data?.ok && (useEdit || method === 'editMessageText')) {
+      const desc = String(data?.description || '').toLowerCase();
       delete body.message_id;
-      data = await callWithRetry(token, 'sendMessage', body);
-    }
-
-    // Multi-chunk: after first, always sendMessage (can't edit into multiple)
-    if (!data?.ok && method === 'editMessageText') {
-      delete body.message_id;
+      // If still too long for a single message, re-chunk at 3500 and send first only here;
+      // outer loop already splits at 4000 — retry without parse_mode if needed.
+      if (desc.includes('too long') && String(body.text || '').length > 3500) {
+        body.text = String(body.text).slice(0, 3490) + '\n…';
+      }
       data = await callWithRetry(token, 'sendMessage', body);
     }
 

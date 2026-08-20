@@ -287,8 +287,43 @@ This name will appear on results and the leaderboard.`,
         response = renderQuestionView(examId, targetIdx, student, user);
       }
     } else if (data.startsWith('grid_')) {
-      const examId = data.replace('grid_', '');
-      response = renderQuestionGrid(examId, student, user);
+      // grid_EXAMID or grid_EXAMID_PAGE
+      const rest = data.slice(5);
+      const lastUnderscore = rest.lastIndexOf('_');
+      let examId = rest;
+      let page = 0;
+      if (lastUnderscore !== -1) {
+        const maybePage = rest.slice(lastUnderscore + 1);
+        if (/^\d+$/.test(maybePage)) {
+          page = parseInt(maybePage, 10);
+          examId = rest.slice(0, lastUnderscore);
+        }
+      }
+      response = renderQuestionGrid(examId, student, user, page);
+    } else if (data.startsWith('rev_')) {
+      // rev_EXAMID_sum | rev_EXAMID_PAGE
+      const rest = data.slice(4);
+      const lastUnderscore = rest.lastIndexOf('_');
+      if (lastUnderscore !== -1) {
+        const examId = rest.slice(0, lastUnderscore);
+        const pagePart = rest.slice(lastUnderscore + 1);
+        const exam = store.getExamById(examId);
+        // Prefer latest submitted attempt (official first, then any)
+        const mine = store.getStudentAttempts(examId, student.telegramUserId!).filter(
+          (a) => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'
+        );
+        const attempt =
+          mine.find((a) => a.isOfficial !== false) ||
+          mine[mine.length - 1] ||
+          (exam ? store.getAttempt(examId, student.telegramUserId!) : undefined);
+        if (exam && attempt) {
+          if (pagePart === 'sum') {
+            response = renderAttemptSummary(exam, attempt, null);
+          } else {
+            response = renderAttemptSummary(exam, attempt, parseInt(pagePart, 10) || 0);
+          }
+        }
+      }
     } else if (data.startsWith('confirm_submit_')) {
       const examId = data.replace('confirm_submit_', '');
       response = renderSubmitConfirmation(examId, student, user);
@@ -704,7 +739,8 @@ function renderQuestionView(examId: string, qIdx: number, student: Student, user
   question.options.forEach((optText, oIdx) => {
     const isSelected = selectedOpt === oIdx;
     const prefix = isSelected ? '🔘 ' : '⚪ ';
-    const label = `${prefix}${String.fromCharCode(65 + oIdx)}. ${optText}`;
+    let label = `${prefix}${String.fromCharCode(65 + oIdx)}. ${optText}`;
+    if (label.length > 60) label = label.slice(0, 57) + '…';
     keyboard.push([{
       text: label,
       callback_data: `ans_${exam.id}_${qIdx}_${oIdx}`
@@ -738,14 +774,11 @@ function renderQuestionView(examId: string, qIdx: number, student: Student, user
   };
 }
 
-function renderQuestionGrid(examId: string, student: Student, user: TelegramUser): SimulatorResponse {
+function renderQuestionGrid(examId: string, student: Student, user: TelegramUser, page = 0): SimulatorResponse {
   const exam = store.getExamById(examId);
   if (!exam) {
     return { chatId: user.id, text: '❌ Examination not found.', type: 'sendMessage' };
   }
-
-  // Enroll only when student is allowed past the lock checks (authorized access)
-  linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
@@ -756,39 +789,51 @@ function renderQuestionGrid(examId: string, student: Student, user: TelegramUser
     }
   }
 
-  const answeredCount = Object.keys(attempt.answers).length;
+  const answeredCount = Object.keys(attempt.answers || {}).length;
   const total = exam.questions.length;
   const remaining = formatRemaining(attempt.expiresAt);
+  const PER_PAGE = 16; // 4x4 buttons — stays within Telegram button limits
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const p = Math.max(0, Math.min(page, totalPages - 1));
+  const start = p * PER_PAGE;
+  const end = Math.min(start + PER_PAGE, total);
 
   let text = `📋 *Question Review Grid*\n`;
-  text += `📝 *${exam.title}*\n`;
+  text += `📝 *${escapeMd(exam.title)}*\n`;
   text += `⏱️ Time Remaining: *${remaining}*\n`;
-  text += `🟢 Answered: ${answeredCount}/${total} | ⚪ Unanswered: ${total - answeredCount}\n\n`;
-  text += `Tap any question number below to jump directly to it:`;
+  text += `🟢 Answered: ${answeredCount}/${total} | ⚪ Unanswered: ${total - answeredCount}\n`;
+  text += `📄 Page ${p + 1}/${totalPages} (Q${start + 1}–Q${end})\n\n`;
+  text += `Tap a question number to jump to it:`;
 
   const keyboard: InlineKeyboardButton[][] = [];
   let currentRow: InlineKeyboardButton[] = [];
 
-  exam.questions.forEach((q, idx) => {
-    const isAnswered = attempt.answers[q.id] !== undefined;
+  for (let idx = start; idx < end; idx++) {
+    const q = exam.questions[idx];
+    const isAnswered = attempt.answers?.[q.id] !== undefined;
     const isCurrent = attempt.currentQuestionIndex === idx;
     let label = isAnswered ? `🟢 Q${idx + 1}` : `⚪ Q${idx + 1}`;
-    if (isCurrent) label = `👉 ${label}`;
+    if (isCurrent) label = `👉 Q${idx + 1}`;
 
     currentRow.push({
       text: label,
-      callback_data: `nav_${exam.id}_${idx}`
+      callback_data: `nav_${exam.id}_${idx}`,
     });
 
-    if (currentRow.length === 4 || idx === total - 1) {
+    if (currentRow.length === 4 || idx === end - 1) {
       keyboard.push(currentRow);
       currentRow = [];
     }
-  });
+  }
+
+  const nav: InlineKeyboardButton[] = [];
+  if (p > 0) nav.push({ text: '◀ Prev page', callback_data: `grid_${exam.id}_${p - 1}` });
+  if (p < totalPages - 1) nav.push({ text: 'Next page ▶', callback_data: `grid_${exam.id}_${p + 1}` });
+  if (nav.length) keyboard.push(nav);
 
   keyboard.push([
     { text: '🔙 Back to question', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex}` },
-    { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` }
+    { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` },
   ]);
   keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
@@ -796,7 +841,7 @@ function renderQuestionGrid(examId: string, student: Student, user: TelegramUser
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText'
+    type: 'editMessageText',
   };
 }
 
@@ -894,14 +939,17 @@ function autoSubmitExam(exam: Exam, attempt: Attempt): SimulatorResponse {
   return renderAttemptSummary(exam, attempt);
 }
 
-function renderAttemptSummary(exam: Exam, attempt: Attempt): SimulatorResponse {
+function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number | null = null): SimulatorResponse {
+  const chatId = attempt.telegramUserId;
   let text = `🎉 *Exam submitted*\n\n`;
-  text += `📝 *${exam.title}*\n`;
-  text += `👤 *${attempt.studentName}*\n`;
+  text += `📝 *${escapeMd(exam.title)}*\n`;
+  text += `👤 *${escapeMd(attempt.studentName || '')}*\n`;
   if (attempt.attemptNumber && attempt.attemptNumber > 1) {
     text += `🔁 Practice attempt #${attempt.attemptNumber} (not ranked)\n`;
   }
   text += `📌 ${attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-submitted (time up)' : '✅ Submitted'}\n\n`;
+
+  const keyboard: InlineKeyboardButton[][] = [];
 
   if (exam.resultVisibility === 'PUBLISHED') {
     text += `📊 *Your score*\n`;
@@ -915,85 +963,143 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt): SimulatorResponse {
     } else if (attempt.isOfficial !== false && !isExamTimeEnded(exam)) {
       text += `🏆 Rank after exam ends\n`;
     }
-    text += `\n*Question-wise*\n`;
-    exam.questions.forEach((q, i) => {
-      const sel = attempt.answers[q.id];
-      const has = sel !== undefined && sel !== null;
-      let mark = '⚪';
-      let extra = 'Skipped';
-      if (has) {
-        const ok = q.answer !== null && sel === q.answer;
-        mark = ok ? '✅' : '❌';
-        const chosen = q.options?.[sel] ?? `opt ${sel}`;
-        const correct = q.answer !== null && q.options?.[q.answer] !== undefined ? q.options[q.answer] : '—';
-        extra = ok ? `Your answer: ${chosen}` : `Yours: ${chosen} · Correct: ${correct}`;
+
+    const totalQ = exam.questions.length;
+    const PER_PAGE = 5;
+    const totalPages = Math.max(1, Math.ceil(totalQ / PER_PAGE));
+
+    if (reviewPage === null) {
+      // Summary only — stays under Telegram limit even with 100+ questions
+      text += `\n📖 Tap *Review answers* to see each question (page by page).`;
+      if (totalQ > 0) {
+        keyboard.push([{ text: `📖 Review answers (1/${totalPages})`, callback_data: `rev_${exam.id}_0` }]);
       }
-      const short = (q.question || '').slice(0, 60);
-      text += `${mark} Q${i + 1}. ${short}${short.length >= 60 ? '…' : ''}\n   ${extra}\n`;
-    });
+    } else {
+      const page = Math.max(0, Math.min(reviewPage, totalPages - 1));
+      const start = page * PER_PAGE;
+      const end = Math.min(start + PER_PAGE, totalQ);
+      text += `\n*Questions ${start + 1}–${end} of ${totalQ}* (page ${page + 1}/${totalPages})\n\n`;
+
+      for (let i = start; i < end; i++) {
+        const q = exam.questions[i];
+        const sel = attempt.answers?.[q.id];
+        const has = sel !== undefined && sel !== null;
+        let mark = '⚪';
+        let extra = 'Skipped';
+        if (has) {
+          const ok = q.answer !== null && sel === q.answer;
+          mark = ok ? '✅' : '❌';
+          const chosen = q.options?.[sel as number] ?? `opt ${sel}`;
+          const correct =
+            q.answer !== null && q.options?.[q.answer] !== undefined ? q.options[q.answer] : '—';
+          // Keep lines short for Telegram limit
+          const cShort = String(chosen).slice(0, 40);
+          const rShort = String(correct).slice(0, 40);
+          extra = ok ? `Yours: ${cShort}` : `Yours: ${cShort} · Correct: ${rShort}`;
+        }
+        const short = escapeMd((q.question || '').slice(0, 50));
+        text += `${mark} *Q${i + 1}.* ${short}${ (q.question || '').length > 50 ? '…' : ''}\n   ${escapeMd(extra)}\n`;
+      }
+
+      const nav: InlineKeyboardButton[] = [];
+      if (page > 0) {
+        nav.push({ text: '◀ Previous', callback_data: `rev_${exam.id}_${page - 1}` });
+      }
+      if (page < totalPages - 1) {
+        nav.push({ text: 'Next ▶', callback_data: `rev_${exam.id}_${page + 1}` });
+      }
+      if (nav.length) keyboard.push(nav);
+      keyboard.push([{ text: '📊 Score summary', callback_data: `rev_${exam.id}_sum` }]);
+    }
   } else {
     text += `🔒 Results are hidden by the teacher for now.\n`;
   }
 
+  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
+  keyboard.push([{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]);
+  keyboard.push([{ text: '🔁 Reattempt (practice)', callback_data: `reattempt_${exam.id}` }]);
+  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+
+  // Hard safety: never exceed Telegram limit in one edit
+  if (text.length > 3900) {
+    text = text.slice(0, 3890) + '\n…';
+  }
+
   return {
-    chatId: attempt.telegramUserId,
+    chatId,
     text,
-    replyMarkup: {
-      inline_keyboard: [
-        [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
-        [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }],
-        [{ text: '🔁 Reattempt (practice)', callback_data: `reattempt_${exam.id}` }],
-        [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
-      ]
-    },
-    type: 'editMessageText'
+    replyMarkup: { inline_keyboard: keyboard },
+    type: 'editMessageText',
   };
 }
 
 function renderStudentResults(student: Student): SimulatorResponse {
-  const attempts = store.getAttempts().filter(a =>
-    (a.telegramUserId === student.telegramUserId || a.studentId === student.studentId) &&
-    (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED')
-  );
+  const attempts = store
+    .getAttempts()
+    .filter(
+      (a) =>
+        (a.telegramUserId === student.telegramUserId || a.studentId === student.studentId) &&
+        (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED')
+    )
+    .slice()
+    .sort((a, b) => {
+      const ta = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+      const tb = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+      return tb - ta;
+    });
 
   if (attempts.length === 0) {
     return {
       chatId: student.telegramUserId!,
       text: `📊 *My Results*\n\nYou have not submitted any exams yet.\nOpen the link from your teacher to start.`,
       replyMarkup: { inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]] },
-      type: 'sendMessage'
+      type: 'sendMessage',
     };
   }
 
-  let text = `📊 *My Results — ${student.name}*\n\n`;
+  // Cap list text length — details open via Review buttons
+  const MAX_LIST = 12;
+  const shown = attempts.slice(0, MAX_LIST);
+  let text = `📊 *My Results — ${escapeMd(student.name)}*\n\n`;
+  text += `_Showing ${shown.length} of ${attempts.length}. Tap an exam to open score & answers._\n\n`;
 
-  attempts.forEach((att, idx) => {
+  const keyboard: InlineKeyboardButton[][] = [];
+  shown.forEach((att, idx) => {
     const exam = store.getExamById(att.examId);
     const title = exam ? exam.title : att.examId;
     const practice = att.isOfficial === false ? ' (practice)' : '';
-    text += `*${idx + 1}. ${title}*${practice}\n`;
+    let line = `*${idx + 1}. ${escapeMd(title)}*${practice}\n`;
     if (exam && exam.resultVisibility === 'PUBLISHED') {
-      text += `   Score: *${att.score}/${att.maxScore}* (${att.percentage}%)`;
+      line += `   Score: *${att.score}/${att.maxScore}* (${att.percentage}%)`;
       if (att.isOfficial !== false && isExamTimeEnded(exam) && att.rank) {
-        text += ` · Rank #${att.rank}`;
+        line += ` · Rank #${att.rank}`;
       }
-      text += `\n\n`;
+      line += `\n`;
     } else {
-      text += `   🔒 Results hidden\n\n`;
+      line += `   🔒 Results hidden\n`;
+    }
+    text += line;
+    if (exam && exam.resultVisibility === 'PUBLISHED') {
+      keyboard.push([
+        {
+          text: `📖 ${idx + 1}. ${(title || 'Exam').slice(0, 28)}`,
+          callback_data: `rev_${att.examId}_sum`,
+        },
+      ]);
     }
   });
+
+  if (text.length > 3500) text = text.slice(0, 3490) + '\n…';
+
+  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
+  keyboard.push([{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]);
+  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
   return {
     chatId: student.telegramUserId!,
     text,
-    replyMarkup: {
-      inline_keyboard: [
-        [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
-        [{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }],
-        [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
-      ]
-    },
-    type: 'editMessageText'
+    replyMarkup: { inline_keyboard: keyboard },
+    type: 'editMessageText',
   };
 }
 
