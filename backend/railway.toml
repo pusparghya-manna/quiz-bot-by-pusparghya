@@ -1,6 +1,6 @@
 [build]
-builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile"
+builder = "RAILPACK"
+buildCommand = "npm install --no-audit --no-fund && npm run build"
 
 [deploy]
 startCommand = "node dist/index.js"
