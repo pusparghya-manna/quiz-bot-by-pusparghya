@@ -1,20 +1,26 @@
-# Build
 FROM node:20-slim AS builder
 WORKDIR /app
+ENV NODE_ENV=development
 COPY package.json package-lock.json ./
-RUN npm install
-COPY . .
-RUN npm run build && test -f dist/index.js
+RUN npm install --no-audit --no-fund
+COPY src ./src
+COPY tsconfig.json ./
+# Build with local esbuild from PATH via npm bin
+RUN ./node_modules/.bin/esbuild src/index.ts \
+      --bundle --platform=node --target=node20 --format=esm \
+      --outfile=dist/index.js \
+      --external:@libsql/client --external:libsql \
+      --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
+  && test -f dist/index.js
 
-# Run — app is bundled; @libsql/client native driver comes from node_modules
 FROM node:20-slim
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 COPY --from=builder /app/dist ./dist
-# Railway injects PORT; do not hardcode
 EXPOSE 3000
 CMD ["node", "dist/index.js"]

@@ -2,9 +2,13 @@
   "name": "quiz-bot-by-pusparghya-backend",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "npx esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --external:@libsql/client --external:libsql --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" && node -e \"require('fs').accessSync('dist/index.js')\"",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --external:@libsql/client --external:libsql --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
+    "postbuild": "node -e \"require('fs').accessSync('dist/index.js'); console.log('dist/index.js ok')\"",
     "start": "node dist/index.js",
     "db:migrate": "tsx src/database/migrateFromBlobs.ts",
     "test": "tsx src/__tests__/security.regression.test.ts && tsx src/__tests__/telegramSplit.test.ts && tsx src/__tests__/migration.smoke.test.ts",
