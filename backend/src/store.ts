@@ -2,10 +2,19 @@
  * Production store: Turso SQL is the authoritative source of truth.
  * In-memory structures are a bounded cache only; writes always go to SQL first.
  */
-import { db, withWriteTx, batchWrite } from './db.js';
-import { Exam, Question, Student, Attempt, AuditLog, SystemSettings } from './types.js';
+import { db } from './database/client.js';
+import { Exam, Question, Student, Attempt, AuditLog, SystemSettings } from './types/domain.js';
 import { ensureSchema, runBlobMigration } from './database/migrateFromBlobs.js';
 import { effectiveExamStatus } from './examStatus.js';
+import {
+  examRepository,
+  attemptRepository,
+  answerRepository,
+  studentRepository,
+  auditRepository,
+  questionRepository,
+  telegramUpdateRepository,
+} from './repositories/index.js';
 
 const AUDIT_CACHE_MAX = 200;
 const ATTEMPT_CACHE_MAX = 2000;
@@ -269,14 +278,7 @@ class Store {
   }
 
   async loadAttemptAnswers(attemptId: string): Promise<Record<string, number>> {
-    const ans = await db.execute({
-      sql: 'SELECT question_id, option_index FROM attempt_answers WHERE attempt_id = ?',
-      args: [attemptId],
-    });
-    const answers: Record<string, number> = {};
-    for (const a of ans.rows as any[]) {
-      answers[String(a.question_id)] = Number(a.option_index);
-    }
+    const answers = await answerRepository.findByAttemptId(attemptId);
     const att = this.data.attempts.find((x) => x.id === attemptId);
     if (att) att.answers = answers;
     return answers;
@@ -284,176 +286,21 @@ class Store {
 
   /** Atomic exam upsert + full question replacement. */
   private async persistExam(exam: Exam) {
-    const status = effectiveExamStatus(exam);
-    const now = new Date().toISOString();
-    const questions = exam.questions || [];
-    await withWriteTx(async (tx) => {
-      await tx.execute({
-        sql: `INSERT INTO exams (id, teacher_id, title, subject, class_name, test_number, total_questions,
-              start_date, duration_minutes, total_marks, negative_marking, randomize_questions, randomize_options,
-              result_visibility, leaderboard_visibility, status, created_at, updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-              ON CONFLICT(id) DO UPDATE SET title=excluded.title, subject=excluded.subject, class_name=excluded.class_name,
-                test_number=excluded.test_number, total_questions=excluded.total_questions, start_date=excluded.start_date,
-                duration_minutes=excluded.duration_minutes, total_marks=excluded.total_marks,
-                negative_marking=excluded.negative_marking, randomize_questions=excluded.randomize_questions,
-                randomize_options=excluded.randomize_options, result_visibility=excluded.result_visibility,
-                leaderboard_visibility=excluded.leaderboard_visibility, status=excluded.status, updated_at=excluded.updated_at,
-                teacher_id=excluded.teacher_id`,
-        args: [
-          exam.id,
-          exam.teacherId || 'default',
-          exam.title,
-          exam.subject || null,
-          exam.className || null,
-          exam.testNumber || null,
-          questions.length || exam.totalQuestions || 0,
-          exam.startDate,
-          exam.durationMinutes || 60,
-          exam.totalMarks || 0,
-          exam.negativeMarking || 0,
-          exam.randomizeQuestions ? 1 : 0,
-          exam.randomizeOptions ? 1 : 0,
-          exam.resultVisibility || 'PUBLISHED',
-          exam.leaderboardVisibility || 'PUBLISHED',
-          status,
-          exam.createdAt || now,
-          now,
-        ],
-      });
-      await tx.execute({ sql: 'DELETE FROM questions WHERE exam_id = ?', args: [exam.id] });
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i];
-        await tx.execute({
-          sql: `INSERT INTO questions (id, exam_id, teacher_id, question, options_json, answer, marks, negative_marks, explanation, subject, sort_order)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-          args: [
-            q.id,
-            exam.id,
-            exam.teacherId || q.teacherId || 'default',
-            q.question || '',
-            JSON.stringify(q.options || []),
-            q.answer ?? null,
-            q.marks ?? 1,
-            q.negativeMarks ?? 0,
-            q.explanation || null,
-            q.subject || null,
-            i,
-          ],
-        });
-      }
-    });
+    await examRepository.saveExamWithQuestions(exam);
   }
 
   private async persistStudent(student: Student) {
-    await withWriteTx(async (tx) => {
-      await tx.execute({
-        sql: `INSERT INTO students (id, student_code, name, class_name, telegram_user_id, telegram_username, link_code, status, joined_at)
-              VALUES (?,?,?,?,?,?,?,?,?)
-              ON CONFLICT(id) DO UPDATE SET name=excluded.name, class_name=excluded.class_name,
-                telegram_user_id=excluded.telegram_user_id, telegram_username=excluded.telegram_username,
-                link_code=excluded.link_code, status=excluded.status, student_code=excluded.student_code`,
-        args: [
-          student.id,
-          student.studentId,
-          student.name,
-          student.className || null,
-          student.telegramUserId ?? null,
-          student.telegramUsername || null,
-          student.linkCode || null,
-          student.status || 'ACTIVE',
-          student.joinedAt || new Date().toISOString(),
-        ],
-      });
-      // Replace teacher links atomically
-      await tx.execute({ sql: 'DELETE FROM student_teachers WHERE student_id = ?', args: [student.id] });
-      for (const tid of student.teacherIds || []) {
-        await tx.execute({
-          sql: `INSERT OR IGNORE INTO student_teachers (student_id, teacher_id) VALUES (?,?)`,
-          args: [student.id, tid],
-        });
-      }
-    });
+    await studentRepository.saveStudent(student);
   }
 
   /** Upsert attempt row; replace answers only when full answers map is provided and not empty-for-progress. */
   private async persistAttempt(attempt: Attempt, opts: { replaceAnswers?: boolean } = {}) {
-    const replaceAnswers = opts.replaceAnswers !== false;
-    await withWriteTx(async (tx) => {
-      await tx.execute({
-        sql: `INSERT INTO attempts (
-                id, exam_id, student_id, telegram_user_id, student_name, student_class,
-                started_at, expires_at, submitted_at, status, current_question_index,
-                score, max_score, percentage, correct_count, wrong_count, skipped_count,
-                time_taken_seconds, rank, is_official, attempt_number
-              ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-              ON CONFLICT(id) DO UPDATE SET
-                student_id=excluded.student_id, student_name=excluded.student_name,
-                student_class=excluded.student_class, expires_at=excluded.expires_at,
-                submitted_at=excluded.submitted_at, status=excluded.status,
-                current_question_index=excluded.current_question_index,
-                score=excluded.score, max_score=excluded.max_score, percentage=excluded.percentage,
-                correct_count=excluded.correct_count, wrong_count=excluded.wrong_count,
-                skipped_count=excluded.skipped_count, time_taken_seconds=excluded.time_taken_seconds,
-                rank=excluded.rank, is_official=excluded.is_official, attempt_number=excluded.attempt_number`,
-        args: [
-          attempt.id,
-          attempt.examId,
-          attempt.studentId || null,
-          attempt.telegramUserId,
-          attempt.studentName || null,
-          attempt.studentClass || null,
-          attempt.startedAt,
-          attempt.expiresAt,
-          attempt.submittedAt || null,
-          attempt.status,
-          attempt.currentQuestionIndex || 0,
-          attempt.score || 0,
-          attempt.maxScore || 0,
-          attempt.percentage || 0,
-          attempt.correctCount || 0,
-          attempt.wrongCount || 0,
-          attempt.skippedCount || 0,
-          attempt.timeTakenSeconds || 0,
-          attempt.rank ?? null,
-          attempt.isOfficial === false ? 0 : 1,
-          attempt.attemptNumber || 1,
-        ],
-      });
-      if (replaceAnswers && attempt.answers) {
-        await tx.execute({
-          sql: 'DELETE FROM attempt_answers WHERE attempt_id = ?',
-          args: [attempt.id],
-        });
-        for (const [qid, opt] of Object.entries(attempt.answers)) {
-          await tx.execute({
-            sql: `INSERT INTO attempt_answers (attempt_id, question_id, option_index, updated_at)
-                  VALUES (?,?,?,?)`,
-            args: [attempt.id, qid, opt, new Date().toISOString()],
-          });
-        }
-      }
-    });
+    await attemptRepository.upsertAttempt(attempt, opts.replaceAnswers !== false);
   }
 
   /** Single-answer UPSERT — preferred for live exam answering (idempotent). */
   async saveAnswer(attemptId: string, questionId: string, optionIndex: number, currentQuestionIndex?: number) {
-    const now = new Date().toISOString();
-    await withWriteTx(async (tx) => {
-      await tx.execute({
-        sql: `INSERT INTO attempt_answers (attempt_id, question_id, option_index, updated_at)
-              VALUES (?,?,?,?)
-              ON CONFLICT(attempt_id, question_id) DO UPDATE SET
-                option_index=excluded.option_index, updated_at=excluded.updated_at`,
-        args: [attemptId, questionId, optionIndex, now],
-      });
-      if (currentQuestionIndex !== undefined) {
-        await tx.execute({
-          sql: `UPDATE attempts SET current_question_index = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-          args: [currentQuestionIndex, attemptId],
-        });
-      }
-    });
+    await answerRepository.upsertAnswer(attemptId, questionId, optionIndex, currentQuestionIndex);
     const att = this.data.attempts.find((a) => a.id === attemptId);
     if (att) {
       if (!att.answers) att.answers = {};
@@ -467,47 +314,7 @@ class Store {
    * Returns false if already submitted (idempotent).
    */
   async submitAttemptIfInProgress(attempt: Attempt): Promise<boolean> {
-    const result = await withWriteTx(async (tx) => {
-      const upd = await tx.execute({
-        sql: `UPDATE attempts SET
-                status = ?, submitted_at = ?, score = ?, max_score = ?, percentage = ?,
-                correct_count = ?, wrong_count = ?, skipped_count = ?, time_taken_seconds = ?,
-                rank = ?, is_official = ?, attempt_number = ?
-              WHERE id = ? AND status = 'IN_PROGRESS'`,
-        args: [
-          attempt.status,
-          attempt.submittedAt || new Date().toISOString(),
-          attempt.score || 0,
-          attempt.maxScore || 0,
-          attempt.percentage || 0,
-          attempt.correctCount || 0,
-          attempt.wrongCount || 0,
-          attempt.skippedCount || 0,
-          attempt.timeTakenSeconds || 0,
-          attempt.rank ?? null,
-          attempt.isOfficial === false ? 0 : 1,
-          attempt.attemptNumber || 1,
-          attempt.id,
-        ],
-      });
-      const changed = Number((upd as any).rowsAffected ?? (upd as any).rows?.length ?? 0);
-      // libsql returns rowsAffected on ResultSet
-      const affected = typeof (upd as any).rowsAffected === 'number' ? (upd as any).rowsAffected : -1;
-      if (affected === 0) return false;
-      // Persist final answers
-      if (attempt.answers) {
-        for (const [qid, opt] of Object.entries(attempt.answers)) {
-          await tx.execute({
-            sql: `INSERT INTO attempt_answers (attempt_id, question_id, option_index, updated_at)
-                  VALUES (?,?,?,?)
-                  ON CONFLICT(attempt_id, question_id) DO UPDATE SET
-                    option_index=excluded.option_index, updated_at=excluded.updated_at`,
-            args: [attempt.id, qid, opt, new Date().toISOString()],
-          });
-        }
-      }
-      return true;
-    });
+    const result = await attemptRepository.submitIfInProgress(attempt);
     if (result) {
       const idx = this.data.attempts.findIndex((a) => a.id === attempt.id);
       if (idx >= 0) this.data.attempts[idx] = attempt;
@@ -518,15 +325,7 @@ class Store {
 
   /** Claim a Telegram update_id for idempotent processing. Returns false if already processed. */
   async claimTelegramUpdate(updateId: number): Promise<boolean> {
-    try {
-      await db.execute({
-        sql: `INSERT INTO telegram_processed_updates (update_id, processed_at) VALUES (?,?)`,
-        args: [updateId, new Date().toISOString()],
-      });
-      return true;
-    } catch {
-      return false; // UNIQUE violation → already processed
-    }
+    return telegramUpdateRepository.claim(updateId);
   }
 
   getExams() {
@@ -548,15 +347,7 @@ class Store {
   async deleteExam(id: string) {
     this.data.exams = this.data.exams.filter((e) => e.id !== id);
     this.data.attempts = this.data.attempts.filter((a) => a.examId !== id);
-    await withWriteTx(async (tx) => {
-      await tx.execute({
-        sql: 'DELETE FROM attempt_answers WHERE attempt_id IN (SELECT id FROM attempts WHERE exam_id = ?)',
-        args: [id],
-      });
-      await tx.execute({ sql: 'DELETE FROM attempts WHERE exam_id = ?', args: [id] });
-      await tx.execute({ sql: 'DELETE FROM questions WHERE exam_id = ?', args: [id] });
-      await tx.execute({ sql: 'DELETE FROM exams WHERE id = ?', args: [id] });
-    });
+    await examRepository.deleteExamCascade(id);
   }
 
   getStudents() {
@@ -577,18 +368,12 @@ class Store {
   }
   async deleteStudent(id: string) {
     this.data.students = this.data.students.filter((s) => s.id !== id);
-    await withWriteTx(async (tx) => {
-      await tx.execute({ sql: 'DELETE FROM student_teachers WHERE student_id = ?', args: [id] });
-      await tx.execute({ sql: 'DELETE FROM students WHERE id = ?', args: [id] });
-    });
+    await studentRepository.deleteStudent(id);
   }
 
   /** Link student to teacher idempotently. */
   async linkStudentTeacher(studentId: string, teacherId: string) {
-    await db.execute({
-      sql: `INSERT OR IGNORE INTO student_teachers (student_id, teacher_id) VALUES (?,?)`,
-      args: [studentId, teacherId],
-    });
+    await studentRepository.linkTeacher(studentId, teacherId);
     const s = this.data.students.find((x) => x.id === studentId);
     if (s) {
       if (!s.teacherIds) s.teacherIds = [];
@@ -613,19 +398,12 @@ class Store {
 
   /** Next attempt_number for exam+user (SQL-backed for multi-instance safety). */
   async nextAttemptNumber(examId: string, telegramUserId: number): Promise<number> {
-    const res = await db.execute({
-      sql: `SELECT COALESCE(MAX(attempt_number), 0) as m FROM attempts WHERE exam_id = ? AND telegram_user_id = ?`,
-      args: [examId, telegramUserId],
-    });
-    return Number((res.rows[0] as any)?.m || 0) + 1;
+    return attemptRepository.nextAttemptNumber(examId, telegramUserId);
   }
 
   async deleteAttempt(id: string) {
     this.data.attempts = this.data.attempts.filter((a) => a.id !== id);
-    await withWriteTx(async (tx) => {
-      await tx.execute({ sql: 'DELETE FROM attempt_answers WHERE attempt_id = ?', args: [id] });
-      await tx.execute({ sql: 'DELETE FROM attempts WHERE id = ?', args: [id] });
-    });
+    await attemptRepository.deleteById(id);
   }
 
   async saveAttempt(attempt: Attempt) {
@@ -648,29 +426,12 @@ class Store {
     const idx = this.data.questionBank.findIndex((x) => x.id === q.id);
     if (idx >= 0) this.data.questionBank[idx] = q;
     else this.data.questionBank.push(q);
-    await db.execute({
-      sql: `INSERT INTO question_bank (id, teacher_id, question, options_json, answer, marks, negative_marks, explanation, subject)
-            VALUES (?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(id) DO UPDATE SET question=excluded.question, options_json=excluded.options_json,
-              answer=excluded.answer, marks=excluded.marks, negative_marks=excluded.negative_marks,
-              explanation=excluded.explanation, subject=excluded.subject, teacher_id=excluded.teacher_id`,
-      args: [
-        q.id,
-        q.teacherId || 'default',
-        q.question,
-        JSON.stringify(q.options || []),
-        q.answer,
-        q.marks ?? 1,
-        q.negativeMarks ?? 0,
-        q.explanation || null,
-        q.subject || null,
-      ],
-    });
+    await questionRepository.saveBankItem(q);
     return q;
   }
   async deleteQuestion(id: string) {
     this.data.questionBank = this.data.questionBank.filter((q) => q.id !== id);
-    await db.execute({ sql: 'DELETE FROM question_bank WHERE id = ?', args: [id] });
+    await questionRepository.deleteBankItem(id);
   }
 
   getSettings() {
@@ -709,9 +470,12 @@ class Store {
     };
     this.data.auditLogs.unshift(log);
     if (this.data.auditLogs.length > AUDIT_CACHE_MAX) this.data.auditLogs.length = AUDIT_CACHE_MAX;
-    await db.execute({
-      sql: 'INSERT INTO audit_logs (id, timestamp, action, details, actor, teacher_id) VALUES (?,?,?,?,?,?)',
-      args: [log.id, log.timestamp, log.action, log.details, log.actor, null],
+    await auditRepository.insert({
+      id: log.id,
+      timestamp: log.timestamp,
+      action: log.action,
+      details: log.details,
+      actor: log.actor,
     });
   }
 

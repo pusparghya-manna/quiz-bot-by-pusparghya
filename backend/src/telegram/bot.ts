@@ -14,72 +14,11 @@ import {
 } from '../types.js';
 
 // Calculate authoritative scores for an attempt
-export function calculateAttemptScore(exam: Exam, answers: Record<string, number>, timeTakenSecs: number) {
-  let correctCount = 0;
-  let wrongCount = 0;
-  let skippedCount = 0;
-  let score = 0;
-
-  exam.questions.forEach((q) => {
-    const selected = answers[q.id];
-    if (selected === undefined || selected === null) {
-      skippedCount++;
-    } else if (q.answer !== null && selected === q.answer) {
-      correctCount++;
-      score += q.marks || 1;
-    } else {
-      wrongCount++;
-      const neg = q.negativeMarks || exam.negativeMarking || 0;
-      score -= neg;
-    }
-  });
-
-  score = Math.max(0, score);
-  const maxScore = exam.totalMarks || exam.questions.reduce((acc, q) => acc + (q.marks || 1), 0);
-  const percentage = maxScore > 0 ? Math.round((score / maxScore) * 100 * 10) / 10 : 0;
-
-  return {
-    score,
-    maxScore,
-    percentage,
-    correctCount,
-    wrongCount,
-    skippedCount,
-    timeTakenSeconds: timeTakenSecs
-  };
-}
+export { calculateAttemptScore, updateExamRanks } from '../services/scoringService.js';
 
 // Recalculate ranks for all attempts of an exam according to default ranking rules:
 // Priority: 1. Higher score -> 2. Lower time taken -> 3. Earlier submission timestamp
-export async function updateExamRanks(examId: string) {
-  // Only FIRST (official) attempts count toward ranking — rank-only SQL updates (no answer rewrite)
-  const attempts = store.getAttempts(examId).filter(a =>
-    (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false
-  );
 
-  attempts.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    if (a.timeTakenSeconds !== b.timeTakenSeconds) return a.timeTakenSeconds - b.timeTakenSeconds;
-    const aTime = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
-    const bTime = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
-    return aTime - bTime;
-  });
-
-  const { db } = await import('../db.js');
-  for (const att of store.getAttempts(examId)) {
-    if (att.isOfficial === false) {
-      att.rank = undefined;
-      await db.execute({ sql: 'UPDATE attempts SET rank = NULL WHERE id = ?', args: [att.id] });
-    }
-  }
-  for (let idx = 0; idx < attempts.length; idx++) {
-    attempts[idx].rank = idx + 1;
-    await db.execute({
-      sql: 'UPDATE attempts SET rank = ? WHERE id = ?',
-      args: [idx + 1, attempts[idx].id],
-    });
-  }
-}
 
 /** Official exam window: [startDate, startDate + durationMinutes) */
 function getExamWindow(exam: Exam): { start: number; end: number } {
