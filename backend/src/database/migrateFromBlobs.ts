@@ -15,10 +15,45 @@ function parseJson<T>(s: string, fallback: T): T {
   }
 }
 
+/** Additive columns for existing production DBs (CREATE IF NOT EXISTS does not alter). */
+const ADDITIVE_COLUMNS: { table: string; column: string; ddl: string }[] = [
+  { table: 'students', column: 'joined_at', ddl: 'ALTER TABLE students ADD COLUMN joined_at TEXT' },
+  { table: 'students', column: 'class_name', ddl: 'ALTER TABLE students ADD COLUMN class_name TEXT' },
+  { table: 'students', column: 'link_code', ddl: 'ALTER TABLE students ADD COLUMN link_code TEXT' },
+  { table: 'students', column: 'status', ddl: "ALTER TABLE students ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'" },
+  { table: 'attempt_answers', column: 'updated_at', ddl: 'ALTER TABLE attempt_answers ADD COLUMN updated_at TEXT' },
+  { table: 'attempts', column: 'rank', ddl: 'ALTER TABLE attempts ADD COLUMN rank INTEGER' },
+  { table: 'attempts', column: 'is_official', ddl: 'ALTER TABLE attempts ADD COLUMN is_official INTEGER NOT NULL DEFAULT 1' },
+  { table: 'attempts', column: 'attempt_number', ddl: 'ALTER TABLE attempts ADD COLUMN attempt_number INTEGER NOT NULL DEFAULT 1' },
+  { table: 'exams', column: 'updated_at', ddl: 'ALTER TABLE exams ADD COLUMN updated_at TEXT' },
+  { table: 'questions', column: 'teacher_id', ddl: 'ALTER TABLE questions ADD COLUMN teacher_id TEXT' },
+  { table: 'questions', column: 'sort_order', ddl: 'ALTER TABLE questions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0' },
+];
+
+async function ensureAdditiveColumns(): Promise<void> {
+  for (const { table, column, ddl } of ADDITIVE_COLUMNS) {
+    try {
+      const info = await db.execute(`PRAGMA table_info(${table})`);
+      const cols = new Set((info.rows as any[]).map((r) => String(r.name)));
+      if (!cols.has(column)) {
+        await db.execute(ddl);
+        console.log(`[schema] added ${table}.${column}`);
+      }
+    } catch (e: any) {
+      // Table may not exist yet (created by SCHEMA_SQL first) or column already exists
+      const msg = String(e?.message || e);
+      if (!msg.includes('duplicate column') && !msg.includes('no such table')) {
+        console.warn(`[schema] alter ${table}.${column}:`, msg);
+      }
+    }
+  }
+}
+
 export async function ensureSchema(): Promise<void> {
   for (const stmt of SCHEMA_SQL.split(';').map((s) => s.trim()).filter(Boolean)) {
     await db.execute(stmt);
   }
+  await ensureAdditiveColumns();
 }
 
 async function backupBlobs(): Promise<number> {

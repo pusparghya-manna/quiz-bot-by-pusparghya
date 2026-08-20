@@ -73,18 +73,22 @@ function formatRemaining(expiresAtIso: string): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function linkStudentToTeacher(student: Student, teacherId?: string | null) {
+async function linkStudentToTeacher(student: Student, teacherId?: string | null) {
   if (!teacherId) return student;
   const ids = Array.isArray(student.teacherIds) ? [...student.teacherIds] : [];
   if (!ids.includes(teacherId)) {
     ids.push(teacherId);
     student.teacherIds = ids;
-    store.saveStudent(student);
+    try {
+      await store.saveStudent(student);
+    } catch (e: any) {
+      console.error('[telegram] linkStudentToTeacher save failed:', e?.message || e);
+    }
   }
   return student;
 }
 
-export function getOrCreateStudent(user: TelegramUser): Student {
+export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
   let student = store.getStudentByTelegramId(user.id);
   const now = new Date().toISOString();
 
@@ -108,10 +112,14 @@ export function getOrCreateStudent(user: TelegramUser): Student {
       linkCode: `S${String(user.id).slice(-6)}`,
       telegramUserId: user.id,
       telegramUsername: telegramUsername,
-      linkedAt: now
+      joinedAt: now,
     };
-    store.saveStudent(student);
-    store.addAuditLog('STUDENT_AUTO_REGISTERED', `Auto-registered Telegram student ${name} (${telegramUsername || user.id})`);
+    try {
+      await store.saveStudent(student);
+      await store.addAuditLog('STUDENT_AUTO_REGISTERED', `Auto-registered Telegram student ${name} (${telegramUsername || user.id})`);
+    } catch (e: any) {
+      console.error('[telegram] getOrCreateStudent save failed:', e?.message || e);
+    }
   } else {
     let updated = false;
     if (telegramUsername && student.telegramUsername !== telegramUsername) {
@@ -123,7 +131,11 @@ export function getOrCreateStudent(user: TelegramUser): Student {
       updated = true;
     }
     if (updated) {
-      store.saveStudent(student);
+      try {
+        await store.saveStudent(student);
+      } catch (e: any) {
+        console.error('[telegram] getOrCreateStudent update failed:', e?.message || e);
+      }
     }
   }
 
@@ -158,12 +170,30 @@ function renderMainMenu(student: Student): SimulatorResponse {
 }
 
 export async function processTelegramUpdate(update: TelegramUpdate): Promise<SimulatorResponse | null> {
-  // Idempotent: ignore already-processed Telegram updates (retries / multi-instance)
-  if (update.update_id != null) {
-    const claimed = await store.claimTelegramUpdate(Number(update.update_id));
-    if (!claimed) {
-      return null;
+  // Claim only after successful handling so crashes do not permanently drop updates.
+  try {
+    const result = await processTelegramUpdateInner(update);
+    if (update.update_id != null && result !== undefined) {
+      await store.claimTelegramUpdate(Number(update.update_id));
     }
+    return result;
+  } catch (err: any) {
+    console.error('[telegram] processTelegramUpdate failed:', err?.message || err);
+    return null;
+  }
+}
+
+async function processTelegramUpdateInner(update: TelegramUpdate): Promise<SimulatorResponse | null> {
+  // Soft dedup: if already claimed from a prior successful run, skip
+  if (update.update_id != null) {
+    const { db } = await import('../database/client.js');
+    try {
+      const existing = await db.execute({
+        sql: 'SELECT 1 FROM telegram_processed_updates WHERE update_id = ? LIMIT 1',
+        args: [Number(update.update_id)],
+      });
+      if (existing.rows.length > 0) return null;
+    } catch { /* table may not exist yet */ }
   }
 
   const now = new Date();
@@ -173,7 +203,7 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<Sim
     const cb = update.callback_query;
     const user = cb.from;
     const data = cb.data || '';
-    const student = getOrCreateStudent(user);
+    const student = await getOrCreateStudent(user);
     const cbMessageId = cb.message?.message_id;
 
     let response: SimulatorResponse | null = null;
@@ -294,7 +324,7 @@ This name will appear on results and the leaderboard.`,
     const msg = update.message;
     const text = msg.text.trim();
     const user = msg.from;
-    const student = getOrCreateStudent(user);
+    const student = await getOrCreateStudent(user);
 
     // Name from "Set your name" button — next plain text is the name
     if (pendingNameUsers.has(user.id) && !text.startsWith('/')) {
@@ -518,7 +548,7 @@ async function handleStartOrResumeExam(examId: string, student: Student, user: T
   }
 
   // Enroll only when student is allowed past the lock checks (authorized access)
-  linkStudentToTeacher(student, exam.teacherId);
+  await linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   const allMine = store.getStudentAttempts(examId, student.telegramUserId!);
@@ -609,7 +639,7 @@ async function handleOptionSelect(examId: string, qIdx: number, optIdx: number, 
   }
 
   // Enroll only when student is allowed past the lock checks (authorized access)
-  linkStudentToTeacher(student, exam.teacherId);
+  await linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
@@ -651,7 +681,7 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
   }
 
   // Enroll only when student is allowed past the lock checks (authorized access)
-  linkStudentToTeacher(student, exam.teacherId);
+  await linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
