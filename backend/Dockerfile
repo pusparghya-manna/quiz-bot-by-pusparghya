@@ -1,9 +1,10 @@
-# ---- build: only needs esbuild (app is fully bundled except @libsql) ----
+# ---- build ----
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 RUN npm install --no-audit --no-fund esbuild@0.25.0
 COPY src ./src
-RUN node node_modules/esbuild/bin/esbuild src/index.ts \
+# esbuild bin is a native binary — run via .bin shim, not `node`
+RUN ./node_modules/.bin/esbuild src/index.ts \
   --bundle --platform=node --target=node20 --format=esm \
   --outfile=dist/index.js \
   --external:@libsql/client --external:libsql \
