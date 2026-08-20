@@ -21,6 +21,42 @@ import {
 // Re-export for API/server consumers
 export { calculateAttemptScore, updateExamRanks };
 
+
+/** Resolve examId from callback payloads when IDs contain underscores (e.g. EXAM_ts_rnd). */
+function resolveExamIdFromRest(rest: string, trailingCount: number): { examId: string; trailing: number[] } | null {
+  const exams = store.getExams();
+  const ids = exams.map((e) => e.id).sort((a, b) => b.length - a.length);
+  for (const id of ids) {
+    if (rest === id && trailingCount === 0) {
+      return { examId: id, trailing: [] };
+    }
+    if (rest.startsWith(id + '_')) {
+      const suffix = rest.slice(id.length + 1);
+      if (trailingCount === 0) {
+        // optional page: only digits
+        if (/^\d+$/.test(suffix)) {
+          return { examId: id, trailing: [parseInt(suffix, 10)] };
+        }
+        continue;
+      }
+      const parts = suffix.split('_');
+      if (parts.length === trailingCount && parts.every((x) => /^-?\d+$/.test(x))) {
+        return { examId: id, trailing: parts.map((x) => parseInt(x, 10)) };
+      }
+    }
+  }
+  // Fallback: last N underscore-separated numeric segments
+  if (trailingCount === 0) {
+    return { examId: rest, trailing: [] };
+  }
+  const segs = rest.split('_');
+  if (segs.length <= trailingCount) return null;
+  const trailing = segs.slice(-trailingCount).map((x) => parseInt(x, 10));
+  if (trailing.some((n) => Number.isNaN(n))) return null;
+  return { examId: segs.slice(0, -trailingCount).join('_'), trailing };
+}
+
+
 /** Official exam window: [startDate, startDate + durationMinutes) */
 function getExamWindow(exam: Exam): { start: number; end: number } {
   const start = new Date(exam.startDate).getTime();
@@ -253,49 +289,50 @@ This name will appear on results and the leaderboard.`,
       const examId = data.replace('reattempt_', '');
       response = await handleStartOrResumeExam(examId, student, user, true);
     } else if (data.startsWith('ans_')) {
-      // ans_EXAMID_qIdx_optIdx
-      const rest = data.slice(4); // Remove "ans_"
-      const lastUnderscore = rest.lastIndexOf('_');
-      if (lastUnderscore !== -1) {
-        const optIdx = parseInt(rest.slice(lastUnderscore + 1), 10);
-        const rem = rest.slice(0, lastUnderscore);
-        const secondLastUnderscore = rem.lastIndexOf('_');
-        if (secondLastUnderscore !== -1) {
-          const qIdx = parseInt(rem.slice(secondLastUnderscore + 1), 10);
-          const examId = rem.slice(0, secondLastUnderscore);
-          response = await handleOptionSelect(examId, qIdx, optIdx, student, user);
-        }
+      // ans_EXAMID_qIdx_optIdx — exam IDs may contain underscores
+      const rest = data.slice(4);
+      const parsed = resolveExamIdFromRest(rest, 2);
+      if (parsed) {
+        const [qIdx, optIdx] = parsed.trailing;
+        response = await handleOptionSelect(parsed.examId, qIdx, optIdx, student, user);
       }
     } else if (data.startsWith('nav_')) {
       // nav_EXAMID_targetIdx
-      const rest = data.slice(4); // Remove "nav_"
-      const lastUnderscore = rest.lastIndexOf('_');
-      if (lastUnderscore !== -1) {
-        const targetIdx = parseInt(rest.slice(lastUnderscore + 1), 10);
-        const examId = rest.slice(0, lastUnderscore);
-        response = await renderQuestionView(examId, targetIdx, student, user);
+      const rest = data.slice(4);
+      const parsed = resolveExamIdFromRest(rest, 1);
+      if (parsed) {
+        response = await renderQuestionView(parsed.examId, parsed.trailing[0], student, user);
       }
     } else if (data.startsWith('grid_')) {
-      // grid_EXAMID or grid_EXAMID_PAGE
+      // grid_EXAMID or grid_EXAMID_PAGE (page only if full exam id matched)
       const rest = data.slice(5);
-      const lastUnderscore = rest.lastIndexOf('_');
-      let examId = rest;
-      let page = 0;
-      if (lastUnderscore !== -1) {
-        const maybePage = rest.slice(lastUnderscore + 1);
-        if (/^\d+$/.test(maybePage)) {
-          page = parseInt(maybePage, 10);
-          examId = rest.slice(0, lastUnderscore);
-        }
+      const parsed = resolveExamIdFromRest(rest, 0);
+      if (parsed) {
+        const page = parsed.trailing[0] ?? 0;
+        response = await renderQuestionGrid(parsed.examId, student, user, page);
       }
-      response = await renderQuestionGrid(examId, student, user, page);
     } else if (data.startsWith('rev_')) {
       // rev_EXAMID_sum | rev_EXAMID_PAGE
       const rest = data.slice(4);
-      const lastUnderscore = rest.lastIndexOf('_');
-      if (lastUnderscore !== -1) {
-        const examId = rest.slice(0, lastUnderscore);
-        const pagePart = rest.slice(lastUnderscore + 1);
+      // Prefer matching known exam id then trailing token
+      let examId = '';
+      let pagePart = '';
+      const examsSorted = store.getExams().map((e) => e.id).sort((a, b) => b.length - a.length);
+      for (const id of examsSorted) {
+        if (rest === id + '_sum' || rest.startsWith(id + '_')) {
+          examId = id;
+          pagePart = rest.slice(id.length + 1);
+          break;
+        }
+      }
+      if (!examId) {
+        const lastUnderscore = rest.lastIndexOf('_');
+        if (lastUnderscore !== -1) {
+          examId = rest.slice(0, lastUnderscore);
+          pagePart = rest.slice(lastUnderscore + 1);
+        }
+      }
+      if (examId) {
         const exam = store.getExamById(examId);
         // Prefer latest submitted attempt (official first, then any)
         const mine = store.getStudentAttempts(examId, student.telegramUserId!).filter(
