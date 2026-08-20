@@ -7,3 +7,4 @@ local.db
 coverage
 **/*.test.ts
 *.md
+dist

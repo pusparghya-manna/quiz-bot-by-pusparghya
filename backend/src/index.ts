@@ -715,52 +715,82 @@ async function startServer(app?: import('express').Express) {
 }
 
 async function main() {
-  // 1) Fail fast on missing/invalid production config
+  // Fail fast on missing production secrets (JWT / Turso / Telegram token)
   assertSecureConfig();
-
-  // 2) Database must succeed before we accept traffic in production
-  await initDb();
-  await ensureTeachersTable();
-  await store.init();
-  if (!store.isReady()) {
-    throw new Error('Store failed to become ready');
-  }
 
   const PORT = env.port;
   const app = express();
+  let bootError: string | null = null;
 
-  // Liveness: process is up
+  // Liveness — process is up (Railway healthcheck). Independent of Telegram.
   app.get('/health', (_req, res) => {
     res.status(200).json({ ok: true, service: 'quiz-bot-api' });
   });
-  // Readiness: DB + store initialized
+  // Readiness — DB/store initialized
   app.get('/ready', (_req, res) => {
     if (!store.isReady()) {
-      return res.status(503).json({ ok: false, ready: false });
+      return res.status(503).json({
+        ok: false,
+        ready: false,
+        error: bootError || 'initializing',
+      });
     }
     return res.status(200).json({ ok: true, ready: true, service: 'quiz-bot-api' });
   });
   app.get('/', (_req, res) => {
-    res.status(200).json({ ok: true, service: 'quiz-bot-api', ready: store.isReady() });
+    res.status(200).json({
+      ok: true,
+      service: 'quiz-bot-api',
+      ready: store.isReady(),
+    });
   });
 
-  // 3) Mount API routes
-  await startServer(app);
-
-  // 4) Bind Railway PORT (never hardcode)
+  // Bind PORT immediately so Railway healthchecks can succeed
   await new Promise<void>((resolve, reject) => {
     const server = app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Quiz Bot API listening on 0.0.0.0:${PORT}`);
+      console.log(`[boot] listening on 0.0.0.0:${PORT} (health up)`);
       resolve();
     });
     server.on('error', reject);
+    const shutdown = () => {
+      console.log('[boot] shutting down…');
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 8000);
+    };
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
   });
 
-  // 5) Single-instance Telegram polling
-  startTelegramPolling();
-  console.log('Quiz Bot API fully ready');
+  // Database + store (after HTTP is up)
+  try {
+    await initDb();
+    await ensureTeachersTable();
+    await store.init();
+    if (!store.isReady()) {
+      throw new Error('Store failed to become ready');
+    }
+  } catch (e: any) {
+    bootError = e?.message || String(e);
+    console.error('[boot] FATAL database/store init:', bootError);
+    // In production, exit so Railway marks deploy unhealthy rather than serving a half-broken API
+    if (env.isProd) {
+      process.exit(1);
+    }
+  }
+
+  // Mount API routes on the already-listening app
+  await startServer(app);
+
+  // Telegram after HTTP + DB (must not block /health)
+  try {
+    startTelegramPolling();
+  } catch (e: any) {
+    console.error('[boot] Telegram polling failed to start (HTTP still up):', e?.message || e);
+  }
+
+  console.log('[boot] Quiz Bot API fully ready');
 }
-main().catch(err => {
+main().catch((err) => {
   console.error('[boot] FATAL:', err);
   process.exit(1);
 });
