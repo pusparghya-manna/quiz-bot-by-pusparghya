@@ -13,12 +13,13 @@ import {
   Student
 } from '../types.js';
 
-// Calculate authoritative scores for an attempt
-export { calculateAttemptScore, updateExamRanks } from '../services/scoringService.js';
+import {
+  calculateAttemptScore,
+  updateExamRanks,
+} from '../services/scoringService.js';
 
-// Recalculate ranks for all attempts of an exam according to default ranking rules:
-// Priority: 1. Higher score -> 2. Lower time taken -> 3. Earlier submission timestamp
-
+// Re-export for API/server consumers
+export { calculateAttemptScore, updateExamRanks };
 
 /** Official exam window: [startDate, startDate + durationMinutes) */
 function getExamWindow(exam: Exam): { start: number; end: number } {
