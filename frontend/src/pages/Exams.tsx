@@ -663,7 +663,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                 <div className="space-y-2.5">
                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-4 text-center">
                     <div className="mx-auto w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-500 mb-1.5"><IconSparkles className="w-5 h-5" /></div>
-                    <p className="text-xs text-slate-600">Upload a photo of questions. Gemini extracts MCQs — review them after.</p>
+                    <p className="text-xs text-slate-600">Upload a photo of questions.</p>
                   </div>
                   <label className={btnP + ' w-full cursor-pointer'}>
                     <IconUpload className="w-4 h-4" />
