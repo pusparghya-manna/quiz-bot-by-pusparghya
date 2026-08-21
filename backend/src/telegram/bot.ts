@@ -662,7 +662,10 @@ This name will appear on results and the leaderboard.`,
           }
           if (sess.screen === 'in_exam' && sess.examId && sess.qIdx != null) {
             const qIdx = sess.qIdx + (action === 'next' ? 1 : -1);
-            return await renderQuestionView(sess.examId, Math.max(0, qIdx), student, user);
+            // Keep bottom keyboard as-is — only update question + MCQ options
+            return await renderQuestionView(sess.examId, Math.max(0, qIdx), student, user, {
+              refreshKeyboard: false,
+            });
           }
         }
         if ((action === 'prev_page' || action === 'next_page') && sess?.examId) {
@@ -1162,7 +1165,7 @@ async function renderQuestionGrid(examId: string, student: Student, user: Telegr
   const answeredCount = Object.keys(attempt.answers || {}).length;
   const total = exam.questions.length;
   const remaining = formatRemaining(attempt.expiresAt);
-  const PER = 8;
+  const PER = 20;
   const totalPages = Math.max(1, Math.ceil(total / PER));
   const p = Math.max(0, Math.min(page, totalPages - 1));
   const startIdx = p * PER;
@@ -1707,22 +1710,22 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    *  2) send/edit the real message with inline options only
    */
   if (hasReplyKb && hasInline) {
-    const kbResult = await sendSafeTelegramMessage(
-      token,
-      resp.chatId,
-      '⬇️ *Navigation buttons are below the chat*',
-      {
-        parseMode: 'Markdown',
-        replyKeyboard: resp.replyKeyboard,
-      }
-    );
+    // Telegram allows only one reply_markup per message.
+    // 1) Silently apply bottom ReplyKeyboard (zero-width space — no visible notice)
+    // 2) Send the real question with inline MCQ options
+    const kbResult = await sendSafeTelegramMessage(token, resp.chatId, '​', {
+      replyKeyboard: resp.replyKeyboard,
+    });
     if (!kbResult.ok) {
+      // Fallback: still try a minimal visible carrier if ZWSP rejected
+      await sendSafeTelegramMessage(token, resp.chatId, '·', {
+        replyKeyboard: resp.replyKeyboard,
+      }).catch(() => {});
       console.warn('[Telegram] reply keyboard send failed:', kbResult.error);
     }
     const qResult = await sendSafeTelegramMessage(token, resp.chatId, resp.text || '', {
       parseMode: 'Markdown',
       replyMarkup: resp.replyMarkup,
-      // never edit for this path — need a message that owns the inline options
     });
     if (!qResult.ok) {
       console.warn('[Telegram] question+options send failed:', qResult.error);
