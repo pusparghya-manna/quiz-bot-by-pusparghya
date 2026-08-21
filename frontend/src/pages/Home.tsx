@@ -51,15 +51,15 @@ export function Home({ exams, live, submissions, students, attempts, examList, o
         <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 hover:text-blue-700" onClick={() => setProfile(null)}>
           <IconArrowLeft className="w-3.5 h-3.5" /> Back
         </button>
-        <div className={card + ' p-3 ring-1 ring-slate-200/70 overflow-hidden relative'}>
-          <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-blue-50" />
-          <div className="relative flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl ${avatarColor(profile)} flex items-center justify-center font-bold text-sm shrink-0 ring-1 ring-white shadow-sm`}>{initials(profile.name)}</div>
+        <div className={card + ' p-2.5 ring-1 ring-slate-200/70 overflow-hidden relative'}>
+          <div className="absolute -right-8 -top-8 w-24 h-24 rounded-full bg-blue-50" />
+          <div className="relative flex items-center gap-2.5">
+            <div className={`w-9 h-9 rounded-lg ${avatarColor(profile)} flex items-center justify-center font-bold text-xs shrink-0 ring-1 ring-white shadow-sm`}>{initials(profile.name)}</div>
             <div className="min-w-0 flex-1">
-              <div className="font-bold text-sm text-slate-900 truncate">{profile.name}</div>
-              <div className="text-[11px] text-slate-500 mt-0.5 space-y-0.5">
-                <div className="flex items-center gap-1"><IconMessage className="w-3 h-3" />{profile.telegramUsername || '—'}</div>
-                <div className="flex items-center gap-1"><IconHash className="w-3 h-3" />{profile.studentId}</div>
+              <div className="font-bold text-[13px] text-slate-900 truncate">{profile.name}</div>
+              <div className="text-[10px] text-slate-500 mt-0.5 space-y-0.5">
+                <div className="flex items-center gap-1"><IconMessage className="w-2.5 h-2.5" />{profile.telegramUsername || '—'}</div>
+                <div className="flex items-center gap-1"><IconHash className="w-2.5 h-2.5" />{profile.studentId}</div>
               </div>
             </div>
           </div>

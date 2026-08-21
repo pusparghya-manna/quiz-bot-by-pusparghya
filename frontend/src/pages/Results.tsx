@@ -5,7 +5,8 @@ import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import { inp, btnP, btnS, btnD, card } from '../styles/ui';
 import { Sheet } from '../components/ui/Sheet';
 import {
-  IconCopy, IconDownload, IconArrowLeft, IconMessage, IconSend
+  IconCopy, IconDownload, IconArrowLeft, IconMessage, IconSend,
+  IconUser, IconHash, IconClock, IconCheck, IconClose, IconTrophy, IconBook
 } from '../icons';
 
 export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; attempts: Attempt[]; students: Student[]; onRefresh: () => void }) {
@@ -13,6 +14,7 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   const [view, setView] = useState<View>('exams');
   const [examId, setExamId] = useState('');
   const [detail, setDetail] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [dmText, setDmText] = useState('');
   const [dmBusy, setDmBusy] = useState(false);
@@ -36,10 +38,26 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
     students.find((s) => (s.telegramUserId && a.telegramUserId && s.telegramUserId === a.telegramUserId) || s.studentId === a.studentId);
 
   const openDetail = async (attemptId: string) => {
-    const res = await api(`/api/attempts/${attemptId}/detail`);
-    const data = await res.json();
-    if (res.ok) { setDetail(data); setDmText(''); }
-    else toastError(data.error || 'Failed');
+    // Instant sheet: seed from list data, then hydrate breakdown
+    const seed = list.find((a) => a.id === attemptId) || attempts.find((a) => a.id === attemptId);
+    const exam = seed ? exams.find((e) => e.id === seed.examId) : undefined;
+    setDmText('');
+    setDetailLoading(true);
+    setDetail({
+      attempt: seed || { id: attemptId, studentName: '…' },
+      exam: exam ? { id: exam.id, title: exam.title, totalQuestions: exam.totalQuestions } : null,
+      breakdown: null,
+    });
+    try {
+      const res = await api(`/api/attempts/${attemptId}/detail`);
+      const data = await res.json();
+      if (res.ok) setDetail(data);
+      else toastError(data.error || 'Failed to load details');
+    } catch (e: any) {
+      toastError(e?.message || 'Network error');
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const removeAttempt = async (id: string) => {
@@ -221,63 +239,184 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
       )}
 
       {detail && (
-        <Sheet title={detail.attempt?.studentName || 'Detail'} onClose={() => setDetail(null)}>
-          <div className="space-y-3 text-sm">
-            <div className={card + ' p-3 space-y-1'}>
-              <div>👤 <strong>{detail.attempt.studentName}</strong></div>
-              <div>💬 {findStudent(detail.attempt)?.telegramUsername || 'No Telegram username'}</div>
-              <div>🆔 {detail.attempt.studentId}</div>
-              <div>📝 {detail.exam?.title}</div>
-              {detail.attempt.isOfficial === false && (
-                <div>🔁 Practice{detail.attempt.attemptNumber ? ` · Attempt #${detail.attempt.attemptNumber}` : ''}</div>
-              )}
-              <div>⭐ {detail.attempt.score}/{detail.attempt.maxScore} ({detail.attempt.percentage}%)</div>
-              <div>⏱️ {Math.floor(detail.attempt.timeTakenSeconds / 60)}m {detail.attempt.timeTakenSeconds % 60}s</div>
+        <Sheet
+          title={detail.attempt?.studentName || 'Result'}
+          subtitle={detail.exam?.title || 'Student attempt'}
+          icon={<IconUser className="w-4 h-4" />}
+          onClose={() => { setDetail(null); setDetailLoading(false); }}
+        >
+          <div className="space-y-2.5">
+            {/* Summary card */}
+            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-3">
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="col-span-2 flex items-center gap-1.5 text-[13px] font-bold text-slate-900">
+                  <IconUser className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span className="truncate">{detail.attempt.studentName}</span>
+                </div>
+                <div className="flex items-center gap-1 text-slate-600 truncate">
+                  <IconMessage className="w-3 h-3 shrink-0 text-slate-400" />
+                  <span className="truncate">{findStudent(detail.attempt)?.telegramUsername || 'No @username'}</span>
+                </div>
+                <div className="flex items-center gap-1 text-slate-600 truncate">
+                  <IconHash className="w-3 h-3 shrink-0 text-slate-400" />
+                  {detail.attempt.studentId}
+                </div>
+                <div className="col-span-2 flex items-center gap-1 text-slate-600">
+                  <IconBook className="w-3 h-3 shrink-0 text-slate-400" />
+                  <span className="truncate">{detail.exam?.title || '—'}</span>
+                </div>
+                {detail.attempt.isOfficial === false && (
+                  <div className="col-span-2 text-[10px] font-bold text-violet-700 bg-violet-50 rounded-md px-2 py-1 w-fit">
+                    Practice{detail.attempt.attemptNumber ? ` · #${detail.attempt.attemptNumber}` : ''}
+                  </div>
+                )}
+              </div>
+              <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+                <div className="rounded-lg bg-blue-50 border border-blue-100 px-2 py-1.5 text-center">
+                  <div className="text-[14px] font-bold text-blue-700 leading-none">
+                    {detail.attempt.score ?? '—'}/{detail.attempt.maxScore ?? '—'}
+                  </div>
+                  <div className="text-[9px] font-semibold text-blue-600/80 mt-0.5">Score</div>
+                </div>
+                <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-2 py-1.5 text-center">
+                  <div className="text-[14px] font-bold text-emerald-700 leading-none">
+                    {detail.attempt.percentage != null ? `${detail.attempt.percentage}%` : '—'}
+                  </div>
+                  <div className="text-[9px] font-semibold text-emerald-600/80 mt-0.5">Percent</div>
+                </div>
+                <div className="rounded-lg bg-slate-50 border border-slate-200 px-2 py-1.5 text-center">
+                  <div className="text-[14px] font-bold text-slate-700 leading-none flex items-center justify-center gap-0.5">
+                    <IconClock className="w-3 h-3" />
+                    {detail.attempt.timeTakenSeconds != null
+                      ? `${Math.floor(detail.attempt.timeTakenSeconds / 60)}m${detail.attempt.timeTakenSeconds % 60}s`
+                      : '—'}
+                  </div>
+                  <div className="text-[9px] font-semibold text-slate-500 mt-0.5">Time</div>
+                </div>
+              </div>
             </div>
 
+            {/* Message */}
             {(detail.attempt.telegramUserId || findStudent(detail.attempt)?.telegramUserId) && (
-              <div className={card + ' p-3 space-y-2'}>
-                <div className="font-bold text-xs text-slate-600">Message student</div>
-                {findStudent(detail.attempt)?.telegramUsername && (
-                  <a
-                    href={`https://t.me/${(findStudent(detail.attempt)!.telegramUsername || '').replace(/^@/, '')}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className={btnS + ' w-full text-xs no-underline'}
+              <div className="rounded-xl border border-slate-200 p-2.5 space-y-1.5">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Message student</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {findStudent(detail.attempt)?.telegramUsername && (
+                    <a
+                      href={`https://t.me/${(findStudent(detail.attempt)!.telegramUsername || '').replace(/^@/, '')}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={btnS + ' !py-1.5 !text-[11px]'}
+                    >
+                      <IconMessage className="w-3 h-3" /> Open Telegram
+                    </a>
+                  )}
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    className={inp + ' !py-1.5 !text-[12px]'}
+                    placeholder="Send via bot…"
+                    value={dmText}
+                    onChange={(e) => setDmText(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={btnP + ' !py-1.5 !px-2.5 shrink-0'}
+                    disabled={dmBusy || !dmText.trim()}
+                    onClick={() =>
+                      sendDm(
+                        Number(
+                          detail.attempt.telegramUserId ||
+                            findStudent(detail.attempt)?.telegramUserId
+                        )
+                      )
+                    }
                   >
-                    <IconMessage className="w-3.5 h-3.5" /> Open in Telegram
-                  </a>
-                )}
-                <textarea
-                  className={inp + ' min-h-[72px] text-sm'}
-                  value={dmText}
-                  onChange={(e) => setDmText(e.target.value)}
-                  placeholder="Type a message to send via bot…"
-                />
-                <button
-                  type="button"
-                  className={btnP + ' w-full text-xs'}
-                  disabled={dmBusy}
-                  onClick={() => sendDm(Number(detail.attempt.telegramUserId || findStudent(detail.attempt)?.telegramUserId))}
-                >
-                  {dmBusy ? 'Sending…' : 'Send by bot'}
-                </button>
+                    <IconSend className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             )}
 
-            <div className="font-bold text-xs">Question-wise</div>
-            <div className="space-y-1.5 max-h-[30vh] overflow-y-auto">
-              {(detail.breakdown || []).map((b: any) => (
-                <div key={b.questionId} className={`border rounded-lg p-2 text-xs ${b.status === 'correct' ? 'border-emerald-200 bg-emerald-50' : b.status === 'wrong' ? 'border-red-200 bg-red-50' : 'border-slate-200'}`}>
-                  <div className="font-bold text-slate-500">Q{b.index} · {b.status}</div>
-                  <div className="font-medium text-sm">{b.question}</div>
+            {/* Breakdown */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1">
+                <IconTrophy className="w-3 h-3" /> Question breakdown
+              </div>
+              {detailLoading || detail.breakdown == null ? (
+                <div className="space-y-1.5" aria-busy="true" aria-label="Loading answers">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 animate-pulse"
+                    >
+                      <div className="h-2.5 w-16 bg-slate-200 rounded mb-1.5" />
+                      <div className="h-3 w-full bg-slate-200 rounded mb-1" />
+                      <div className="h-3 w-2/3 bg-slate-200 rounded" />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <div className="space-y-1.5 max-h-[40vh] overflow-y-auto pr-0.5">
+                  {(detail.breakdown || []).map((b: any) => {
+                    const tone =
+                      b.status === 'correct'
+                        ? 'border-emerald-200 bg-emerald-50/50'
+                        : b.status === 'wrong'
+                          ? 'border-red-200 bg-red-50/40'
+                          : 'border-slate-200 bg-white';
+                    const badge =
+                      b.status === 'correct'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : b.status === 'wrong'
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-slate-100 text-slate-500';
+                    return (
+                      <div key={b.questionId || b.index} className={`rounded-lg border p-2 ${tone}`}>
+                        <div className="flex items-center justify-between gap-2 mb-0.5">
+                          <span className="text-[10px] font-bold text-slate-500">Q{b.index}</span>
+                          <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${badge}`}>
+                            {b.status}
+                          </span>
+                        </div>
+                        <div className="text-[12px] font-medium text-slate-800 leading-snug line-clamp-3">
+                          {b.question}
+                        </div>
+                        <div className="mt-1 text-[10px] text-slate-600 space-y-0.5">
+                          {b.status !== 'skipped' && (
+                            <div>
+                              Your: {typeof b.selected === 'number' ? String.fromCharCode(65 + b.selected) : '—'}
+                              {b.options?.[b.selected] != null ? ` · ${b.options[b.selected]}` : ''}
+                            </div>
+                          )}
+                          <div className="text-emerald-700">
+                            Correct: {typeof b.correctAnswer === 'number' ? String.fromCharCode(65 + b.correctAnswer) : '—'}
+                            {b.options?.[b.correctAnswer] != null ? ` · ${b.options[b.correctAnswer]}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            <div className="flex gap-2">
-              <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-xl py-2.5'} onClick={() => removeAttempt(detail.attempt.id)}>Remove result</button>
+
+            <div className="flex gap-1.5 pt-0.5">
+              <button
+                type="button"
+                className={btnD + ' flex-1 !py-2 !text-[11px] border border-red-100 rounded-lg'}
+                onClick={() => removeAttempt(detail.attempt.id)}
+              >
+                Remove result
+              </button>
               {findStudent(detail.attempt) && (
-                <button type="button" className={btnD + ' flex-1 border border-red-100 rounded-xl py-2.5'} onClick={() => removeStudent(findStudent(detail.attempt)!.id)}>Delete student</button>
+                <button
+                  type="button"
+                  className={btnD + ' flex-1 !py-2 !text-[11px] border border-red-100 rounded-lg'}
+                  onClick={() => removeStudent(findStudent(detail.attempt)!.id)}
+                >
+                  Delete student
+                </button>
               )}
             </div>
           </div>

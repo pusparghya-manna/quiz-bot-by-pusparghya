@@ -653,6 +653,7 @@ async function startServer(app?: import('express').Express) {
     const att = store.getAttempts().find(a => a.id === req.params.id);
     if (!att || !attemptBelongsToTeacher(att, teacherId)) return res.status(404).json({ error: 'Attempt not found' });
     await store.deleteAttempt(att.id);
+    try { invalidateTeacherCache(teacherId); } catch {}
     updateExamRanks(att.examId);
     await store.addAuditLog('ATTEMPT_DELETED', `Removed attempt ${att.id} for ${att.studentName}`, teacherId);
     res.json({ success: true });
@@ -663,30 +664,49 @@ async function startServer(app?: import('express').Express) {
     if (!teacherId) return;
     const att = store.getAttempts().find(a => a.id === req.params.id);
     if (!att || !attemptBelongsToTeacher(att, teacherId)) return res.status(404).json({ error: 'Attempt not found' });
-    if (!att.answers || Object.keys(att.answers).length === 0) {
-      await store.loadAttemptAnswers(att.id);
+    try {
+      const payload = await l1Cache.getOrSet(
+        tenantKey(teacherId, `attempt-detail:${att.id}`),
+        20_000,
+        async () => {
+          if (!att.answers || Object.keys(att.answers).length === 0) {
+            await store.loadAttemptAnswers(att.id);
+          }
+          const exam = store.getExamById(att.examId);
+          const breakdown = (exam?.questions || []).map((q, idx) => {
+            const selected = att.answers?.[q.id];
+            const has = selected !== undefined && selected !== null;
+            let status: 'correct' | 'wrong' | 'skipped' = 'skipped';
+            if (has) {
+              status = q.answer !== null && selected === q.answer ? 'correct' : 'wrong';
+            }
+            return {
+              index: idx + 1,
+              questionId: q.id,
+              question: q.question,
+              options: q.options,
+              correctAnswer: q.answer,
+              selected,
+              status,
+              marks: q.marks,
+              explanation: q.explanation || '',
+            };
+          });
+          // Do not cache mutable live IN_PROGRESS heavily — still ok for submitted
+          return {
+            attempt: att,
+            exam: exam
+              ? { id: exam.id, title: exam.title, totalQuestions: exam.totalQuestions }
+              : null,
+            breakdown,
+          };
+        }
+      );
+      res.json(payload);
+    } catch (e: any) {
+      console.error('[attempt detail]', e?.message || e);
+      res.status(500).json({ error: 'Failed to load detail' });
     }
-    const exam = store.getExamById(att.examId);
-    const breakdown = (exam?.questions || []).map((q, idx) => {
-      const selected = att.answers?.[q.id];
-      const has = selected !== undefined && selected !== null;
-      let status: 'correct' | 'wrong' | 'skipped' = 'skipped';
-      if (has) {
-        status = (q.answer !== null && selected === q.answer) ? 'correct' : 'wrong';
-      }
-      return {
-        index: idx + 1,
-        questionId: q.id,
-        question: q.question,
-        options: q.options,
-        correctAnswer: q.answer,
-        selected,
-        status,
-        marks: q.marks,
-        explanation: q.explanation || ''
-      };
-    });
-    res.json({ attempt: att, exam: exam ? { id: exam.id, title: exam.title, totalQuestions: exam.totalQuestions } : null, breakdown });
   });
 
   app.post('/api/students/:id/reset-attempt', async (req, res) => {
