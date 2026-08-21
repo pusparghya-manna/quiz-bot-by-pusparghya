@@ -683,7 +683,9 @@ This name will appear on results and the leaderboard.`,
         }
         if (action === 'continue_ans' && sess?.examId) {
           const qIdx = sess.qIdx || 0;
-          return await renderQuestionView(sess.examId, qIdx, student, user, { refreshKeyboard: true });
+          return await renderQuestionView(sess.examId, qIdx, student, user, {
+            refreshKeyboard: false,
+          });
         }
       }
     }
@@ -1056,63 +1058,72 @@ async function handleOptionSelect(examId: string, qIdx: number, optIdx: number, 
   return await renderQuestionView(examId, qIdx, student, user, { refreshKeyboard: false });
 }
 
-async function renderQuestionView(examId: string, qIdx: number, student: Student, user: TelegramUser, opts: { refreshKeyboard?: boolean } = {}): Promise<SimulatorResponse> {
+async function renderQuestionView(
+  examId: string,
+  qIdx: number,
+  student: Student,
+  user: TelegramUser,
+  opts: { refreshKeyboard?: boolean } = {}
+): Promise<SimulatorResponse> {
   const now = new Date();
   const exam = store.getExamById(examId);
   if (!exam) {
-    return { chatId: user.id, text: '❌ Examination not found. Please type /exams to see available tests.', type: 'sendMessage' };
+    return {
+      chatId: user.id,
+      text: '❌ Examination not found. Please type /exams to see available tests.',
+      type: 'sendMessage',
+    };
   }
 
-  // Enroll only when student is allowed past the lock checks (authorized access)
   await linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
     const startRes = await handleStartOrResumeExam(examId, student, user);
     attempt = store.getAttempt(examId, student.telegramUserId!);
-    if (!attempt) {
-      return startRes;
-    }
+    if (!attempt) return startRes;
   }
 
-  // Expiration check
   if (now.getTime() > new Date(attempt.expiresAt).getTime()) {
     return await autoSubmitExam(exam, attempt);
   }
 
-  // Memory-only index update for snappy UI. SQL is updated on answer save / submit.
   attempt.currentQuestionIndex = qIdx;
 
   const total = exam.questions.length;
   const question = exam.questions[qIdx];
-  const selectedOpt = attempt.answers[question.id];
-
+  const selectedOpt = attempt.answers?.[question.id];
   const remaining = formatRemaining(attempt.expiresAt);
 
-  let text = `📝 *${exam.title}*\n`;
-  text += `⏱️ *${remaining} remaining* | Question ${qIdx + 1}/${total}\n\n`;
-  text += `${question.question}\n\n`;
+  // No status / selected-answer lines — just title, timer, question
+  let text = `📝 *${escapeMd(exam.title)}*\n`;
+  text += `⏱️ *${remaining}* left · Q${qIdx + 1}/${total}\n\n`;
+  text += `${escapeMd(question.question || '')}`;
 
-  // ONLY MCQ choices under the message (inline)
+  // INLINE under the message: options + exam controls (edit-in-place, no user chat spam)
   const keyboard: InlineKeyboardButton[][] = [];
   question.options.forEach((optText, oIdx) => {
     const isSelected = selectedOpt === oIdx;
     const prefix = isSelected ? '🔘 ' : '⚪ ';
     let label = `${prefix}${String.fromCharCode(65 + oIdx)}. ${optText}`;
     if (label.length > 60) label = label.slice(0, 57) + '…';
-    keyboard.push([{
-      text: label,
-      callback_data: `ans_${exam.id}_${qIdx}_${oIdx}`
-    }]);
+    keyboard.push([{ text: label, callback_data: `ans_${exam.id}_${qIdx}_${oIdx}` }]);
   });
 
-  // Prev / Next / Grid / Submit on bottom ReplyKeyboard — no Main menu during exam
-  const rows: string[][] = [];
-  const nav: string[] = [];
-  if (qIdx > 0) nav.push(LABELS.prev);
-  if (qIdx < total - 1) nav.push(LABELS.next);
-  if (nav.length) rows.push(nav);
-  rows.push([LABELS.grid, LABELS.submit]);
+  const navRow: InlineKeyboardButton[] = [];
+  if (qIdx > 0) {
+    navRow.push({ text: '◀ Previous', callback_data: `nav_${exam.id}_${qIdx - 1}` });
+  }
+  if (qIdx < total - 1) {
+    navRow.push({ text: 'Next ▶', callback_data: `nav_${exam.id}_${qIdx + 1}` });
+  }
+  if (navRow.length) keyboard.push(navRow);
+
+  keyboard.push([
+    { text: '📋 Question Grid', callback_data: `grid_${exam.id}` },
+    { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` },
+  ]);
+  // No Main menu under exam message (per product request)
 
   const prevSess = getKbSession(user.id);
   setKbSession(user.id, {
@@ -1122,33 +1133,39 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
     lastMessageId: prevSess?.lastMessageId,
   });
 
-  const refreshKeyboard = opts.refreshKeyboard === true;
   const messageId = prevSess?.lastMessageId;
-
-  // Enter exam: send once (sets bottom keyboard + question)
-  if (refreshKeyboard || !messageId) {
+  // Prefer edit-in-place when we have a prior message id
+  if (messageId && opts.refreshKeyboard !== true) {
     return {
       chatId: user.id,
       text,
       replyMarkup: { inline_keyboard: keyboard },
-      replyKeyboard: kbMarkup(rows),
-      type: 'sendMessage',
+      messageId,
+      type: 'editMessageText',
     };
   }
-  // Next / Previous / pick answer: EDIT the same message (no new menu spam)
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    messageId,
-    type: 'editMessageText',
+    type: 'sendMessage',
   };
 }
 
-async function renderQuestionGrid(examId: string, student: Student, user: TelegramUser, page?: number): Promise<SimulatorResponse> {
+async function renderQuestionGrid(
+  examId: string,
+  student: Student,
+  user: TelegramUser,
+  page?: number
+): Promise<SimulatorResponse> {
   const exam = store.getExamById(examId);
   if (!exam) {
-    return { chatId: user.id, text: '❌ Examination not found.', replyKeyboard: mainNavReplyKeyboard(), type: 'sendMessage' };
+    return {
+      chatId: user.id,
+      text: '❌ Examination not found.',
+      replyKeyboard: mainNavReplyKeyboard(),
+      type: 'sendMessage',
+    };
   }
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
@@ -1163,21 +1180,29 @@ async function renderQuestionGrid(examId: string, student: Student, user: Telegr
   const answeredCount = Object.keys(attempt.answers || {}).length;
   const total = exam.questions.length;
   const remaining = formatRemaining(attempt.expiresAt);
-  const currentIdx = Math.max(0, attempt.currentQuestionIndex || 0);
+  const currentIdx = Math.max(0, Math.min(attempt.currentQuestionIndex || 0, total - 1));
   const PER = 20;
   const totalPages = Math.max(1, Math.ceil(total / PER));
-  // Open the page that contains the current question
-  const p = Math.max(0, Math.min(page != null ? page : Math.floor(currentIdx / PER), totalPages - 1));
+  // Open page containing the current question unless page is forced
+  const p = Math.max(
+    0,
+    Math.min(page != null ? page : Math.floor(currentIdx / PER), totalPages - 1)
+  );
   const startIdx = p * PER;
   const endIdx = Math.min(startIdx + PER, total);
 
-  let text = `📋 *Question Grid*\n`;
-  text += `📝 *${escapeMd(exam.title)}*\n`;
-  text += `⏱️ *${remaining}* left · 🟢 ${answeredCount}/${total}\n`;
-  text += `📄 Page ${p + 1}/${totalPages} · Now on *Q${currentIdx + 1}*\n\n`;
+  let text = `📋 *Question Grid*
+`;
+  text += `📝 *${escapeMd(exam.title)}*
+`;
+  text += `⏱️ *${remaining}* left · 🟢 ${answeredCount}/${total}
+`;
+  text += `📄 Page ${p + 1}/${totalPages} · Now on *Q${currentIdx + 1}*
+
+`;
   text += `_Tap a number to jump:_`;
 
-  // Inline grid → can edit the same bot message (no new spam)
+  // Inline grid on the same bot message (edit-in-place, no chat spam)
   const keyboard: InlineKeyboardButton[][] = [];
   let row: InlineKeyboardButton[] = [];
   for (let i = startIdx; i < endIdx; i++) {
@@ -1197,6 +1222,11 @@ async function renderQuestionGrid(examId: string, student: Student, user: Telegr
   if (p > 0) pageNav.push({ text: '◀ Prev page', callback_data: `grid_${exam.id}_${p - 1}` });
   if (p < totalPages - 1) pageNav.push({ text: 'Next page ▶', callback_data: `grid_${exam.id}_${p + 1}` });
   if (pageNav.length) keyboard.push(pageNav);
+  // Back to current question
+  keyboard.push([
+    { text: '🔙 Back to question', callback_data: `nav_${exam.id}_${currentIdx}` },
+    { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` },
+  ]);
 
   const sess = getKbSession(user.id);
   setKbSession(user.id, {
@@ -1714,9 +1744,9 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
   };
 
   /**
-   * ReplyKeyboard is chat-level; InlineKeyboard is per-message.
-   * When both needed: sendMessage with ReplyKeyboard + text, then
-   * editMessageText same id with InlineKeyboard — one visible message, no "." spam.
+   * ReplyKeyboard is chat-level (persists). InlineKeyboard is per-message.
+   * When both needed: one sendMessage with ReplyKeyboard + text, then edit same
+   * message for InlineKeyboard — one bubble, no "." / notice spam.
    */
   if (hasReplyKb && hasInline) {
     const r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
@@ -1741,11 +1771,11 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     return;
   }
 
-  // Edit-in-place when we have a message id
   let messageId = resp.messageId;
   if (!messageId && resp.type === 'editMessageText') {
     messageId = getKbSession(chatId)?.lastMessageId;
   }
+  // Prefer in-place edit for pure inline updates (answer / next without keyboard change)
   const preferEdit = Boolean(messageId) && !hasReplyKb;
 
   const result = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
@@ -1763,7 +1793,7 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
         parseMode: 'Markdown',
         replyMarkup: resp.replyMarkup,
       });
-      rememberId(r2.messageIds);
+      if (r2.ok) rememberId(r2.messageIds);
     }
     return;
   }
