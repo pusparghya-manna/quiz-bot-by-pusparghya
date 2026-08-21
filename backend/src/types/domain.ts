@@ -105,6 +105,24 @@ export interface InlineKeyboardMarkup {
   inline_keyboard: InlineKeyboardButton[][];
 }
 
+/** Bottom-of-screen custom keyboard (ReplyKeyboard) */
+export interface ReplyKeyboardButton {
+  text: string;
+}
+
+export interface ReplyKeyboardMarkup {
+  keyboard: ReplyKeyboardButton[][];
+  resize_keyboard?: boolean;
+  one_time_keyboard?: boolean;
+  is_persistent?: boolean;
+  selective?: boolean;
+}
+
+export interface ReplyKeyboardRemove {
+  remove_keyboard: true;
+  selective?: boolean;
+}
+
 export interface TelegramChat {
   id: number;
   first_name?: string;
@@ -145,7 +163,13 @@ export interface TelegramUpdate {
 export interface SimulatorResponse {
   chatId: number;
   text: string;
+  /** Inline buttons under the message */
   replyMarkup?: InlineKeyboardMarkup;
+  /**
+   * Bottom input-area keyboard (ReplyKeyboard).
+   * Only applied on sendMessage (Telegram cannot attach it via editMessageText).
+   */
+  replyKeyboard?: ReplyKeyboardMarkup | ReplyKeyboardRemove;
   messageId?: number;
   type: 'sendMessage' | 'editMessageText';
 }

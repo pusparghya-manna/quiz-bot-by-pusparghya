@@ -6,6 +6,7 @@ import {
   TelegramUser,
   InlineKeyboardButton,
   InlineKeyboardMarkup,
+  ReplyKeyboardMarkup,
   SimulatorResponse,
   Attempt,
   Exam,
@@ -77,6 +78,45 @@ function isExamTimeEnded(exam: Exam): boolean {
 
 /** Users who tapped "Set your name" — next text message becomes their display name */
 const pendingNameUsers = new Set<number>();
+
+/** Labels shown on Telegram's bottom ReplyKeyboard (must match text handlers). */
+export const MAIN_NAV = {
+  exams: '📚 My Exams',
+  results: '📊 My Results',
+  leaderboard: '🏆 Leaderboard',
+  setName: '✏️ Set my name',
+  home: '🏠 Main menu',
+} as const;
+
+function mainNavReplyKeyboard(): ReplyKeyboardMarkup {
+  return {
+    keyboard: [
+      [{ text: MAIN_NAV.exams }, { text: MAIN_NAV.results }],
+      [{ text: MAIN_NAV.leaderboard }, { text: MAIN_NAV.setName }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
+}
+
+function matchMainNav(text: string): keyof typeof MAIN_NAV | null {
+  const t = text.trim();
+  for (const [key, label] of Object.entries(MAIN_NAV) as [keyof typeof MAIN_NAV, string][]) {
+    if (t === label) return key;
+  }
+  // Also accept without emoji prefix for resilience
+  const plain: Record<string, keyof typeof MAIN_NAV> = {
+    'My Exams': 'exams',
+    'My Results': 'results',
+    'Leaderboard': 'leaderboard',
+    'Leaderboards': 'leaderboard',
+    'Set my name': 'setName',
+    'Set your name': 'setName',
+    'Main menu': 'home',
+  };
+  return plain[t] || null;
+}
+
 
 function formatInIST(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
@@ -184,25 +224,23 @@ function renderMainMenu(student: Student): SimulatorResponse {
   const notice = store.getSettings().systemNotice;
   return {
     chatId: student.telegramUserId!,
-    text: `👋 *Welcome to Quiz Bot by Pusparghya!*
+    text:
+      `👋 *Welcome to Quiz Bot by Pusparghya!*
 
 ` +
       (notice ? `📢 ${notice}
 
 ` : '') +
-      `You are registered as *${student.name}*.
+      `You are registered as *${escapeMd(student.name)}*.
 
 ` +
-      `Teachers share a special link for each exam. Open that link to start.`,
-    replyMarkup: {
-      inline_keyboard: [
-        [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
-        [{ text: '📊 My Results', callback_data: 'btn_results' }],
-        [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }],
-        [{ text: '✏️ Set your name', callback_data: 'btn_setname' }]
-      ]
-    },
-    type: 'editMessageText'
+      `Teachers share a special link for each exam. Open that link to start.
+
+` +
+      `_Use the buttons below the chat to navigate._`,
+    // Bottom keyboard (not under the message)
+    replyKeyboard: mainNavReplyKeyboard(),
+    type: 'sendMessage',
   };
 }
 
@@ -474,6 +512,35 @@ This name will appear on results and the leaderboard.`,
       };
     }
 
+
+    // Bottom ReplyKeyboard main navigation (sends button label as text)
+    const nav = matchMainNav(text);
+    if (nav && !pendingNameUsers.has(user.id)) {
+      if (nav === 'exams') {
+        return { ...renderExamsList(student), type: 'sendMessage', replyKeyboard: mainNavReplyKeyboard() };
+      }
+      if (nav === 'results') {
+        return { ...renderStudentResults(student), type: 'sendMessage', replyKeyboard: mainNavReplyKeyboard() };
+      }
+      if (nav === 'leaderboard') {
+        return { ...renderLeaderboardExamPicker(student), type: 'sendMessage', replyKeyboard: mainNavReplyKeyboard() };
+      }
+      if (nav === 'home') {
+        return renderMainMenu(student);
+      }
+      if (nav === 'setName') {
+        pendingNameUsers.add(user.id);
+        return {
+          chatId: user.id,
+          text: `✏️ *Set my name*
+
+Please type your full name and send it as a message.`,
+          replyKeyboard: mainNavReplyKeyboard(),
+          type: 'sendMessage',
+        };
+      }
+    }
+
     // /setname command (still supported)
     if (text.startsWith('/setname')) {
       const newName = text.replace('/setname', '').trim().slice(0, 60);
@@ -484,12 +551,7 @@ This name will appear on results and the leaderboard.`,
         return {
           chatId: user.id,
           text: `✅ *Name updated!*\n\nYour name is now: *${newName}*`,
-          replyMarkup: {
-            inline_keyboard: [
-              [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
-              [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
-            ]
-          },
+          replyKeyboard: mainNavReplyKeyboard(),
           type: 'sendMessage'
         };
       }
@@ -1434,10 +1496,13 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
   const token = process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken;
   if (!token) return;
 
-  const preferEdit = resp.type === 'editMessageText' && !!resp.messageId;
+  // ReplyKeyboard can only be attached via sendMessage
+  const hasReplyKb = Boolean(resp.replyKeyboard);
+  const preferEdit = resp.type === 'editMessageText' && !!resp.messageId && !hasReplyKb;
   const result = await sendSafeTelegramMessage(token, resp.chatId, resp.text || '', {
     parseMode: 'Markdown',
     replyMarkup: resp.replyMarkup,
+    replyKeyboard: resp.replyKeyboard,
     messageId: resp.messageId,
     preferEdit,
   });

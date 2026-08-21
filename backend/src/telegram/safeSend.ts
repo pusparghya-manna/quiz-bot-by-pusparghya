@@ -79,6 +79,8 @@ export async function sendSafeTelegramMessage(
   options: {
     parseMode?: 'Markdown' | 'HTML' | undefined;
     replyMarkup?: unknown;
+    /** Bottom ReplyKeyboard — cannot be set via editMessageText */
+    replyKeyboard?: unknown;
     messageId?: number;
     preferEdit?: boolean;
   } = {}
@@ -88,17 +90,23 @@ export async function sendSafeTelegramMessage(
   const chunks = splitTelegramMessage(text, 4000);
   const messageIds: number[] = [];
   let parseMode = options.parseMode;
+  // Reply keyboard requires sendMessage
+  const mustSendForKeyboard = Boolean(options.replyKeyboard);
 
   for (let i = 0; i < chunks.length; i++) {
     const isFirst = i === 0;
-    const useEdit = Boolean(options.preferEdit && options.messageId && isFirst && chunks.length === 1);
+    const useEdit = Boolean(
+      options.preferEdit && options.messageId && isFirst && chunks.length === 1 && !mustSendForKeyboard
+    );
 
     const body: Record<string, unknown> = {
       chat_id: chatId,
       text: chunks[i],
     };
     if (parseMode) body.parse_mode = parseMode;
-    if (isFirst && options.replyMarkup) body.reply_markup = options.replyMarkup;
+    // Prefer replyKeyboard on first chunk; else inline under message
+    if (isFirst && options.replyKeyboard) body.reply_markup = options.replyKeyboard;
+    else if (isFirst && options.replyMarkup) body.reply_markup = options.replyMarkup;
 
     let method = 'sendMessage';
     if (useEdit) {
