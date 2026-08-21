@@ -12,3 +12,8 @@ export const btnP = btn + ' bg-blue-600 text-white hover:bg-blue-700 shadow-sm s
 export const btnS = btn + ' bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 px-3.5 py-2';
 export const btnD = btn + ' text-red-600 hover:bg-red-50 px-2.5 py-1.5';
 export const card = 'bg-white rounded-xl border border-slate-200/80 shadow-sm';
+
+/** Field with leading icon (exam form) */
+export const inpIconWrap = 'flex items-center gap-2.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 sm:py-3 text-slate-900 transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15';
+export const inpBare = 'flex-1 min-w-0 bg-transparent outline-none text-[13px] sm:text-sm placeholder:text-slate-400';
+export const labelReq = 'text-[11px] sm:text-xs font-semibold text-slate-600 mb-1.5 block';

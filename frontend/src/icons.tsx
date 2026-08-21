@@ -50,3 +50,7 @@ export const IconAlert = ({ className }: P) => <svg {...s} className={className}
 export const IconPercent = ({ className }: P) => <svg {...s} className={className}><path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>;
 export const IconFilter = ({ className }: P) => <svg {...s} className={className}><path d="M3 4h18l-7 8v6l-4 2v-8z"/></svg>;
 export const IconExternal = ({ className }: P) => <svg {...s} className={className}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>;
+
+export const IconShuffle = ({ className }: P) => <svg {...s} className={className}><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>;
+export const IconMinus = ({ className }: P) => <svg {...s} className={className}><path d="M5 12h14"/></svg>;
+export const IconBookmark = ({ className }: P) => <svg {...s} className={className}><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>;

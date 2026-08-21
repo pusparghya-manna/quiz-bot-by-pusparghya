@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Exam, Question, ExamStatus } from '../types';
 import { api } from '../api';
-import { inp, btn, btnP, btnS, btnD, card } from '../styles/ui';
+import { inp, btn, btnP, btnS, btnD, card, inpIconWrap, inpBare, labelReq } from '../styles/ui';
 import { Field } from '../components/ui/Field';
 import { Sheet } from '../components/ui/Sheet';
 import { Badge } from '../components/ui/Badge';
@@ -12,7 +12,8 @@ import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconUpload, IconShare, IconInfo,
   IconCalendar, IconCopy, IconFileText, IconSparkles, IconClose, IconSearch,
-  IconChevronDown, IconClock, IconExam, IconUsers, IconBook
+  IconChevronDown, IconClock, IconExam, IconUsers, IconBook, IconHash,
+  IconShuffle, IconMinus, IconBookmark, IconUser
 } from '../icons';
 
 export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }: { exams: Exam[]; botUsername: string; onRefresh: () => void; defaultOpenNew?: boolean }) {
@@ -333,47 +334,243 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       </div>
 
       {open && (
-        <Sheet title={editId ? 'Edit exam' : 'New exam'} onClose={() => setOpen(false)}>
-          {/* Steps */}
-          <div className="flex gap-1 mb-4 bg-slate-100 p-1 rounded-lg">
-            {([
-              { id: 'info', label: '1. Info' },
-              { id: 'questions', label: '2. Questions' },
-              { id: 'review', label: '3. Review' },
-            ] as const).map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setStep(s.id)}
-                className={`flex-1 py-1.5 rounded-md text-xs font-bold transition ${step === s.id ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-              >
-                {s.label}
-              </button>
-            ))}
+        <Sheet
+          title={editId ? 'Edit exam' : 'New exam'}
+          subtitle={editId ? 'Update exam details' : 'Create a new examination'}
+          icon={<IconEdit className="w-5 h-5" />}
+          onClose={() => setOpen(false)}
+        >
+          {/* Stepper — matches design, responsive */}
+          <div className="mb-5">
+            <div className="flex items-start justify-between gap-1 sm:gap-2 relative">
+              <div className="absolute top-4 left-[12%] right-[12%] h-0.5 bg-slate-100 -z-0 hidden xs:block sm:block" aria-hidden />
+              {([
+                { id: 'info' as const, n: 1, label: 'Info', sub: 'Basic details' },
+                { id: 'questions' as const, n: 2, label: 'Questions', sub: 'Add and manage' },
+                { id: 'review' as const, n: 3, label: 'Review', sub: 'Preview exam' },
+              ]).map((s) => {
+                const active = step === s.id;
+                const done =
+                  (s.id === 'info' && (step === 'questions' || step === 'review')) ||
+                  (s.id === 'questions' && step === 'review');
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setStep(s.id)}
+                    className="relative z-[1] flex-1 flex flex-col items-center text-center min-w-0"
+                  >
+                    <span
+                      className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold border-2 transition ${
+                        active
+                          ? 'bg-white border-blue-600 text-blue-600 shadow-sm shadow-blue-600/20'
+                          : done
+                            ? 'bg-blue-600 border-blue-600 text-white'
+                            : 'bg-white border-slate-200 text-slate-400'
+                      }`}
+                    >
+                      {done && !active ? <IconCheck className="w-4 h-4" /> : s.n}
+                    </span>
+                    <span className={`mt-1.5 text-[11px] sm:text-xs font-bold truncate w-full ${active ? 'text-blue-600' : 'text-slate-600'}`}>
+                      {s.label}
+                    </span>
+                    <span className="text-[9px] sm:text-[10px] text-slate-400 truncate w-full hidden sm:block">
+                      {s.sub}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3 h-1 rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                style={{
+                  width: step === 'info' ? '33%' : step === 'questions' ? '66%' : '100%',
+                }}
+              />
+            </div>
           </div>
 
           {step === 'info' && (
-            <div className="space-y-2.5">
-              <Field label="Exam title"><input className={inp} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Biology Unit Test 3" /></Field>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Field label="Subject"><input className={inp} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} /></Field>
-                <Field label="Class / group"><input className={inp} value={form.className} onChange={(e) => setForm({ ...form, className: e.target.value })} /></Field>
-                <Field label="Test code"><input className={inp} value={form.testNumber} onChange={(e) => setForm({ ...form, testNumber: e.target.value })} /></Field>
-                <Field label="Start time"><input type="datetime-local" className={inp} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
-                <Field label="Duration (minutes)"><input type="number" className={inp} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: +e.target.value })} /></Field>
-                <Field label="Negative marking"><input type="number" step="0.25" className={inp} value={form.negativeMarking} onChange={(e) => setForm({ ...form, negativeMarking: +e.target.value })} /></Field>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[13px] pt-0.5">
-                <label className={`flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2.5 transition ${form.randomizeQuestions ? 'border-blue-300 bg-blue-50/50 text-blue-700' : 'border-slate-200 hover:border-slate-300'}`}>
-                  <input type="checkbox" checked={form.randomizeQuestions} onChange={(e) => setForm({ ...form, randomizeQuestions: e.target.checked })} className="accent-blue-600" />
-                  Shuffle questions
+            <div className="space-y-3.5 sm:space-y-4">
+              <div>
+                <label className={labelReq}>
+                  Exam title <span className="text-red-500">*</span>
                 </label>
-                <label className={`flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2.5 transition ${form.randomizeOptions ? 'border-blue-300 bg-blue-50/50 text-blue-700' : 'border-slate-200 hover:border-slate-300'}`}>
-                  <input type="checkbox" checked={form.randomizeOptions} onChange={(e) => setForm({ ...form, randomizeOptions: e.target.checked })} className="accent-blue-600" />
-                  Shuffle options
+                <div className={inpIconWrap}>
+                  <IconBookmark className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    className={inpBare}
+                    value={form.title}
+                    onChange={(e) => setForm({ ...form, title: e.target.value })}
+                    placeholder="e.g. Biology Unit Test 3"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className={labelReq}>
+                  Subject <span className="text-red-500">*</span>
+                </label>
+                <div className={inpIconWrap}>
+                  <IconBook className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    className={inpBare}
+                    value={form.subject}
+                    onChange={(e) => setForm({ ...form, subject: e.target.value })}
+                    placeholder="Biology"
+                    list="exam-subjects"
+                  />
+                  <IconChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                </div>
+                <datalist id="exam-subjects">
+                  <option value="Biology" />
+                  <option value="Physics" />
+                  <option value="Chemistry" />
+                  <option value="Mathematics" />
+                  <option value="English" />
+                  <option value="History" />
+                  <option value="Geography" />
+                  <option value="Computer Science" />
+                </datalist>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-3.5">
+                <div>
+                  <label className={labelReq}>
+                    Class / group <span className="text-red-500">*</span>
+                  </label>
+                  <div className={inpIconWrap}>
+                    <IconUser className="w-4 h-4 text-slate-400 shrink-0" />
+                    <input
+                      className={inpBare}
+                      value={form.className}
+                      onChange={(e) => setForm({ ...form, className: e.target.value })}
+                      placeholder="12"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelReq}>
+                    Test code <span className="text-red-500">*</span>
+                  </label>
+                  <div className={inpIconWrap}>
+                    <IconHash className="w-4 h-4 text-slate-400 shrink-0" />
+                    <input
+                      className={inpBare}
+                      value={form.testNumber}
+                      onChange={(e) => setForm({ ...form, testNumber: e.target.value })}
+                      placeholder="0A"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelReq}>
+                  Start time <span className="text-red-500">*</span>
+                </label>
+                <div className={inpIconWrap}>
+                  <IconCalendar className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    type="datetime-local"
+                    className={inpBare + ' [color-scheme:light]'}
+                    value={form.startDate}
+                    onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-3.5">
+                <div>
+                  <label className={labelReq}>
+                    Duration (minutes) <span className="text-red-500">*</span>
+                  </label>
+                  <div className={inpIconWrap}>
+                    <IconClock className="w-4 h-4 text-slate-400 shrink-0" />
+                    <input
+                      type="number"
+                      min={1}
+                      className={inpBare}
+                      value={form.durationMinutes}
+                      onChange={(e) => setForm({ ...form, durationMinutes: +e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelReq}>Negative marking</label>
+                  <div className={inpIconWrap}>
+                    <IconMinus className="w-4 h-4 text-slate-400 shrink-0" />
+                    <input
+                      type="number"
+                      step="0.25"
+                      min={0}
+                      className={inpBare}
+                      value={form.negativeMarking}
+                      onChange={(e) => setForm({ ...form, negativeMarking: +e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 pt-0.5">
+                <label
+                  className={`flex items-start gap-3 cursor-pointer rounded-xl border px-3.5 py-3 transition ${
+                    form.randomizeQuestions
+                      ? 'border-blue-400 bg-blue-50/70 ring-1 ring-blue-200'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.randomizeQuestions}
+                    onChange={(e) => setForm({ ...form, randomizeQuestions: e.target.checked })}
+                    className="mt-0.5 w-4 h-4 accent-blue-600 rounded"
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
+                      <IconShuffle className="w-3.5 h-3.5 text-blue-600" />
+                      Shuffle questions
+                    </span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      Questions will be shown in random order
+                    </span>
+                  </span>
+                  <IconInfo className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                </label>
+                <label
+                  className={`flex items-start gap-3 cursor-pointer rounded-xl border px-3.5 py-3 transition ${
+                    form.randomizeOptions
+                      ? 'border-blue-400 bg-blue-50/70 ring-1 ring-blue-200'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.randomizeOptions}
+                    onChange={(e) => setForm({ ...form, randomizeOptions: e.target.checked })}
+                    className="mt-0.5 w-4 h-4 accent-blue-600 rounded"
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
+                      <IconShuffle className="w-3.5 h-3.5 text-slate-500" />
+                      Shuffle options
+                    </span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      Options within each question will be shuffled
+                    </span>
+                  </span>
+                  <IconInfo className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                 </label>
               </div>
-              <button type="button" className={btnP + ' w-full mt-1'} onClick={() => setStep('questions')}>Next: Questions →</button>
+
+              <button
+                type="button"
+                className="w-full mt-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-3.5 shadow-md shadow-blue-600/25 active:scale-[0.99] transition"
+                onClick={() => setStep('questions')}
+              >
+                Next: Questions →
+              </button>
             </div>
           )}
 
