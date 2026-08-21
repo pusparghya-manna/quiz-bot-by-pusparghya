@@ -1782,73 +1782,44 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    * When both needed: one sendMessage with ReplyKeyboard + text, then edit same
    * message for InlineKeyboard — one bubble, no "." / notice spam.
    */
+  /**
+   * Telegram allows only ONE reply_markup per message.
+   * Never send the question text twice (that caused duplicate Q1 bubbles).
+   * Pattern: optional silent carrier for bottom ReplyKeyboard (deleted),
+   * then a SINGLE sendMessage with the question + inline A–D / nav.
+   */
   if (hasReplyKb && hasInline) {
-    const isRemove = Boolean((resp.replyKeyboard as any)?.remove_keyboard);
-
-    if (isRemove) {
-      // Hide bottom menu WITHOUT showing a second question bubble:
-      // 1) brief remove-keyboard message (deleted immediately)
-      // 2) single question message with inline A–D / nav only
-      try {
-        const r0 = await sendSafeTelegramMessage(token, chatId, '⁠', {
-          replyKeyboard: { remove_keyboard: true },
-        });
-        const carrierId = r0.messageIds?.[0];
-        if (carrierId) {
-          await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
-            signal: AbortSignal.timeout(4000),
-          }).catch(() => {});
-        }
-      } catch {
-        /* ignore remove failures */
-      }
-      const r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
-        parseMode: 'Markdown',
-        replyMarkup: resp.replyMarkup,
+    try {
+      const r0 = await sendSafeTelegramMessage(token, chatId, '⁠', {
+        replyKeyboard: resp.replyKeyboard,
       });
-      if (!r1.ok) {
-        // Retry without Markdown (Bengali / special chars can break parse_mode)
-        const r2 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
-          replyMarkup: resp.replyMarkup,
-        });
-        if (r2.ok) rememberId(r2.messageIds);
-        else console.warn('[Telegram] question send failed:', r1.error);
-        return;
+      const carrierId = r0.messageIds?.[0];
+      if (carrierId) {
+        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
+          signal: AbortSignal.timeout(4000),
+        }).catch(() => {});
       }
-      rememberId(r1.messageIds);
-      return;
+    } catch {
+      /* keyboard apply is best-effort */
     }
 
-    // Real bottom keyboard + inline: one send with keyboard, then edit for inline
-    const r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+    let r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
       parseMode: 'Markdown',
-      replyKeyboard: resp.replyKeyboard,
+      replyMarkup: resp.replyMarkup,
     });
     if (!r1.ok) {
-      console.warn('[Telegram] send+replyKb failed:', r1.error);
+      r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+        replyMarkup: resp.replyMarkup,
+      });
+    }
+    if (!r1.ok) {
+      console.warn('[Telegram] question+options send failed:', r1.error);
       return;
     }
     rememberId(r1.messageIds);
-    const mid = r1.messageIds?.[0];
-    if (mid) {
-      const r2 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
-        parseMode: 'Markdown',
-        replyMarkup: resp.replyMarkup,
-        messageId: mid,
-        preferEdit: true,
-      });
-      if (!r2.ok) {
-        // Keep the one message; try adding inline without parse_mode
-        await sendSafeTelegramMessage(token, chatId, resp.text || '', {
-          replyMarkup: resp.replyMarkup,
-          messageId: mid,
-          preferEdit: true,
-        });
-      }
-    }
     return;
   }
 
