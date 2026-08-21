@@ -1115,19 +1115,43 @@ async function renderQuestionView(
   const selectedOpt = attempt.answers?.[question.id];
   const remaining = formatRemaining(attempt.expiresAt);
 
-  // No status / selected-answer lines — just title, timer, question
-  let text = `📝 *${escapeMd(exam.title)}*\n`;
-  text += `⏱️ *${remaining}* left · Q${qIdx + 1}/${total}\n\n`;
-  text += `${escapeMd(question.question || '')}`;
+  // Full option text in the message; letter-only buttons below
+  let text = `📝 *${escapeMd(exam.title)}*
+`;
+  text += `⏱️ *${remaining}* left · Q${qIdx + 1}/${total}
 
-  // INLINE under the message: options + exam controls (edit-in-place, no user chat spam)
-  const keyboard: InlineKeyboardButton[][] = [];
-  question.options.forEach((optText, oIdx) => {
+`;
+  text += `${escapeMd(question.question || '')}
+
+`;
+
+  const optsList = question.options || [];
+  optsList.forEach((optText, oIdx) => {
+    const letter = String.fromCharCode(65 + oIdx);
     const isSelected = selectedOpt === oIdx;
-    const prefix = isSelected ? '🔘 ' : '⚪ ';
-    let label = `${prefix}${String.fromCharCode(65 + oIdx)}. ${optText}`;
-    if (label.length > 60) label = label.slice(0, 57) + '…';
-    keyboard.push([{ text: label, callback_data: `ans_${exam.id}_${qIdx}_${oIdx}` }]);
+    const mark = isSelected ? '🔘' : '⚪';
+    text += `${mark} *${letter}.* ${escapeMd(String(optText || ''))}
+`;
+  });
+  if (selectedOpt !== undefined && selectedOpt !== null) {
+    text += `
+_Selected: ${String.fromCharCode(65 + Number(selectedOpt))}_`;
+  }
+
+  // Buttons: A B C D only (full text is above)
+  const keyboard: InlineKeyboardButton[][] = [];
+  let letterRow: InlineKeyboardButton[] = [];
+  optsList.forEach((_optText, oIdx) => {
+    const letter = String.fromCharCode(65 + oIdx);
+    const isSelected = selectedOpt === oIdx;
+    letterRow.push({
+      text: isSelected ? `● ${letter}` : letter,
+      callback_data: `ans_${exam.id}_${qIdx}_${oIdx}`,
+    });
+    if (letterRow.length === 4 || oIdx === optsList.length - 1) {
+      keyboard.push(letterRow);
+      letterRow = [];
+    }
   });
 
   const navRow: InlineKeyboardButton[] = [];
