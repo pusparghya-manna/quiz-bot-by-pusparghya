@@ -680,6 +680,24 @@ This name will appear on results and the leaderboard.`,
           return renderSubmitConfirmation(sess.examId, student, user);
         }
         if (action === 'do_submit' && sess?.examId) {
+          // Show submitting text immediately (text-button path has no callback loading)
+          try {
+            const token = process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken;
+            const mid = sess.lastMessageId;
+            if (token && mid) {
+              await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: user.id,
+                  message_id: mid,
+                  text: '⏳ *Submitting exam…*\n\nPlease wait while we score your answers.',
+                  parse_mode: 'Markdown',
+                }),
+                signal: AbortSignal.timeout(5000),
+              });
+            }
+          } catch { /* ignore */ }
           return await handleFinalSubmit(sess.examId, student, user);
         }
         if (action === 'continue_ans' && sess?.examId) {
@@ -1277,14 +1295,19 @@ function renderSubmitConfirmation(examId: string, student: Student, user: Telegr
     qIdx: attempt.currentQuestionIndex || 0,
   });
 
+  const sess = getKbSession(user.id);
+  const messageId = sess?.lastMessageId;
   return {
     chatId: user.id,
     text,
-    replyKeyboard: kbMarkup([
-      [LABELS.confirmSubmit],
-      [LABELS.continueAns],
-    ]),
-    type: 'sendMessage',
+    replyMarkup: {
+      inline_keyboard: [
+        [{ text: '🚀 Yes, Submit Exam Now', callback_data: `do_submit_${exam.id}` }],
+        [{ text: '🔙 Continue Answering', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex || 0}` }],
+      ],
+    },
+    messageId,
+    type: messageId ? 'editMessageText' : 'sendMessage',
   };
 }
 
@@ -1753,6 +1776,46 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    * message for InlineKeyboard — one bubble, no "." / notice spam.
    */
   if (hasReplyKb && hasInline) {
+    const isRemove = Boolean((resp.replyKeyboard as any)?.remove_keyboard);
+
+    if (isRemove) {
+      // Hide bottom menu WITHOUT showing a second question bubble:
+      // 1) brief remove-keyboard message (deleted immediately)
+      // 2) single question message with inline A–D / nav only
+      try {
+        const r0 = await sendSafeTelegramMessage(token, chatId, '⁠', {
+          replyKeyboard: { remove_keyboard: true },
+        });
+        const carrierId = r0.messageIds?.[0];
+        if (carrierId) {
+          await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
+            signal: AbortSignal.timeout(4000),
+          }).catch(() => {});
+        }
+      } catch {
+        /* ignore remove failures */
+      }
+      const r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+        parseMode: 'Markdown',
+        replyMarkup: resp.replyMarkup,
+      });
+      if (!r1.ok) {
+        // Retry without Markdown (Bengali / special chars can break parse_mode)
+        const r2 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+          replyMarkup: resp.replyMarkup,
+        });
+        if (r2.ok) rememberId(r2.messageIds);
+        else console.warn('[Telegram] question send failed:', r1.error);
+        return;
+      }
+      rememberId(r1.messageIds);
+      return;
+    }
+
+    // Real bottom keyboard + inline: one send with keyboard, then edit for inline
     const r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
       parseMode: 'Markdown',
       replyKeyboard: resp.replyKeyboard,
@@ -1770,7 +1833,14 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
         messageId: mid,
         preferEdit: true,
       });
-      if (!r2.ok) console.warn('[Telegram] edit+inline failed:', r2.error);
+      if (!r2.ok) {
+        // Keep the one message; try adding inline without parse_mode
+        await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+          replyMarkup: resp.replyMarkup,
+          messageId: mid,
+          preferEdit: true,
+        });
+      }
     }
     return;
   }
