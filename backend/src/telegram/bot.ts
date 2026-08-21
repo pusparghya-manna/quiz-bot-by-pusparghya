@@ -1697,8 +1697,39 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
   const token = process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken;
   if (!token) return;
 
-  // ReplyKeyboard can only be attached via sendMessage
   const hasReplyKb = Boolean(resp.replyKeyboard);
+  const hasInline = Boolean(resp.replyMarkup && (resp.replyMarkup as any).inline_keyboard);
+
+  /**
+   * Telegram allows only ONE reply_markup per message.
+   * When we need bottom ReplyKeyboard AND inline MCQ options:
+   *  1) apply ReplyKeyboard (short nav notice)
+   *  2) send/edit the real message with inline options only
+   */
+  if (hasReplyKb && hasInline) {
+    const kbResult = await sendSafeTelegramMessage(
+      token,
+      resp.chatId,
+      '⬇️ *Navigation buttons are below the chat*',
+      {
+        parseMode: 'Markdown',
+        replyKeyboard: resp.replyKeyboard,
+      }
+    );
+    if (!kbResult.ok) {
+      console.warn('[Telegram] reply keyboard send failed:', kbResult.error);
+    }
+    const qResult = await sendSafeTelegramMessage(token, resp.chatId, resp.text || '', {
+      parseMode: 'Markdown',
+      replyMarkup: resp.replyMarkup,
+      // never edit for this path — need a message that owns the inline options
+    });
+    if (!qResult.ok) {
+      console.warn('[Telegram] question+options send failed:', qResult.error);
+    }
+    return;
+  }
+
   const preferEdit = resp.type === 'editMessageText' && !!resp.messageId && !hasReplyKb;
   const result = await sendSafeTelegramMessage(token, resp.chatId, resp.text || '', {
     parseMode: 'Markdown',
