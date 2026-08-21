@@ -397,7 +397,8 @@ This name will appear on results and the leaderboard.`,
       const rest = data.slice(5);
       const parsed = resolveExamIdFromRest(rest, 0);
       if (parsed) {
-        const page = parsed.trailing[0] ?? 0;
+        // trailing[0] = page when present; undefined → open page of current question
+        const page = parsed.trailing.length ? parsed.trailing[0] : undefined;
         response = await renderQuestionGrid(parsed.examId, student, user, page);
       }
     } else if (data.startsWith('revatt_')) {
@@ -1163,13 +1164,13 @@ async function renderQuestionView(
       type: 'editMessageText',
     };
   }
-  // Entering exam: one send that REMOVES the sticky bottom menu (Continue/View Result/…)
-  // and shows question + A–D + Prev/Next/Grid/Submit under the message.
+  // Entering exam: replace sticky exam-options bar with a single Main menu key
+  // (full remove_keyboard makes the phone typing keyboard pop up).
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    replyKeyboard: { remove_keyboard: true },
+    replyKeyboard: kbMarkup([[LABELS.home]]),
     type: 'sendMessage',
   };
 }
@@ -1202,13 +1203,18 @@ async function renderQuestionGrid(
   const answeredCount = Object.keys(attempt.answers || {}).length;
   const total = exam.questions.length;
   const remaining = formatRemaining(attempt.expiresAt);
-  const currentIdx = Math.max(0, Math.min(attempt.currentQuestionIndex || 0, total - 1));
+  const sessForQ = getKbSession(user.id);
+  const fromSess = sessForQ?.examId === examId && sessForQ.qIdx != null ? sessForQ.qIdx : undefined;
+  const currentIdx = Math.max(
+    0,
+    Math.min(fromSess ?? attempt.currentQuestionIndex ?? 0, total - 1)
+  );
   const PER = 20;
   const totalPages = Math.max(1, Math.ceil(total / PER));
   // Open page containing the current question unless page is forced
   const p = Math.max(
     0,
-    Math.min(page != null ? page : Math.floor(currentIdx / PER), totalPages - 1)
+    Math.min(page != null && page !== undefined ? page : Math.floor(currentIdx / PER), totalPages - 1)
   );
   const startIdx = p * PER;
   const endIdx = Math.min(startIdx + PER, total);
@@ -1377,46 +1383,48 @@ async function autoSubmitExam(exam: Exam, attempt: Attempt): Promise<SimulatorRe
 
 function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number | null = null): SimulatorResponse {
   const chatId = attempt.telegramUserId;
-  let text = `🎉 *Exam submitted*\n\n`;
-  text += `📝 *${escapeMd(exam.title)}*\n`;
-  text += `👤 *${escapeMd(attempt.studentName || '')}*\n`;
-  if (attempt.attemptNumber && attempt.attemptNumber > 1) {
-    text += `🔁 Practice attempt #${attempt.attemptNumber} (not ranked)\n`;
-  }
-  text += `📌 ${attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-submitted (time up)' : '✅ Submitted'}\n\n`;
-
   const keyboard: InlineKeyboardButton[][] = [];
+  const totalQ = exam.questions?.length || 0;
+  const PER_PAGE = 8;
+  const totalPages = Math.max(1, Math.ceil(totalQ / PER_PAGE));
+  let text = '';
 
   if (exam.resultVisibility === 'PUBLISHED') {
-    text += `📊 *Your score*\n`;
-    text += `⭐ ${attempt.score} / ${attempt.maxScore} (${attempt.percentage}%)\n`;
-    text += `✅ ${attempt.correctCount}  ❌ ${attempt.wrongCount}  ⚪ ${attempt.skippedCount}\n`;
-    const mins = Math.floor(attempt.timeTakenSeconds / 60);
-    const secs = attempt.timeTakenSeconds % 60;
-    text += `⏱️ Time: ${mins}m ${secs}s\n`;
-    if (attempt.isOfficial !== false && isExamTimeEnded(exam) && attempt.rank) {
-      text += `🏆 Rank: #${attempt.rank}\n`;
-    } else if (attempt.isOfficial !== false && !isExamTimeEnded(exam)) {
-      text += `🏆 Rank after exam ends\n`;
-    }
-
-    const totalQ = exam.questions.length;
-    const PER_PAGE = 5;
-    const totalPages = Math.max(1, Math.ceil(totalQ / PER_PAGE));
-
-    if (reviewPage === null) {
-      // Summary only — stays under Telegram limit even with 100+ questions
+    if (reviewPage === null || reviewPage === undefined) {
+      // Full summary once
+      text = `🎉 *Exam submitted*\n\n`;
+      text += `📝 *${escapeMd(exam.title)}*\n`;
+      text += `👤 *${escapeMd(attempt.studentName || '')}*\n`;
+      if (attempt.attemptNumber && attempt.attemptNumber > 1) {
+        text += `🔁 Practice attempt #${attempt.attemptNumber} (not ranked)\n`;
+      }
+      text += `📌 ${attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-submitted (time up)' : '✅ Submitted'}\n\n`;
+      text += `📊 *Your score*\n`;
+      text += `⭐ ${attempt.score} / ${attempt.maxScore} (${attempt.percentage}%)\n`;
+      text += `✅ ${attempt.correctCount}  ❌ ${attempt.wrongCount}  ⚪ ${attempt.skippedCount}\n`;
+      const mins = Math.floor(attempt.timeTakenSeconds / 60);
+      const secs = attempt.timeTakenSeconds % 60;
+      text += `⏱️ Time: ${mins}m ${secs}s\n`;
+      if (attempt.isOfficial !== false && isExamTimeEnded(exam) && attempt.rank) {
+        text += `🏆 Rank: #${attempt.rank}\n`;
+      } else if (attempt.isOfficial !== false && !isExamTimeEnded(exam)) {
+        text += `🏆 Rank after exam ends\n`;
+      }
       text += `\n📖 Tap *Review answers* to see each question (page by page).`;
       if (totalQ > 0) {
         keyboard.push([{ text: `📖 Review answers (1/${totalPages})`, callback_data: `revatt_${attempt.id}_0` }]);
       }
     } else {
+      // Review: no score summary — more answers per page
       const page = Math.max(0, Math.min(reviewPage, totalPages - 1));
-      const start = page * PER_PAGE;
-      const end = Math.min(start + PER_PAGE, totalQ);
-      text += `\n*Questions ${start + 1}–${end} of ${totalQ}* (page ${page + 1}/${totalPages})\n\n`;
+      const startQ = page * PER_PAGE;
+      const endQ = Math.min(startQ + PER_PAGE, totalQ);
+      text =
+        `📖 *Review answers*\n` +
+        `📝 ${escapeMd(exam.title)}\n` +
+        `*Questions ${startQ + 1}\u2013${endQ} of ${totalQ}* (page ${page + 1}/${totalPages})\n\n`;
 
-      for (let i = start; i < end; i++) {
+      for (let i = startQ; i < endQ; i++) {
         const q = exam.questions[i];
         const sel = attempt.answers?.[q.id];
         const has = sel !== undefined && sel !== null;
@@ -1428,13 +1436,12 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
           const chosen = q.options?.[sel as number] ?? `opt ${sel}`;
           const correct =
             q.answer !== null && q.options?.[q.answer] !== undefined ? q.options[q.answer] : '—';
-          // Keep lines short for Telegram limit
           const cShort = String(chosen).slice(0, 40);
           const rShort = String(correct).slice(0, 40);
           extra = ok ? `Yours: ${cShort}` : `Yours: ${cShort} · Correct: ${rShort}`;
         }
-        const short = escapeMd((q.question || '').slice(0, 50));
-        text += `${mark} *Q${i + 1}.* ${short}${ (q.question || '').length > 50 ? '…' : ''}\n   ${escapeMd(extra)}\n`;
+        const short = escapeMd((q.question || '').slice(0, 55));
+        text += `${mark} *Q${i + 1}.* ${short}${ (q.question || '').length > 55 ? '…' : ''}\n   ${escapeMd(extra)}\n`;
       }
 
       const nav: InlineKeyboardButton[] = [];
@@ -1447,7 +1454,7 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
       if (nav.length) keyboard.push(nav);
       keyboard.push([{ text: '📊 Score summary', callback_data: `revatt_${attempt.id}_sum` }]);
     }
-  } else {
+} else {
     text += `🔒 Results are hidden by the teacher for now.\n`;
   }
 

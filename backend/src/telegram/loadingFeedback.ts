@@ -28,7 +28,8 @@ export function classifySlowCallback(data: string): 'submit' | 'start' | 'result
   if (data.startsWith('rev_')) return 'results';
   // List endpoints are usually fast — no loading overlay (avoids race/stuck UI)
   if (data === 'btn_results' || data === 'btn_leaderboard' || data === 'leaderboard_more') return null;
-  if (data.startsWith('grid_')) return 'generic';
+  // Grid page nav is instant — never show Please wait
+  if (data.startsWith('grid_')) return null;
   return null;
 }
 
