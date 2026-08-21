@@ -24,6 +24,8 @@ export type KbSession = {
   gridPage?: number;
   /** Map button label → action payload */
   labels?: Record<string, string>;
+  /** Last bot message id — edit this instead of sending new menus */
+  lastMessageId?: number;
 };
 
 const sessions = new Map<number, KbSession>();
@@ -33,9 +35,12 @@ export function getKbSession(userId: number): KbSession | undefined {
 }
 
 export function setKbSession(userId: number, s: KbSession) {
+  const prev = sessions.get(userId);
+  if (prev?.lastMessageId != null && s.lastMessageId == null) {
+    s = { ...s, lastMessageId: prev.lastMessageId };
+  }
   sessions.set(userId, s);
   if (sessions.size > 5000) {
-    // drop arbitrary old entries
     let n = 0;
     for (const k of sessions.keys()) {
       sessions.delete(k);
@@ -93,21 +98,17 @@ export function mainNavRows(): string[][] {
 }
 
 /** Build numbered list buttons + optional footer rows */
-export function numberedListRows(titles: string[], footer: string[][]): { rows: string[][]; labels: Record<string, string> } {
+export function numberedListRows(
+  titles: string[],
+  footer: string[][]
+): { rows: string[][]; labels: Record<string, string> } {
   const labels: Record<string, string> = {};
   const rows: string[][] = [];
-  let row: string[] = [];
   titles.forEach((title, i) => {
     const label = `${i + 1}. ${(title || 'Item').slice(0, 40)}`.slice(0, 64);
     labels[label] = String(i);
-    row.push(label);
-    if (row.length === 1) {
-      // one exam per row for readability
-      rows.push(row);
-      row = [];
-    }
+    rows.push([label]);
   });
-  if (row.length) rows.push(row);
   for (const f of footer) rows.push(f);
   return { rows, labels };
 }

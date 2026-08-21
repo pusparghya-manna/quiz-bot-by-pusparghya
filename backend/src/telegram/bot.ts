@@ -673,7 +673,7 @@ This name will appear on results and the leaderboard.`,
           return await renderQuestionGrid(sess.examId, student, user, Math.max(0, page));
         }
         if (action === 'grid' && sess?.examId) {
-          return await renderQuestionGrid(sess.examId, student, user, 0);
+          return await renderQuestionGrid(sess.examId, student, user);
         }
         if (action === 'submit' && sess?.examId) {
           return renderSubmitConfirmation(sess.examId, student, user);
@@ -1093,12 +1093,6 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
   text += `⏱️ *${remaining} remaining* | Question ${qIdx + 1}/${total}\n\n`;
   text += `${question.question}\n\n`;
 
-  if (selectedOpt !== undefined) {
-    text += `*Your Selected Answer:* Option ${String.fromCharCode(65 + selectedOpt)}: ${question.options[selectedOpt]}\n`;
-  } else {
-    text += `*Status:* ⚪ Unanswered\n`;
-  }
-
   // ONLY MCQ choices under the message (inline)
   const keyboard: InlineKeyboardButton[][] = [];
   question.options.forEach((optText, oIdx) => {
@@ -1120,16 +1114,19 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
   if (nav.length) rows.push(nav);
   rows.push([LABELS.grid, LABELS.submit]);
 
+  const prevSess = getKbSession(user.id);
   setKbSession(user.id, {
     screen: 'in_exam',
     examId: exam.id,
     qIdx,
+    lastMessageId: prevSess?.lastMessageId,
   });
 
   const refreshKeyboard = opts.refreshKeyboard === true;
-  // Only refresh bottom keyboard when entering exam (explicit true).
-  // Prev/Next/answer: update question + MCQ only — no extra messages.
-  if (refreshKeyboard) {
+  const messageId = prevSess?.lastMessageId;
+
+  // Enter exam: send once (sets bottom keyboard + question)
+  if (refreshKeyboard || !messageId) {
     return {
       chatId: user.id,
       text,
@@ -1138,15 +1135,17 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
       type: 'sendMessage',
     };
   }
+  // Next / Previous / pick answer: EDIT the same message (no new menu spam)
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
+    messageId,
     type: 'editMessageText',
   };
 }
 
-async function renderQuestionGrid(examId: string, student: Student, user: TelegramUser, page = 0): Promise<SimulatorResponse> {
+async function renderQuestionGrid(examId: string, student: Student, user: TelegramUser, page?: number): Promise<SimulatorResponse> {
   const exam = store.getExamById(examId);
   if (!exam) {
     return { chatId: user.id, text: '❌ Examination not found.', replyKeyboard: mainNavReplyKeyboard(), type: 'sendMessage' };
@@ -1164,54 +1163,57 @@ async function renderQuestionGrid(examId: string, student: Student, user: Telegr
   const answeredCount = Object.keys(attempt.answers || {}).length;
   const total = exam.questions.length;
   const remaining = formatRemaining(attempt.expiresAt);
+  const currentIdx = Math.max(0, attempt.currentQuestionIndex || 0);
   const PER = 20;
   const totalPages = Math.max(1, Math.ceil(total / PER));
-  const p = Math.max(0, Math.min(page, totalPages - 1));
+  // Open the page that contains the current question
+  const p = Math.max(0, Math.min(page != null ? page : Math.floor(currentIdx / PER), totalPages - 1));
   const startIdx = p * PER;
   const endIdx = Math.min(startIdx + PER, total);
 
   let text = `📋 *Question Grid*\n`;
   text += `📝 *${escapeMd(exam.title)}*\n`;
-  text += `⏱️ *${remaining}* remaining\n`;
-  text += `🟢 ${answeredCount}/${total} answered\n`;
-  text += `📄 Page ${p + 1}/${totalPages}\n\n_Tap a question below._`;
+  text += `⏱️ *${remaining}* left · 🟢 ${answeredCount}/${total}\n`;
+  text += `📄 Page ${p + 1}/${totalPages} · Now on *Q${currentIdx + 1}*\n\n`;
+  text += `_Tap a number to jump:_`;
 
-  const labels: Record<string, string> = {};
-  const rows: string[][] = [];
-  let row: string[] = [];
+  // Inline grid → can edit the same bot message (no new spam)
+  const keyboard: InlineKeyboardButton[][] = [];
+  let row: InlineKeyboardButton[] = [];
   for (let i = startIdx; i < endIdx; i++) {
     const q = exam.questions[i];
     const answered = attempt.answers && attempt.answers[q.id] !== undefined;
-    const mark = answered ? '✅' : '⚪';
-    const lab = `${mark} Q${i + 1}`.slice(0, 64);
-    labels[lab] = `q:${i}`;
-    row.push(lab);
+    const isCurrent = i === currentIdx;
+    let label = isCurrent ? `👉${i + 1}` : answered ? `✅${i + 1}` : `${i + 1}`;
+    row.push({ text: label.slice(0, 64), callback_data: `nav_${exam.id}_${i}` });
     if (row.length === 5) {
-      rows.push(row);
+      keyboard.push(row);
       row = [];
     }
   }
-  if (row.length) rows.push(row);
+  if (row.length) keyboard.push(row);
 
-  const pageNav: string[] = [];
-  if (p > 0) pageNav.push(LABELS.prevPage);
-  if (p < totalPages - 1) pageNav.push(LABELS.nextPage);
-  if (pageNav.length) rows.push(pageNav);
-  rows.push([LABELS.continueAns, LABELS.submit]);
+  const pageNav: InlineKeyboardButton[] = [];
+  if (p > 0) pageNav.push({ text: '◀ Prev page', callback_data: `grid_${exam.id}_${p - 1}` });
+  if (p < totalPages - 1) pageNav.push({ text: 'Next page ▶', callback_data: `grid_${exam.id}_${p + 1}` });
+  if (pageNav.length) keyboard.push(pageNav);
 
+  const sess = getKbSession(user.id);
   setKbSession(user.id, {
     screen: 'grid',
     examId: exam.id,
     gridPage: p,
-    qIdx: attempt.currentQuestionIndex || 0,
-    labels,
+    qIdx: currentIdx,
+    lastMessageId: sess?.lastMessageId,
   });
 
+  const messageId = sess?.lastMessageId;
   return {
     chatId: user.id,
     text,
-    replyKeyboard: kbMarkup(rows),
-    type: 'sendMessage',
+    replyMarkup: { inline_keyboard: keyboard },
+    messageId,
+    type: messageId ? 'editMessageText' : 'sendMessage',
   };
 }
 
@@ -1701,53 +1703,69 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
 
   const hasReplyKb = Boolean(resp.replyKeyboard);
   const hasInline = Boolean(resp.replyMarkup && (resp.replyMarkup as any).inline_keyboard);
+  const chatId = resp.chatId;
+
+  const rememberId = (ids?: number[]) => {
+    const mid = ids && ids.length ? ids[ids.length - 1] : undefined;
+    if (mid == null) return;
+    const sess = getKbSession(chatId);
+    if (sess) setKbSession(chatId, { ...sess, lastMessageId: mid });
+    else setKbSession(chatId, { screen: 'main', lastMessageId: mid });
+  };
 
   /**
-   * Telegram allows only ONE reply_markup per message.
-   * When we need bottom ReplyKeyboard AND inline MCQ options:
-   *  1) apply ReplyKeyboard (short nav notice)
-   *  2) send/edit the real message with inline options only
+   * ReplyKeyboard is chat-level; InlineKeyboard is per-message.
+   * When both needed: sendMessage with ReplyKeyboard + text, then
+   * editMessageText same id with InlineKeyboard — one visible message, no "." spam.
    */
   if (hasReplyKb && hasInline) {
-    // Telegram: only one reply_markup per message.
-    // Apply bottom keyboard via a temporary carrier, then delete it (no visible notice).
-    const kbResult = await sendSafeTelegramMessage(token, resp.chatId, '\u200B', {
+    const r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+      parseMode: 'Markdown',
       replyKeyboard: resp.replyKeyboard,
     });
-    const carrierId = kbResult.messageIds?.[0];
-    if (carrierId) {
-      try {
-        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: resp.chatId, message_id: carrierId }),
-          signal: AbortSignal.timeout(4000),
-        });
-      } catch {
-        /* keyboard stays even if delete fails */
-      }
-    } else if (!kbResult.ok) {
-      console.warn('[Telegram] reply keyboard apply failed:', kbResult.error);
+    if (!r1.ok) {
+      console.warn('[Telegram] send+replyKb failed:', r1.error);
+      return;
     }
-    const qResult = await sendSafeTelegramMessage(token, resp.chatId, resp.text || '', {
-      parseMode: 'Markdown',
-      replyMarkup: resp.replyMarkup,
-    });
-    if (!qResult.ok) {
-      console.warn('[Telegram] question+options send failed:', qResult.error);
+    rememberId(r1.messageIds);
+    const mid = r1.messageIds?.[0];
+    if (mid) {
+      const r2 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+        parseMode: 'Markdown',
+        replyMarkup: resp.replyMarkup,
+        messageId: mid,
+        preferEdit: true,
+      });
+      if (!r2.ok) console.warn('[Telegram] edit+inline failed:', r2.error);
     }
     return;
   }
 
-  const preferEdit = resp.type === 'editMessageText' && !!resp.messageId && !hasReplyKb;
-  const result = await sendSafeTelegramMessage(token, resp.chatId, resp.text || '', {
+  // Edit-in-place when we have a message id
+  let messageId = resp.messageId;
+  if (!messageId && resp.type === 'editMessageText') {
+    messageId = getKbSession(chatId)?.lastMessageId;
+  }
+  const preferEdit = Boolean(messageId) && !hasReplyKb;
+
+  const result = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
     parseMode: 'Markdown',
     replyMarkup: resp.replyMarkup,
     replyKeyboard: resp.replyKeyboard,
-    messageId: resp.messageId,
+    messageId,
     preferEdit,
   });
+
   if (!result.ok) {
     console.warn('[Telegram] send failed:', result.error);
+    if (preferEdit) {
+      const r2 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+        parseMode: 'Markdown',
+        replyMarkup: resp.replyMarkup,
+      });
+      rememberId(r2.messageIds);
+    }
+    return;
   }
+  rememberId(result.messageIds);
 }
