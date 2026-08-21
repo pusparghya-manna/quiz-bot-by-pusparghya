@@ -252,28 +252,44 @@ export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
 }
 
 
+function escapeHtml(s: string): string {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function renderMainMenu(student: Student): SimulatorResponse {
   const notice = store.getSettings().systemNotice;
   if (student.telegramUserId) {
     setKbSession(student.telegramUserId, { screen: 'main' });
   }
+  const displayName = escapeHtml((student.name || 'Student').trim() || 'Student');
+  const noticeHtml = notice
+    ? `\n\n📢 <b>${escapeHtml(notice)}</b>\n`
+    : '';
+  const text =
+    `<blockquote>` +
+    `<b>Qᴜɪᴢ Bᴏᴛ</b>\n` +
+    `<i>ʙʏ Pᴜsᴘᴀʀɢʜʏᴀ <tg-emoji emoji-id="6185737106585814820">🎖️</tg-emoji></i>\n\n` +
+    `<b><i>Wᴇʟᴄᴏᴍᴇ, ${displayName} 👀</i></b>\n\n` +
+    `<b>📚 Hᴏᴡ Iᴛ Wᴏʀᴋs:</b>\n\n` +
+    `🔗 Oᴘᴇɴ ᴛʜᴇ ᴇxᴀᴍ ʟɪɴᴋ sʜᴀʀᴇᴅ ʙʏ ʏᴏᴜʀ ᴛᴇᴀᴄʜᴇʀ.\n` +
+    `📝 Sᴛᴀʀᴛ ʏᴏᴜʀ ᴇxᴀᴍɪɴᴀᴛɪᴏɴ.\n` +
+    `📊 Vɪᴇᴡ ʏᴏᴜʀ ʀᴇsᴜʟᴛs ᴀғᴛᴇʀᴡᴀʀᴅs.\n\n` +
+    `<b>✨ Fᴇᴀᴛᴜʀᴇs:</b>\n\n` +
+    `⚡ Fᴀsᴛ ᴇxᴀᴍɪɴᴀᴛɪᴏɴ\n` +
+    `🏆 Lᴇᴀᴅᴇʀʙᴏᴀʀᴅs\n` +
+    `📈 Pᴇʀғᴏʀᴍᴀɴᴄᴇ ᴛʀᴀᴄᴋɪɴɢ\n\n` +
+    `<i>Exᴀᴍɪɴᴀᴛɪᴏɴs ᴍᴀᴅᴇ sɪᴍᴘʟᴇ.</i>` +
+    `</blockquote>` +
+    noticeHtml;
+
   return {
     chatId: student.telegramUserId!,
-    text:
-      `👋 *Welcome to Quiz Bot by Pusparghya!*
-
-` +
-      (notice ? `📢 ${notice}
-
-` : '') +
-      `You are registered as *${escapeMd(student.name)}*.
-
-` +
-      `Teachers share a special link for each exam. Open that link to start.
-
-` +
-      `_Use the buttons below the chat to navigate._`,
+    text,
     replyKeyboard: mainNavReplyKeyboard(),
+    parseMode: 'HTML',
     type: 'sendMessage',
   };
 }
@@ -1830,8 +1846,9 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       /* keyboard apply is best-effort */
     }
 
+    const mode = resp.parseMode || 'Markdown';
     let r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
-      parseMode: 'Markdown',
+      parseMode: mode,
       replyMarkup: resp.replyMarkup,
     });
     if (!r1.ok) {
@@ -1854,8 +1871,9 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
   // Prefer in-place edit for pure inline updates (answer / next without keyboard change)
   const preferEdit = Boolean(messageId) && !hasReplyKb;
 
+  const mode = resp.parseMode || 'Markdown';
   const result = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
-    parseMode: 'Markdown',
+    parseMode: mode,
     replyMarkup: resp.replyMarkup,
     replyKeyboard: resp.replyKeyboard,
     messageId,
@@ -1866,7 +1884,7 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     console.warn('[Telegram] send failed:', result.error);
     if (preferEdit) {
       const r2 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
-        parseMode: 'Markdown',
+        parseMode: mode,
         replyMarkup: resp.replyMarkup,
       });
       if (r2.ok) rememberId(r2.messageIds);

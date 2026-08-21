@@ -171,5 +171,7 @@ export interface SimulatorResponse {
    */
   replyKeyboard?: ReplyKeyboardMarkup | ReplyKeyboardRemove;
   messageId?: number;
+  /** Defaults to Markdown when omitted */
+  parseMode?: 'Markdown' | 'HTML';
   type: 'sendMessage' | 'editMessageText';
 }
