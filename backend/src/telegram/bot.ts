@@ -390,7 +390,7 @@ This name will appear on results and the leaderboard.`,
       const rest = data.slice(4);
       const parsed = resolveExamIdFromRest(rest, 1);
       if (parsed) {
-        response = await renderQuestionView(parsed.examId, parsed.trailing[0], student, user);
+        response = await renderQuestionView(parsed.examId, parsed.trailing[0], student, user, { refreshKeyboard: false });
       }
     } else if (data.startsWith('grid_')) {
       // grid_EXAMID or grid_EXAMID_PAGE (page only if full exam id matched)
@@ -582,7 +582,7 @@ This name will appear on results and the leaderboard.`,
           }
           if (arg.startsWith('q:') && sess?.examId) {
             const qIdx = parseInt(arg.slice(2), 10) || 0;
-            return await renderQuestionView(sess.examId, qIdx, student, user);
+            return await renderQuestionView(sess.examId, qIdx, student, user, { refreshKeyboard: false });
           }
         }
 
@@ -683,7 +683,7 @@ This name will appear on results and the leaderboard.`,
         }
         if (action === 'continue_ans' && sess?.examId) {
           const qIdx = sess.qIdx || 0;
-          return await renderQuestionView(sess.examId, qIdx, student, user);
+          return await renderQuestionView(sess.examId, qIdx, student, user, { refreshKeyboard: true });
         }
       }
     }
@@ -963,7 +963,7 @@ async function handleStartOrResumeExam(examId: string, student: Student, user: T
     if (now.getTime() > new Date(attempt.expiresAt).getTime()) {
       return await autoSubmitExam(exam, attempt);
     }
-    return await renderQuestionView(exam.id, attempt.currentQuestionIndex, student, user);
+    return await renderQuestionView(exam.id, attempt.currentQuestionIndex, student, user, { refreshKeyboard: true });
   }
 
   // Start new attempt (first or reattempt) — SQL-backed number for multi-instance safety
@@ -1010,9 +1010,8 @@ async function handleStartOrResumeExam(examId: string, student: Student, user: T
   store.saveAttempt(attempt);
   store.addAuditLog('EXAM_STARTED', `${student.name} started ${exam.title} (attempt #${attemptNumber}, official=${isOfficial})`);
 
-  // If practice (window closed or reattempt), go straight into questions with exam keyboard
-  // (keyboard is set inside renderQuestionView)
-  return await renderQuestionView(exam.id, 0, student, user);
+  // Practice / new attempt: set bottom exam keyboard once
+  return await renderQuestionView(exam.id, 0, student, user, { refreshKeyboard: true });
 }
 
 async function handleOptionSelect(examId: string, qIdx: number, optIdx: number, student: Student, user: TelegramUser): Promise<SimulatorResponse> {
@@ -1127,9 +1126,9 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
     qIdx,
   });
 
-  const refreshKeyboard = opts.refreshKeyboard !== false;
-  // refreshKeyboard=true: new sendMessage so bottom bar updates (enter exam / prev-next)
-  // refreshKeyboard=false: edit same message after picking A/B/C/D (keeps current bottom bar)
+  const refreshKeyboard = opts.refreshKeyboard === true;
+  // Only refresh bottom keyboard when entering exam (explicit true).
+  // Prev/Next/answer: update question + MCQ only — no extra messages.
   if (refreshKeyboard) {
     return {
       chatId: user.id,
@@ -1187,7 +1186,7 @@ async function renderQuestionGrid(examId: string, student: Student, user: Telegr
     const lab = `${mark} Q${i + 1}`.slice(0, 64);
     labels[lab] = `q:${i}`;
     row.push(lab);
-    if (row.length === 4) {
+    if (row.length === 5) {
       rows.push(row);
       row = [];
     }
@@ -1710,18 +1709,25 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    *  2) send/edit the real message with inline options only
    */
   if (hasReplyKb && hasInline) {
-    // Telegram allows only one reply_markup per message.
-    // 1) Silently apply bottom ReplyKeyboard (zero-width space — no visible notice)
-    // 2) Send the real question with inline MCQ options
-    const kbResult = await sendSafeTelegramMessage(token, resp.chatId, '​', {
+    // Telegram: only one reply_markup per message.
+    // Apply bottom keyboard via a temporary carrier, then delete it (no visible notice).
+    const kbResult = await sendSafeTelegramMessage(token, resp.chatId, '\u200B', {
       replyKeyboard: resp.replyKeyboard,
     });
-    if (!kbResult.ok) {
-      // Fallback: still try a minimal visible carrier if ZWSP rejected
-      await sendSafeTelegramMessage(token, resp.chatId, '·', {
-        replyKeyboard: resp.replyKeyboard,
-      }).catch(() => {});
-      console.warn('[Telegram] reply keyboard send failed:', kbResult.error);
+    const carrierId = kbResult.messageIds?.[0];
+    if (carrierId) {
+      try {
+        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: resp.chatId, message_id: carrierId }),
+          signal: AbortSignal.timeout(4000),
+        });
+      } catch {
+        /* keyboard stays even if delete fails */
+      }
+    } else if (!kbResult.ok) {
+      console.warn('[Telegram] reply keyboard apply failed:', kbResult.error);
     }
     const qResult = await sendSafeTelegramMessage(token, resp.chatId, resp.text || '', {
       parseMode: 'Markdown',
