@@ -2,6 +2,14 @@ import { store } from '../store.js';
 import { escapeMd } from '../middleware/validate.js';
 import { sendSafeTelegramMessage } from './safeSend.js';
 import {
+  getKbSession,
+  setKbSession,
+  kbMarkup,
+  LABELS,
+  mainNavRows,
+  numberedListRows,
+} from './replyNav.js';
+import {
   TelegramUpdate,
   TelegramUser,
   InlineKeyboardButton,
@@ -79,33 +87,19 @@ function isExamTimeEnded(exam: Exam): boolean {
 /** Users who tapped "Set your name" — next text message becomes their display name */
 const pendingNameUsers = new Set<number>();
 
-/** Labels shown on Telegram's bottom ReplyKeyboard (must match text handlers). */
-export const MAIN_NAV = {
-  exams: '📚 My Exams',
-  results: '📊 My Results',
-  leaderboard: '🏆 Leaderboard',
-  setName: '✏️ Set my name',
-  home: '🏠 Main menu',
-} as const;
 
-function mainNavReplyKeyboard(): ReplyKeyboardMarkup {
-  return {
-    keyboard: [
-      [{ text: MAIN_NAV.exams }, { text: MAIN_NAV.results }],
-      [{ text: MAIN_NAV.leaderboard }, { text: MAIN_NAV.setName }],
-    ],
-    resize_keyboard: true,
-    is_persistent: true,
-  };
+function mainNavReplyKeyboard() {
+  return kbMarkup(mainNavRows());
 }
 
-function matchMainNav(text: string): keyof typeof MAIN_NAV | null {
+function matchMainNav(text: string): string | null {
   const t = text.trim();
-  for (const [key, label] of Object.entries(MAIN_NAV) as [keyof typeof MAIN_NAV, string][]) {
-    if (t === label) return key;
-  }
-  // Also accept without emoji prefix for resilience
-  const plain: Record<string, keyof typeof MAIN_NAV> = {
+  const map: Record<string, string> = {
+    [LABELS.exams]: 'exams',
+    [LABELS.results]: 'results',
+    [LABELS.leaderboard]: 'leaderboard',
+    [LABELS.setName]: 'setName',
+    [LABELS.home]: 'home',
     'My Exams': 'exams',
     'My Results': 'results',
     'Leaderboard': 'leaderboard',
@@ -114,9 +108,47 @@ function matchMainNav(text: string): keyof typeof MAIN_NAV | null {
     'Set your name': 'setName',
     'Main menu': 'home',
   };
-  return plain[t] || null;
+  return map[t] || null;
 }
 
+/** Resolve a reply-keyboard tap using session labels or fixed LABELS. */
+function resolveReplyAction(userId: number, text: string): { action: string; arg?: string } | null {
+  const raw = text.trim();
+  const sess = getKbSession(userId);
+  if (sess?.labels && sess.labels[raw] !== undefined) {
+    return { action: 'pick', arg: sess.labels[raw] };
+  }
+  // Fixed labels
+  const fixed: Record<string, string> = {
+    [LABELS.exams]: 'exams',
+    [LABELS.results]: 'results',
+    [LABELS.leaderboard]: 'leaderboard',
+    [LABELS.setName]: 'setName',
+    [LABELS.home]: 'home',
+    [LABELS.backExams]: 'back_exams',
+    [LABELS.otherLb]: 'lb_pick',
+    [LABELS.showFullLb]: 'lb_more',
+    [LABELS.startExam]: 'start_exam',
+    [LABELS.continueExam]: 'resume_exam',
+    [LABELS.viewResult]: 'view_result',
+    [LABELS.reattempt]: 'reattempt',
+    [LABELS.practiceAgain]: 'reattempt',
+    [LABELS.examLb]: 'exam_lb',
+    [LABELS.review]: 'review',
+    [LABELS.scoreSum]: 'score_sum',
+    [LABELS.prev]: 'prev',
+    [LABELS.next]: 'next',
+    [LABELS.prevPage]: 'prev_page',
+    [LABELS.nextPage]: 'next_page',
+    [LABELS.grid]: 'grid',
+    [LABELS.submit]: 'submit',
+    [LABELS.confirmSubmit]: 'do_submit',
+    [LABELS.continueAns]: 'continue_ans',
+    [LABELS.myResults]: 'results',
+  };
+  if (fixed[raw]) return { action: fixed[raw] };
+  return matchMainNav(raw) ? { action: matchMainNav(raw)! } : null;
+}
 
 function formatInIST(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
@@ -222,6 +254,9 @@ export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
 
 function renderMainMenu(student: Student): SimulatorResponse {
   const notice = store.getSettings().systemNotice;
+  if (student.telegramUserId) {
+    setKbSession(student.telegramUserId, { screen: 'main' });
+  }
   return {
     chatId: student.telegramUserId!,
     text:
@@ -238,7 +273,6 @@ function renderMainMenu(student: Student): SimulatorResponse {
 
 ` +
       `_Use the buttons below the chat to navigate._`,
-    // Bottom keyboard (not under the message)
     replyKeyboard: mainNavReplyKeyboard(),
     type: 'sendMessage',
   };
@@ -468,10 +502,13 @@ This name will appear on results and the leaderboard.`,
       response = await handleFinalSubmit(examId, student, user);
     }
 
-    // Single-chat UI: always edit the same message on button taps
-    if (response && cbMessageId) {
+    // Keep single-chat edits for pure inline (MCQ). ReplyKeyboard needs sendMessage.
+    if (response && cbMessageId && !response.replyKeyboard) {
       response.messageId = cbMessageId;
       response.type = 'editMessageText';
+    } else if (response && response.replyKeyboard) {
+      response.type = 'sendMessage';
+      delete (response as any).messageId;
     }
     return response;
   }
@@ -513,31 +550,138 @@ This name will appear on results and the leaderboard.`,
     }
 
 
-    // Bottom ReplyKeyboard main navigation (sends button label as text)
-    const nav = matchMainNav(text);
-    if (nav && !pendingNameUsers.has(user.id)) {
-      if (nav === 'exams') {
-        return { ...renderExamsList(student), type: 'sendMessage', replyKeyboard: mainNavReplyKeyboard() };
-      }
-      if (nav === 'results') {
-        return { ...renderStudentResults(student), type: 'sendMessage', replyKeyboard: mainNavReplyKeyboard() };
-      }
-      if (nav === 'leaderboard') {
-        return { ...renderLeaderboardExamPicker(student), type: 'sendMessage', replyKeyboard: mainNavReplyKeyboard() };
-      }
-      if (nav === 'home') {
-        return renderMainMenu(student);
-      }
-      if (nav === 'setName') {
-        pendingNameUsers.add(user.id);
-        return {
-          chatId: user.id,
-          text: `✏️ *Set my name*
 
-Please type your full name and send it as a message.`,
-          replyKeyboard: mainNavReplyKeyboard(),
-          type: 'sendMessage',
-        };
+    // ReplyKeyboard navigation (all non-MCQ actions)
+    {
+      const resolved = resolveReplyAction(user.id, text);
+      if (resolved && !pendingNameUsers.has(user.id)) {
+        const sess = getKbSession(user.id);
+        const action = resolved.action;
+        const arg = resolved.arg;
+
+        // Picked numbered item from list
+        if (action === 'pick' && arg) {
+          if (arg.startsWith('exam:')) {
+            const examId = arg.slice(5);
+            if (sess?.screen === 'lb_pick') {
+              return { ...renderExamLeaderboard(examId, student, false), type: 'sendMessage' };
+            }
+            return { ...renderExamOptions(examId, student), type: 'sendMessage' };
+          }
+          if (arg.startsWith('att:')) {
+            const attemptId = arg.slice(4);
+            const att = store.getAttempts().find((a) => a.id === attemptId);
+            const exam = att ? store.getExamById(att.examId) : undefined;
+            if (att && exam) {
+              if (!att.answers || Object.keys(att.answers).length === 0) {
+                try { await store.loadAttemptAnswers(att.id); } catch {}
+              }
+              const loaded = store.getAttempts().find((a) => a.id === attemptId) || att;
+              return { ...renderAttemptSummary(exam, loaded, null), type: 'sendMessage' };
+            }
+          }
+          if (arg.startsWith('q:') && sess?.examId) {
+            const qIdx = parseInt(arg.slice(2), 10) || 0;
+            return await renderQuestionView(sess.examId, qIdx, student, user);
+          }
+        }
+
+        if (action === 'exams' || action === 'back_exams') {
+          return { ...renderExamsList(student), type: 'sendMessage' };
+        }
+        if (action === 'results') {
+          return { ...renderStudentResults(student), type: 'sendMessage' };
+        }
+        if (action === 'leaderboard' || action === 'lb_pick') {
+          return { ...renderLeaderboardExamPicker(student), type: 'sendMessage' };
+        }
+        if (action === 'home') {
+          return renderMainMenu(student);
+        }
+        if (action === 'setName') {
+          pendingNameUsers.add(user.id);
+          return {
+            chatId: user.id,
+            text: `✏️ *Set my name*\n\nPlease type your full name and send it as a message.`,
+            replyKeyboard: mainNavReplyKeyboard(),
+            type: 'sendMessage',
+          };
+        }
+        if (action === 'start_exam' && sess?.examId) {
+          return await handleStartOrResumeExam(sess.examId, student, user, false);
+        }
+        if (action === 'resume_exam' && sess?.examId) {
+          return await handleStartOrResumeExam(sess.examId, student, user, false);
+        }
+        if (action === 'view_result' && sess?.attemptId) {
+          const att = store.getAttempts().find((a) => a.id === sess.attemptId);
+          const exam = att ? store.getExamById(att.examId) : sess.examId ? store.getExamById(sess.examId) : undefined;
+          if (att && exam) {
+            if (!att.answers || Object.keys(att.answers).length === 0) {
+              try { await store.loadAttemptAnswers(att.id); } catch {}
+            }
+            const loaded = store.getAttempts().find((a) => a.id === att.id) || att;
+            return { ...renderAttemptSummary(exam, loaded, null), type: 'sendMessage' };
+          }
+        }
+        if (action === 'reattempt' && sess?.examId) {
+          return await handleStartOrResumeExam(sess.examId, student, user, true);
+        }
+        if (action === 'exam_lb' && sess?.examId) {
+          return { ...renderExamLeaderboard(sess.examId, student, false), type: 'sendMessage' };
+        }
+        if (action === 'lb_more' && sess?.examId) {
+          return { ...renderExamLeaderboard(sess.examId, student, true), type: 'sendMessage' };
+        }
+        if (action === 'review' && sess?.attemptId) {
+          const att = store.getAttempts().find((a) => a.id === sess.attemptId);
+          const exam = att ? store.getExamById(att.examId) : undefined;
+          if (att && exam) {
+            if (!att.answers || Object.keys(att.answers).length === 0) {
+              try { await store.loadAttemptAnswers(att.id); } catch {}
+            }
+            const loaded = store.getAttempts().find((a) => a.id === att.id) || att;
+            return { ...renderAttemptSummary(exam, loaded, 0), type: 'sendMessage' };
+          }
+        }
+        if (action === 'score_sum' && sess?.attemptId) {
+          const att = store.getAttempts().find((a) => a.id === sess.attemptId);
+          const exam = att ? store.getExamById(att.examId) : undefined;
+          if (att && exam) {
+            return { ...renderAttemptSummary(exam, att, null), type: 'sendMessage' };
+          }
+        }
+        if ((action === 'prev' || action === 'next') && sess) {
+          if (sess.screen === 'review' && sess.attemptId) {
+            const page = (sess.reviewPage || 0) + (action === 'next' ? 1 : -1);
+            const att = store.getAttempts().find((a) => a.id === sess.attemptId);
+            const exam = att ? store.getExamById(att.examId) : undefined;
+            if (att && exam) {
+              return { ...renderAttemptSummary(exam, att, Math.max(0, page)), type: 'sendMessage' };
+            }
+          }
+          if (sess.screen === 'in_exam' && sess.examId && sess.qIdx != null) {
+            const qIdx = sess.qIdx + (action === 'next' ? 1 : -1);
+            return await renderQuestionView(sess.examId, Math.max(0, qIdx), student, user);
+          }
+        }
+        if ((action === 'prev_page' || action === 'next_page') && sess?.examId) {
+          const page = (sess.gridPage || 0) + (action === 'next_page' ? 1 : -1);
+          return await renderQuestionGrid(sess.examId, student, user, Math.max(0, page));
+        }
+        if (action === 'grid' && sess?.examId) {
+          return await renderQuestionGrid(sess.examId, student, user, 0);
+        }
+        if (action === 'submit' && sess?.examId) {
+          return renderSubmitConfirmation(sess.examId, student, user);
+        }
+        if (action === 'do_submit' && sess?.examId) {
+          return await handleFinalSubmit(sess.examId, student, user);
+        }
+        if (action === 'continue_ans' && sess?.examId) {
+          const qIdx = sess.qIdx || 0;
+          return await renderQuestionView(sess.examId, qIdx, student, user);
+        }
       }
     }
 
@@ -627,7 +771,6 @@ function renderUnlinkedMsg(chatId: number): SimulatorResponse {
 }
 
 function renderExamsList(student: Student): SimulatorResponse {
-  // Flow: My Exams → list of exam *names only* → tap to open Exam Options
   const myAttempts = store.getAttempts().filter(
     (a) => a.telegramUserId === student.telegramUserId || a.studentId === student.studentId
   );
@@ -635,41 +778,60 @@ function renderExamsList(student: Student): SimulatorResponse {
   const exams = examIds.map((id) => store.getExamById(id)).filter(Boolean) as Exam[];
 
   if (exams.length === 0) {
+    if (student.telegramUserId) setKbSession(student.telegramUserId, { screen: 'exams' });
     return {
       chatId: student.telegramUserId!,
       text:
-        `📚 *My Exams*\n\n` +
-        `You have no exams yet.\n\n` +
+        `📚 *My Exams*
+
+` +
+        `You have no exams yet.
+
+` +
         `Ask your teacher for the *exam link*. Opening that link starts the exam.`,
-      replyMarkup: {
-        inline_keyboard: [
-          [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
-        ],
-      },
-      type: 'editMessageText',
+      replyKeyboard: kbMarkup([...mainNavRows(), [LABELS.home]]),
+      type: 'sendMessage',
     };
   }
 
-  let text = `📚 *My Exams*\n\n_Tap an exam to see options._\n\n`;
-  const keyboard: InlineKeyboardButton[][] = [];
-
-  exams.forEach((exam, idx) => {
-    text += `*${idx + 1}. ${escapeMd(exam.title)}*\n`;
-    keyboard.push([
-      {
-        text: `${idx + 1}. ${(exam.title || 'Exam').slice(0, 40)}`,
-        callback_data: `exam_view_${exam.id}`,
-      },
-    ]);
+  const { rows, labels } = numberedListRows(
+    exams.map((e) => e.title),
+    [[LABELS.home]]
+  );
+  // Map index → examId via session
+  const indexToId: Record<string, string> = {};
+  exams.forEach((e, i) => {
+    indexToId[String(i)] = e.id;
   });
+  // Store labels pointing to exam ids
+  const labelToExam: Record<string, string> = {};
+  for (const [lab, idx] of Object.entries(labels)) {
+    labelToExam[lab] = indexToId[idx];
+  }
 
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+  if (student.telegramUserId) {
+    setKbSession(student.telegramUserId, {
+      screen: 'exams',
+      examIds: exams.map((e) => e.id),
+      labels: Object.fromEntries(Object.entries(labelToExam).map(([k, v]) => [k, `exam:${v}`])),
+    });
+  }
+
+  let text = `📚 *My Exams*
+
+_Tap an exam below to open options._
+
+`;
+  exams.forEach((exam, idx) => {
+    text += `*${idx + 1}. ${escapeMd(exam.title)}*
+`;
+  });
 
   return {
     chatId: student.telegramUserId!,
     text,
-    replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText',
+    replyKeyboard: kbMarkup(rows),
+    type: 'sendMessage',
   };
 }
 
@@ -679,10 +841,8 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
     return {
       chatId: student.telegramUserId!,
       text: '❌ Exam not found.',
-      replyMarkup: {
-        inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]],
-      },
-      type: 'editMessageText',
+      replyKeyboard: mainNavReplyKeyboard(),
+      type: 'sendMessage',
     };
   }
 
@@ -698,63 +858,48 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
     });
   const officialDone = submitted.find((a) => a.isOfficial !== false);
   const anyDone = submitted.length > 0;
-  const now = Date.now();
-  const locked = now < new Date(exam.startDate).getTime();
+  const locked = Date.now() < new Date(exam.startDate).getTime();
+  const latest = officialDone || submitted[0];
 
-  let text = `👁 *${escapeMd(exam.title)}*\n\n`;
-  text += `${escapeMd(exam.subject || '')} · ${exam.totalQuestions || exam.questions?.length || 0} Qs · ${exam.durationMinutes} min\n\n`;
-  text += `_Choose an option:_`;
+  let text = `👁 *${escapeMd(exam.title)}*
 
-  const keyboard: InlineKeyboardButton[][] = [];
+`;
+  text += `${escapeMd(exam.subject || '')} · ${exam.totalQuestions || exam.questions?.length || 0} Qs · ${exam.durationMinutes} min
 
+`;
+  text += `_Choose an option from the buttons below._`;
+
+  const rows: string[][] = [];
   if (locked) {
-    text += `\n\n🔒 Locked until ${formatInIST(new Date(exam.startDate))}`;
+    text += `
+
+🔒 Locked until ${formatInIST(new Date(exam.startDate))}`;
   } else if (active) {
-    keyboard.push([
-      {
-        text: '▶️ Continue Exam',
-        callback_data: `resume_exam_${exam.id}`,
-      },
-    ]);
+    rows.push([LABELS.continueExam]);
   } else if (!anyDone) {
-    keyboard.push([
-      {
-        text: '▶️ Start Exam',
-        callback_data: `start_exam_${exam.id}`,
-      },
-    ]);
+    rows.push([LABELS.startExam]);
   }
-
   if (anyDone) {
-    const latest = officialDone || submitted[0];
-    keyboard.push([
-      {
-        text: '📊 View Result',
-        callback_data: `revatt_${latest.id}_sum`,
-      },
-    ]);
-    keyboard.push([
-      {
-        text: '🔁 Re-attempt (Practice)',
-        callback_data: `reattempt_${exam.id}`,
-      },
-    ]);
+    rows.push([LABELS.viewResult]);
+    rows.push([LABELS.reattempt]);
   }
+  rows.push([LABELS.examLb]);
+  rows.push([LABELS.backExams]);
+  rows.push([LABELS.home]);
 
-  keyboard.push([
-    {
-      text: '🏆 Leaderboard',
-      callback_data: `lb_exam_${exam.id}`,
-    },
-  ]);
-  keyboard.push([{ text: '📚 Back to My Exams', callback_data: 'btn_exams' }]);
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+  if (student.telegramUserId) {
+    setKbSession(student.telegramUserId, {
+      screen: 'exam_opts',
+      examId: exam.id,
+      attemptId: latest?.id,
+    });
+  }
 
   return {
     chatId: student.telegramUserId!,
     text,
-    replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText',
+    replyKeyboard: kbMarkup(rows),
+    type: 'sendMessage',
   };
 }
 
@@ -1254,24 +1399,45 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
     text += `🔒 Results are hidden by the teacher for now.\n`;
   }
 
-  if (attempt.isOfficial !== false) {
-    keyboard.push([{ text: '🏆 Leaderboard', callback_data: `lb_exam_${exam.id}` }]);
-  } else {
-    keyboard.push([{ text: '🔁 Practice again', callback_data: `reattempt_${exam.id}` }]);
+
+  const rows: string[][] = [];
+  if (reviewPage !== null && reviewPage !== undefined) {
+    const totalQ = exam.questions?.length || 0;
+    const PER_PAGE = 5;
+    const totalPages = Math.max(1, Math.ceil(totalQ / PER_PAGE));
+    const page = Math.max(0, Math.min(reviewPage, totalPages - 1));
+    const nav: string[] = [];
+    if (page > 0) nav.push(LABELS.prev);
+    if (page < totalPages - 1) nav.push(LABELS.next);
+    if (nav.length) rows.push(nav);
+    rows.push([LABELS.scoreSum]);
+  } else if (exam.resultVisibility === 'PUBLISHED' && (exam.questions?.length || 0) > 0) {
+    rows.push([LABELS.review]);
   }
-  keyboard.push([{ text: '📊 My Results', callback_data: 'btn_results' }]);
-  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+  if (attempt.isOfficial !== false) {
+    rows.push([LABELS.examLb]);
+  } else {
+    rows.push([LABELS.practiceAgain]);
+  }
+  rows.push([LABELS.myResults, LABELS.exams]);
+  rows.push([LABELS.home]);
 
   if (text.length > 3900) {
     text = text.slice(0, 3890) + '\n…';
   }
 
+  setKbSession(chatId, {
+    screen: reviewPage != null ? 'review' : 'result_detail',
+    examId: exam.id,
+    attemptId: attempt.id,
+    reviewPage: reviewPage != null ? reviewPage : undefined,
+  });
+
   return {
     chatId,
     text,
-    replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText',
+    replyKeyboard: kbMarkup(rows),
+    type: 'sendMessage',
   };
 }
 
@@ -1334,17 +1500,36 @@ function renderStudentResults(student: Student): SimulatorResponse {
 
   if (text.length > 3500) text = text.slice(0, 3490) + '\n…';
 
-  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
-  keyboard.push([{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]);
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+
+  const titles = shown.map((att) => {
+    const exam = store.getExamById(att.examId);
+    const kind = att.isOfficial === false ? 'P' : 'O';
+    return `${(exam?.title || 'Exam').slice(0, 28)} (${kind})`;
+  });
+  const numbered = numberedListRows(titles, [
+    [LABELS.exams, LABELS.leaderboard],
+    [LABELS.home],
+  ]);
+  const labelMap: Record<string, string> = {};
+  for (const [lab, idx] of Object.entries(numbered.labels)) {
+    labelMap[lab] = `att:${shown[Number(idx)].id}`;
+  }
+  if (student.telegramUserId) {
+    setKbSession(student.telegramUserId, {
+      screen: 'results',
+      attemptIds: shown.map((a) => a.id),
+      labels: labelMap,
+    });
+  }
 
   return {
     chatId: student.telegramUserId!,
     text,
-    replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText',
+    replyKeyboard: kbMarkup(numbered.rows),
+    type: 'sendMessage',
   };
 }
+
 
 function matchesClass(studentClass?: string, examClass?: string): boolean {
   if (!studentClass || !examClass) return true;
@@ -1394,13 +1579,27 @@ function renderLeaderboardExamPicker(student: Student): SimulatorResponse {
       },
     ]);
   });
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+  const { rows, labels } = numberedListRows(
+    exams.map((e) => e.title),
+    [[LABELS.home]]
+  );
+  const labelMap: Record<string, string> = {};
+  for (const [lab, idx] of Object.entries(labels)) {
+    labelMap[lab] = `exam:${exams[Number(idx)].id}`;
+  }
+  if (student.telegramUserId) {
+    setKbSession(student.telegramUserId, {
+      screen: 'lb_pick',
+      examIds: exams.map((e) => e.id),
+      labels: labelMap,
+    });
+  }
 
   return {
     chatId: student.telegramUserId!,
     text,
-    replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText',
+    replyKeyboard: kbMarkup(rows),
+    type: 'sendMessage',
   };
 }
 
@@ -1473,19 +1672,31 @@ function renderExamLeaderboard(
     }
   }
 
-  keyboard.push([{ text: '🏆 Other exams', callback_data: 'btn_leaderboard' }]);
-  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+
+  const rows: string[][] = [];
+  if (!showAll && attempts.length > 10) {
+    rows.push([LABELS.showFullLb]);
+  }
+  rows.push([LABELS.otherLb]);
+  rows.push([LABELS.exams, LABELS.home]);
 
   if (text.length > 3900) text = text.slice(0, 3890) + '\n…';
+
+  if (student.telegramUserId) {
+    setKbSession(student.telegramUserId, {
+      screen: 'lb_exam',
+      examId: exam.id,
+    });
+  }
 
   return {
     chatId: student.telegramUserId!,
     text,
-    replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText',
+    replyKeyboard: kbMarkup(rows),
+    type: 'sendMessage',
   };
 }
+
 
 /** @deprecated — kept for any legacy callback; redirects to picker */
 function renderStudentLeaderboard(student: Student, _showAll = false): SimulatorResponse {
