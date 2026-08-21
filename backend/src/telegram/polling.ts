@@ -62,10 +62,11 @@ export function startTelegramPolling() {
             const cb = update.callback_query;
             const slowKind = cb?.data ? classifySlowCallback(String(cb.data)) : null;
 
-            // Immediate toast on button (unblocks UI + shows "Submitting…")
+            // Answer callback immediately (toast for slow ops)
             if (cb?.id) {
               if (slowKind) {
-                void answerCallbackLoading(token, cb.id, slowKind);
+                // Await so toast is not lost; still fast
+                await answerCallbackLoading(token, cb.id, slowKind).catch(() => {});
               } else {
                 fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
                   method: 'POST',
@@ -75,12 +76,12 @@ export function startTelegramPolling() {
               }
             }
 
-            // Interim message body for slow ops so chat isn't frozen
+            // CRITICAL: await loading edit BEFORE processing so it cannot overwrite the final reply
             if (slowKind && cb) {
               const chatId = cb.message?.chat?.id || cb.from?.id;
               const messageId = cb.message?.message_id;
               if (chatId) {
-                void sendLoadingEdit({
+                await sendLoadingEdit({
                   token,
                   chatId: Number(chatId),
                   messageId: messageId ? Number(messageId) : undefined,
@@ -93,12 +94,46 @@ export function startTelegramPolling() {
               const response = await processTelegramUpdate(update);
               if (response) {
                 await sendTelegramResponse(response);
+              } else if (slowKind && cb) {
+                // Ensure loading is never left stuck if handler returned null
+                const chatId = cb.message?.chat?.id || cb.from?.id;
+                const messageId = cb.message?.message_id;
+                if (chatId) {
+                  await sendTelegramResponse({
+                    chatId: Number(chatId),
+                    messageId: messageId ? Number(messageId) : undefined,
+                    type: messageId ? 'editMessageText' : 'sendMessage',
+                    text: '⚠️ Could not load that view. Tap *Main menu* and try again.',
+                    replyMarkup: {
+                      inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]],
+                    },
+                  } as any);
+                }
               }
             } catch (procErr: any) {
               console.error(
                 '[Telegram Bot Engine] Error processing update:',
                 procErr?.message || procErr
               );
+              if (cb) {
+                const chatId = cb.message?.chat?.id || cb.from?.id;
+                const messageId = cb.message?.message_id;
+                if (chatId) {
+                  try {
+                    await sendTelegramResponse({
+                      chatId: Number(chatId),
+                      messageId: messageId ? Number(messageId) : undefined,
+                      type: messageId ? 'editMessageText' : 'sendMessage',
+                      text: '⚠️ Something went wrong. Please try again from the main menu.',
+                      replyMarkup: {
+                        inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]],
+                      },
+                    } as any);
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              }
             }
           }
         }

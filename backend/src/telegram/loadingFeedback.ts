@@ -24,9 +24,10 @@ export function classifySlowCallback(data: string): 'submit' | 'start' | 'result
   if (!data) return null;
   if (data.startsWith('do_submit_')) return 'submit';
   if (data.startsWith('start_exam_') || data.startsWith('resume_exam_') || data.startsWith('reattempt_')) return 'start';
-  if (data === 'btn_results' || data.startsWith('rev_')) return 'results';
-  if (data === 'btn_leaderboard' || data === 'leaderboard_more') return 'leaderboard';
-  // Grid / heavy nav with many questions can feel slow
+  // Review answers may hit Turso for answer rows — show brief loading
+  if (data.startsWith('rev_')) return 'results';
+  // List endpoints are usually fast — no loading overlay (avoids race/stuck UI)
+  if (data === 'btn_results' || data === 'btn_leaderboard' || data === 'leaderboard_more') return null;
   if (data.startsWith('grid_')) return 'generic';
   return null;
 }

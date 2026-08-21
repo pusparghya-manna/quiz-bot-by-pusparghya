@@ -314,7 +314,6 @@ This name will appear on results and the leaderboard.`,
     } else if (data.startsWith('rev_')) {
       // rev_EXAMID_sum | rev_EXAMID_PAGE
       const rest = data.slice(4);
-      // Prefer matching known exam id then trailing token
       let examId = '';
       let pagePart = '';
       const examsSorted = store.getExams().map((e) => e.id).sort((a, b) => b.length - a.length);
@@ -334,20 +333,40 @@ This name will appear on results and the leaderboard.`,
       }
       if (examId) {
         const exam = store.getExamById(examId);
-        // Prefer latest submitted attempt (official first, then any)
         const mine = store.getStudentAttempts(examId, student.telegramUserId!).filter(
           (a) => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'
         );
-        const attempt =
+        let attempt =
           mine.find((a) => a.isOfficial !== false) ||
           mine[mine.length - 1] ||
           (exam ? store.getAttempt(examId, student.telegramUserId!) : undefined);
         if (exam && attempt) {
+          // Answers are often not in memory (loaded on demand) — required for review
+          if (!attempt.answers || Object.keys(attempt.answers).length === 0) {
+            try {
+              await store.loadAttemptAnswers(attempt.id);
+              attempt = store.getAttempts().find((a) => a.id === attempt!.id) || attempt;
+            } catch (e: any) {
+              console.error('[telegram] loadAttemptAnswers failed:', e?.message || e);
+            }
+          }
           if (pagePart === 'sum') {
             response = renderAttemptSummary(exam, attempt, null);
           } else {
             response = renderAttemptSummary(exam, attempt, parseInt(pagePart, 10) || 0);
           }
+        } else {
+          response = {
+            chatId: user.id,
+            text: '❌ Could not find that exam result. Open *My Results* and try again.',
+            replyMarkup: {
+              inline_keyboard: [
+                [{ text: '📊 My Results', callback_data: 'btn_results' }],
+                [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
+              ],
+            },
+            type: 'editMessageText',
+          };
         }
       }
     } else if (data.startsWith('confirm_submit_')) {
