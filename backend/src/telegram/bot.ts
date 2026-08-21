@@ -1007,23 +1007,8 @@ async function handleStartOrResumeExam(examId: string, student: Student, user: T
   store.saveAttempt(attempt);
   store.addAuditLog('EXAM_STARTED', `${student.name} started ${exam.title} (attempt #${attemptNumber}, official=${isOfficial})`);
 
-  // If practice (window closed or reattempt), show a notice then questions
-  if (!isOfficial) {
-    return {
-      chatId: user.id,
-      text: windowOpen
-        ? `🔁 *Practice attempt*\n\nThis will *not* count on the leaderboard (you already have an official attempt).\n\n📝 ${exam.title}`
-        : `🔁 *Practice mode*\n\nThe official exam window has ended.\n📅 Window: ${formatInIST(new Date(getExamWindow(exam).start))} → ${formatInIST(new Date(getExamWindow(exam).end))}\n\nYou can still practice — scores will *not* affect the leaderboard.\n\n📝 ${exam.title}`,
-      replyMarkup: {
-        inline_keyboard: [
-          [{ text: '▶ Continue to questions', callback_data: `resume_exam_${exam.id}` }],
-          [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
-        ]
-      },
-      type: 'sendMessage'
-    };
-  }
-
+  // If practice (window closed or reattempt), go straight into questions with exam keyboard
+  // (keyboard is set inside renderQuestionView)
   return await renderQuestionView(exam.id, 0, student, user);
 }
 
@@ -1066,10 +1051,10 @@ async function handleOptionSelect(examId: string, qIdx: number, optIdx: number, 
     );
   }
 
-  return await renderQuestionView(examId, qIdx, student, user);
+  return await renderQuestionView(examId, qIdx, student, user, { refreshKeyboard: false });
 }
 
-async function renderQuestionView(examId: string, qIdx: number, student: Student, user: TelegramUser): Promise<SimulatorResponse> {
+async function renderQuestionView(examId: string, qIdx: number, student: Student, user: TelegramUser, opts: { refreshKeyboard?: boolean } = {}): Promise<SimulatorResponse> {
   const now = new Date();
   const exam = store.getExamById(examId);
   if (!exam) {
@@ -1112,9 +1097,8 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
     text += `*Status:* ⚪ Unanswered\n`;
   }
 
-  // Build inline options buttons
+  // ONLY MCQ choices under the message (inline)
   const keyboard: InlineKeyboardButton[][] = [];
-
   question.options.forEach((optText, oIdx) => {
     const isSelected = selectedOpt === oIdx;
     const prefix = isSelected ? '🔘 ' : '⚪ ';
@@ -1126,37 +1110,44 @@ async function renderQuestionView(examId: string, qIdx: number, student: Student
     }]);
   });
 
-  // Navigation row
-  const navRow: InlineKeyboardButton[] = [];
-  if (qIdx > 0) {
-    navRow.push({ text: '◀ Previous', callback_data: `nav_${exam.id}_${qIdx - 1}` });
-  }
-  if (qIdx < total - 1) {
-    navRow.push({ text: 'Next ▶', callback_data: `nav_${exam.id}_${qIdx + 1}` });
-  }
-  if (navRow.length > 0) {
-    keyboard.push(navRow);
-  }
+  // Prev / Next / Grid / Submit on bottom ReplyKeyboard — no Main menu during exam
+  const rows: string[][] = [];
+  const nav: string[] = [];
+  if (qIdx > 0) nav.push(LABELS.prev);
+  if (qIdx < total - 1) nav.push(LABELS.next);
+  if (nav.length) rows.push(nav);
+  rows.push([LABELS.grid, LABELS.submit]);
 
-  // Action row
-  keyboard.push([
-    { text: '📋 Question Grid', callback_data: `grid_${exam.id}` },
-    { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` }
-  ]);
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+  setKbSession(user.id, {
+    screen: 'in_exam',
+    examId: exam.id,
+    qIdx,
+  });
 
+  const refreshKeyboard = opts.refreshKeyboard !== false;
+  // refreshKeyboard=true: new sendMessage so bottom bar updates (enter exam / prev-next)
+  // refreshKeyboard=false: edit same message after picking A/B/C/D (keeps current bottom bar)
+  if (refreshKeyboard) {
+    return {
+      chatId: user.id,
+      text,
+      replyMarkup: { inline_keyboard: keyboard },
+      replyKeyboard: kbMarkup(rows),
+      type: 'sendMessage',
+    };
+  }
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText'
+    type: 'editMessageText',
   };
 }
 
 async function renderQuestionGrid(examId: string, student: Student, user: TelegramUser, page = 0): Promise<SimulatorResponse> {
   const exam = store.getExamById(examId);
   if (!exam) {
-    return { chatId: user.id, text: '❌ Examination not found.', type: 'sendMessage' };
+    return { chatId: user.id, text: '❌ Examination not found.', replyKeyboard: mainNavReplyKeyboard(), type: 'sendMessage' };
   }
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
@@ -1171,56 +1162,54 @@ async function renderQuestionGrid(examId: string, student: Student, user: Telegr
   const answeredCount = Object.keys(attempt.answers || {}).length;
   const total = exam.questions.length;
   const remaining = formatRemaining(attempt.expiresAt);
-  const PER_PAGE = 16; // 4x4 buttons — stays within Telegram button limits
-  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const PER = 8;
+  const totalPages = Math.max(1, Math.ceil(total / PER));
   const p = Math.max(0, Math.min(page, totalPages - 1));
-  const start = p * PER_PAGE;
-  const end = Math.min(start + PER_PAGE, total);
+  const startIdx = p * PER;
+  const endIdx = Math.min(startIdx + PER, total);
 
-  let text = `📋 *Question Review Grid*\n`;
+  let text = `📋 *Question Grid*\n`;
   text += `📝 *${escapeMd(exam.title)}*\n`;
-  text += `⏱️ Time Remaining: *${remaining}*\n`;
-  text += `🟢 Answered: ${answeredCount}/${total} | ⚪ Unanswered: ${total - answeredCount}\n`;
-  text += `📄 Page ${p + 1}/${totalPages} (Q${start + 1}–Q${end})\n\n`;
-  text += `Tap a question number to jump to it:`;
+  text += `⏱️ *${remaining}* remaining\n`;
+  text += `🟢 ${answeredCount}/${total} answered\n`;
+  text += `📄 Page ${p + 1}/${totalPages}\n\n_Tap a question below._`;
 
-  const keyboard: InlineKeyboardButton[][] = [];
-  let currentRow: InlineKeyboardButton[] = [];
-
-  for (let idx = start; idx < end; idx++) {
-    const q = exam.questions[idx];
-    const isAnswered = attempt.answers?.[q.id] !== undefined;
-    const isCurrent = attempt.currentQuestionIndex === idx;
-    let label = isAnswered ? `🟢 Q${idx + 1}` : `⚪ Q${idx + 1}`;
-    if (isCurrent) label = `👉 Q${idx + 1}`;
-
-    currentRow.push({
-      text: label,
-      callback_data: `nav_${exam.id}_${idx}`,
-    });
-
-    if (currentRow.length === 4 || idx === end - 1) {
-      keyboard.push(currentRow);
-      currentRow = [];
+  const labels: Record<string, string> = {};
+  const rows: string[][] = [];
+  let row: string[] = [];
+  for (let i = startIdx; i < endIdx; i++) {
+    const q = exam.questions[i];
+    const answered = attempt.answers && attempt.answers[q.id] !== undefined;
+    const mark = answered ? '✅' : '⚪';
+    const lab = `${mark} Q${i + 1}`.slice(0, 64);
+    labels[lab] = `q:${i}`;
+    row.push(lab);
+    if (row.length === 4) {
+      rows.push(row);
+      row = [];
     }
   }
+  if (row.length) rows.push(row);
 
-  const nav: InlineKeyboardButton[] = [];
-  if (p > 0) nav.push({ text: '◀ Prev page', callback_data: `grid_${exam.id}_${p - 1}` });
-  if (p < totalPages - 1) nav.push({ text: 'Next page ▶', callback_data: `grid_${exam.id}_${p + 1}` });
-  if (nav.length) keyboard.push(nav);
+  const pageNav: string[] = [];
+  if (p > 0) pageNav.push(LABELS.prevPage);
+  if (p < totalPages - 1) pageNav.push(LABELS.nextPage);
+  if (pageNav.length) rows.push(pageNav);
+  rows.push([LABELS.continueAns, LABELS.submit]);
 
-  keyboard.push([
-    { text: '🔙 Back to question', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex}` },
-    { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` },
-  ]);
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+  setKbSession(user.id, {
+    screen: 'grid',
+    examId: exam.id,
+    gridPage: p,
+    qIdx: attempt.currentQuestionIndex || 0,
+    labels,
+  });
 
   return {
     chatId: user.id,
     text,
-    replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText',
+    replyKeyboard: kbMarkup(rows),
+    type: 'sendMessage',
   };
 }
 
@@ -1232,30 +1221,32 @@ function renderSubmitConfirmation(examId: string, student: Student, user: Telegr
     return { chatId: user.id, text: '❌ Exam session missing.', type: 'sendMessage' };
   }
 
-  const answeredCount = Object.keys(attempt.answers).length;
+  const answeredCount = Object.keys(attempt.answers || {}).length;
   const total = exam.questions.length;
   const unansweredCount = total - answeredCount;
   const remaining = formatRemaining(attempt.expiresAt);
 
   let text = `⚠️ *Confirm Submission*\n\n`;
-  text += `📝 *${exam.title}*\n`;
+  text += `📝 *${escapeMd(exam.title)}*\n`;
   text += `⏱️ Time Remaining: *${remaining}*\n\n`;
-  text += `📊 *Summary:* \n`;
-  text += `🟢 Answered Questions: *${answeredCount}*\n`;
-  text += `⚪ Skipped/Unanswered: *${unansweredCount}*\n\n`;
-  text += `Are you sure you want to finalize and submit your examination now?`;
+  text += `🟢 Answered: *${answeredCount}*\n`;
+  text += `⚪ Unanswered: *${unansweredCount}*\n\n`;
+  text += `Submit your examination now?`;
+
+  setKbSession(user.id, {
+    screen: 'submit_confirm',
+    examId: exam.id,
+    qIdx: attempt.currentQuestionIndex || 0,
+  });
 
   return {
     chatId: user.id,
     text,
-    replyMarkup: {
-      inline_keyboard: [
-        [{ text: '🚀 Yes, Submit Exam Now', callback_data: `do_submit_${exam.id}` }],
-        [{ text: '🔙 Continue Answering', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex}` }],
-        [{ text: '🏠 Main menu', callback_data: 'btn_home' }]
-      ]
-    },
-    type: 'editMessageText'
+    replyKeyboard: kbMarkup([
+      [LABELS.confirmSubmit],
+      [LABELS.continueAns],
+    ]),
+    type: 'sendMessage',
   };
 }
 
@@ -1411,16 +1402,15 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
     if (page < totalPages - 1) nav.push(LABELS.next);
     if (nav.length) rows.push(nav);
     rows.push([LABELS.scoreSum]);
-  } else if (exam.resultVisibility === 'PUBLISHED' && (exam.questions?.length || 0) > 0) {
-    rows.push([LABELS.review]);
-  }
-  if (attempt.isOfficial !== false) {
-    rows.push([LABELS.examLb]);
+    rows.push([LABELS.home]);
   } else {
+    // My Results → select attempt: only Review / Practice again / Main menu
+    if (exam.resultVisibility === 'PUBLISHED' && (exam.questions?.length || 0) > 0) {
+      rows.push([LABELS.review]);
+    }
     rows.push([LABELS.practiceAgain]);
+    rows.push([LABELS.home]);
   }
-  rows.push([LABELS.myResults, LABELS.exams]);
-  rows.push([LABELS.home]);
 
   if (text.length > 3900) {
     text = text.slice(0, 3890) + '\n…';
