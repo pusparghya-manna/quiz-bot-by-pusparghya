@@ -10,6 +10,15 @@ import {
   numberedListRows,
 } from './replyNav.js';
 import {
+  escapeHtml,
+  titleBlock,
+  subtitle,
+  quote,
+  brandFooter,
+  emptyState,
+  DIV,
+} from './theme.js';
+import {
   TelegramUpdate,
   TelegramUser,
   InlineKeyboardButton,
@@ -251,13 +260,6 @@ export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
   return student;
 }
 
-
-function escapeHtml(s: string): string {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
 
 function renderMainMenu(student: Student): SimulatorResponse {
   const notice = store.getSettings().systemNotice;
@@ -620,8 +622,12 @@ This name will appear on results and the leaderboard.`,
           pendingNameUsers.add(user.id);
           return {
             chatId: user.id,
-            text: `✏️ *Set my name*\n\nPlease type your full name and send it as a message.`,
+            text: quote(
+              `${titleBlock('✏️', 'Set my name')}\n\n` +
+                `Please type your full name and send it as a message.`
+            ) + brandFooter(),
             replyKeyboard: mainNavReplyKeyboard(),
+            parseMode: 'HTML',
             type: 'sendMessage',
           };
         }
@@ -806,8 +812,9 @@ This name will appear on results and the leaderboard.`,
 function renderUnlinkedMsg(chatId: number): SimulatorResponse {
   return {
     chatId,
-    text: `⚠️ *Account Unlinked*\n\nPlease link your student account using \`/link <LINK_CODE>\` first.`,
-    type: 'sendMessage'
+    text: emptyState('⚠️', 'Account Unlinked', 'Please open the exam link from your teacher to register.'),
+    parseMode: 'HTML',
+    type: 'sendMessage',
   };
 }
 
@@ -822,15 +829,13 @@ function renderExamsList(student: Student): SimulatorResponse {
     if (student.telegramUserId) setKbSession(student.telegramUserId, { screen: 'exams' });
     return {
       chatId: student.telegramUserId!,
-      text:
-        `📚 *My Exams*
-
-` +
-        `You have no exams yet.
-
-` +
-        `Ask your teacher for the *exam link*. Opening that link starts the exam.`,
+      text: emptyState(
+        '📚',
+        'My Exams',
+        'You have no exams yet.\n\nAsk your teacher for the exam link. Opening that link starts the exam.'
+      ),
       replyKeyboard: kbMarkup([...mainNavRows(), [LABELS.home]]),
+      parseMode: 'HTML',
       type: 'sendMessage',
     };
   }
@@ -839,12 +844,10 @@ function renderExamsList(student: Student): SimulatorResponse {
     exams.map((e) => e.title),
     [[LABELS.home]]
   );
-  // Map index → examId via session
   const indexToId: Record<string, string> = {};
   exams.forEach((e, i) => {
     indexToId[String(i)] = e.id;
   });
-  // Store labels pointing to exam ids
   const labelToExam: Record<string, string> = {};
   for (const [lab, idx] of Object.entries(labels)) {
     labelToExam[lab] = indexToId[idx];
@@ -858,20 +861,18 @@ function renderExamsList(student: Student): SimulatorResponse {
     });
   }
 
-  let text = `📚 *My Exams*
-
-_Tap an exam below to open options._
-
-`;
+  let body = `${titleBlock('📚', 'My Exams')}\n${subtitle('Tap an exam below to open options.')}\n\n${DIV}\n`;
   exams.forEach((exam, idx) => {
-    text += `*${idx + 1}. ${escapeMd(exam.title)}*
-`;
+    const n = exam.totalQuestions || exam.questions?.length || 0;
+    body += `\n<b>${idx + 1}.</b> ${escapeHtml(exam.title)}\n`;
+    body += `<i>${escapeHtml(exam.subject || 'General')} · ${n} Qs · ${exam.durationMinutes} min</i>\n`;
   });
 
   return {
     chatId: student.telegramUserId!,
-    text,
+    text: quote(body) + brandFooter(),
     replyKeyboard: kbMarkup(rows),
+    parseMode: 'HTML',
     type: 'sendMessage',
   };
 }
@@ -881,8 +882,9 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
   if (!exam) {
     return {
       chatId: student.telegramUserId!,
-      text: '❌ Exam not found.',
+      text: emptyState('❌', 'Exam not found', 'Go back to My Exams and try again.'),
       replyKeyboard: mainNavReplyKeyboard(),
+      parseMode: 'HTML',
       type: 'sendMessage',
     };
   }
@@ -901,24 +903,28 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
   const anyDone = submitted.length > 0;
   const locked = Date.now() < new Date(exam.startDate).getTime();
   const latest = officialDone || submitted[0];
+  const nQ = exam.totalQuestions || exam.questions?.length || 0;
 
-  let text = `👁 *${escapeMd(exam.title)}*
+  let body =
+    `${titleBlock('📝', exam.title)}\n` +
+    `${subtitle(`${exam.subject || 'General'} · ${nQ} questions · ${exam.durationMinutes} min`)}\n\n` +
+    `${DIV}\n`;
 
-`;
-  text += `${escapeMd(exam.subject || '')} · ${exam.totalQuestions || exam.questions?.length || 0} Qs · ${exam.durationMinutes} min
-
-`;
-  text += `_Choose an option from the buttons below._`;
+  if (locked) {
+    body += `\n🔒 <b>Locked</b> until ${escapeHtml(formatInIST(new Date(exam.startDate)))}\n`;
+  } else if (active) {
+    body += `\n▶️ You have an exam <b>in progress</b>.\n`;
+  } else if (anyDone) {
+    body += `\n✅ You have submitted this exam.\n`;
+  } else {
+    body += `\n✨ Ready when you are — start below.\n`;
+  }
+  body += `\n${subtitle('Choose an option from the buttons below.')}`;
 
   const rows: string[][] = [];
-  if (locked) {
-    text += `
-
-🔒 Locked until ${formatInIST(new Date(exam.startDate))}`;
-  } else if (active) {
-    rows.push([LABELS.continueExam]);
-  } else if (!anyDone) {
-    rows.push([LABELS.startExam]);
+  if (!locked) {
+    if (active) rows.push([LABELS.continueExam]);
+    else if (!anyDone) rows.push([LABELS.startExam]);
   }
   if (anyDone) {
     rows.push([LABELS.viewResult]);
@@ -938,8 +944,9 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
 
   return {
     chatId: student.telegramUserId!,
-    text,
+    text: quote(body) + brandFooter(),
     replyKeyboard: kbMarkup(rows),
+    parseMode: 'HTML',
     type: 'sendMessage',
   };
 }
@@ -1132,26 +1139,20 @@ async function renderQuestionView(
   const remaining = formatRemaining(attempt.expiresAt);
 
   // Full option text in the message; letter-only buttons below
-  let text = `📝 *${escapeMd(exam.title)}*
-`;
-  text += `⏱️ *${remaining}* left · Q${qIdx + 1}/${total}
-
-`;
-  text += `${escapeMd(question.question || '')}
-
-`;
+  let text =
+    `📝 <b>${escapeHtml(exam.title)}</b>\n` +
+    `⏱️ <b>${escapeHtml(remaining)}</b> left · Q${qIdx + 1}/${total}\n\n` +
+    `${escapeHtml(question.question || '')}\n\n`;
 
   const optsList = question.options || [];
   optsList.forEach((optText, oIdx) => {
     const letter = String.fromCharCode(65 + oIdx);
     const isSelected = selectedOpt === oIdx;
     const mark = isSelected ? '🔘' : '⚪';
-    text += `${mark} *${letter}.* ${escapeMd(String(optText || ''))}
-`;
+    text += `${mark} <b>${letter}.</b> ${escapeHtml(String(optText || ''))}\n`;
   });
   if (selectedOpt !== undefined && selectedOpt !== null) {
-    text += `
-_Selected: ${String.fromCharCode(65 + Number(selectedOpt))}_`;
+    text += `\n<i>Selected: ${String.fromCharCode(65 + Number(selectedOpt))}</i>`;
   }
 
   // Buttons: A B C D only (full text is above)
@@ -1201,16 +1202,16 @@ _Selected: ${String.fromCharCode(65 + Number(selectedOpt))}_`;
       text,
       replyMarkup: { inline_keyboard: keyboard },
       messageId,
+      parseMode: 'HTML',
       type: 'editMessageText',
     };
   }
-  // Entering exam: replace sticky exam-options bar with a single Main menu key
-  // (full remove_keyboard makes the phone typing keyboard pop up).
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
     replyKeyboard: kbMarkup([[LABELS.home]]),
+    parseMode: 'HTML',
     type: 'sendMessage',
   };
 }
@@ -1320,7 +1321,12 @@ function renderSubmitConfirmation(examId: string, student: Student, user: Telegr
   const attempt = store.getAttempt(examId, student.telegramUserId!);
 
   if (!exam || !attempt) {
-    return { chatId: user.id, text: '❌ Exam session missing.', type: 'sendMessage' };
+    return {
+      chatId: user.id,
+      text: emptyState('❌', 'Session missing', 'Open My Exams and continue the exam.'),
+      parseMode: 'HTML',
+      type: 'sendMessage',
+    };
   }
 
   const answeredCount = Object.keys(attempt.answers || {}).length;
@@ -1328,12 +1334,14 @@ function renderSubmitConfirmation(examId: string, student: Student, user: Telegr
   const unansweredCount = total - answeredCount;
   const remaining = formatRemaining(attempt.expiresAt);
 
-  let text = `⚠️ *Confirm Submission*\n\n`;
-  text += `📝 *${escapeMd(exam.title)}*\n`;
-  text += `⏱️ Time Remaining: *${remaining}*\n\n`;
-  text += `🟢 Answered: *${answeredCount}*\n`;
-  text += `⚪ Unanswered: *${unansweredCount}*\n\n`;
-  text += `Submit your examination now?`;
+  const body =
+    `${titleBlock('⚠️', 'Confirm Submission')}\n` +
+    `${subtitle(exam.title)}\n\n` +
+    `${DIV}\n` +
+    `⏱️ Time left: <b>${escapeHtml(remaining)}</b>\n` +
+    `🟢 Answered: <b>${answeredCount}</b>\n` +
+    `⚪ Unanswered: <b>${unansweredCount}</b>\n\n` +
+    `${subtitle('Submit your examination now?')}`;
 
   setKbSession(user.id, {
     screen: 'submit_confirm',
@@ -1345,14 +1353,15 @@ function renderSubmitConfirmation(examId: string, student: Student, user: Telegr
   const messageId = sess?.lastMessageId;
   return {
     chatId: user.id,
-    text,
+    text: quote(body),
     replyMarkup: {
       inline_keyboard: [
-        [{ text: '🚀 Yes, Submit Exam Now', callback_data: `do_submit_${exam.id}` }],
+        [{ text: '🚀 Yes, Submit Now', callback_data: `do_submit_${exam.id}` }],
         [{ text: '🔙 Continue Answering', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex || 0}` }],
       ],
     },
     messageId,
+    parseMode: 'HTML',
     type: messageId ? 'editMessageText' : 'sendMessage',
   };
 }
@@ -1422,7 +1431,7 @@ async function autoSubmitExam(exam: Exam, attempt: Attempt): Promise<SimulatorRe
 }
 
 function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number | null = null): SimulatorResponse {
-  const chatId = attempt.telegramUserId;
+  const chatId = attempt.telegramUserId!;
   const keyboard: InlineKeyboardButton[][] = [];
   const totalQ = exam.questions?.length || 0;
   const PER_PAGE = 8;
@@ -1431,38 +1440,48 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
 
   if (exam.resultVisibility === 'PUBLISHED') {
     if (reviewPage === null || reviewPage === undefined) {
-      // Full summary once
-      text = `🎉 *Exam submitted*\n\n`;
-      text += `📝 *${escapeMd(exam.title)}*\n`;
-      text += `👤 *${escapeMd(attempt.studentName || '')}*\n`;
-      if (attempt.attemptNumber && attempt.attemptNumber > 1) {
-        text += `🔁 Practice attempt #${attempt.attemptNumber} (not ranked)\n`;
-      }
-      text += `📌 ${attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-submitted (time up)' : '✅ Submitted'}\n\n`;
-      text += `📊 *Your score*\n`;
-      text += `⭐ ${attempt.score} / ${attempt.maxScore} (${attempt.percentage}%)\n`;
-      text += `✅ ${attempt.correctCount}  ❌ ${attempt.wrongCount}  ⚪ ${attempt.skippedCount}\n`;
       const mins = Math.floor(attempt.timeTakenSeconds / 60);
       const secs = attempt.timeTakenSeconds % 60;
-      text += `⏱️ Time: ${mins}m ${secs}s\n`;
-      if (attempt.isOfficial !== false && isExamTimeEnded(exam) && attempt.rank) {
-        text += `🏆 Rank: #${attempt.rank}\n`;
-      } else if (attempt.isOfficial !== false && !isExamTimeEnded(exam)) {
-        text += `🏆 Rank after exam ends\n`;
+      let body =
+        `${titleBlock('🎉', 'Exam submitted')}\n` +
+        `${subtitle(exam.title)}\n\n` +
+        `👤 <b>${escapeHtml(attempt.studentName || '')}</b>\n`;
+      if (attempt.attemptNumber && attempt.attemptNumber > 1) {
+        body += `🔁 Practice attempt #${attempt.attemptNumber} <i>(not ranked)</i>\n`;
       }
-      text += `\n📖 Tap *Review answers* to see each question (page by page).`;
+      body +=
+        `📌 ${
+          attempt.status === 'AUTO_SUBMITTED' ? '⏰ Auto-submitted' : '✅ Submitted'
+        }\n\n` +
+        `${DIV}\n` +
+        `${titleBlock('📊', 'Your score')}\n` +
+        `⭐ <b>${attempt.score}</b> / ${attempt.maxScore} <i>(${attempt.percentage}%)</i>\n` +
+        `✅ ${attempt.correctCount}   ❌ ${attempt.wrongCount}   ⚪ ${attempt.skippedCount}\n` +
+        `⏱️ ${mins}m ${secs}s\n`;
+      if (attempt.isOfficial !== false && isExamTimeEnded(exam) && attempt.rank) {
+        body += `🏆 Rank: <b>#${attempt.rank}</b>\n`;
+      } else if (attempt.isOfficial !== false && !isExamTimeEnded(exam)) {
+        body += `🏆 Rank after exam ends\n`;
+      }
+      body += `\n${subtitle('Tap Review answers to see each question.')}`;
+      text = quote(body) + brandFooter();
       if (totalQ > 0) {
-        keyboard.push([{ text: `📖 Review answers (1/${totalPages})`, callback_data: `revatt_${attempt.id}_0` }]);
+        keyboard.push([
+          {
+            text: `📖 Review answers (1/${totalPages})`,
+            callback_data: `revatt_${attempt.id}_0`,
+          },
+        ]);
       }
     } else {
-      // Review: no score summary — more answers per page
       const page = Math.max(0, Math.min(reviewPage, totalPages - 1));
       const startQ = page * PER_PAGE;
       const endQ = Math.min(startQ + PER_PAGE, totalQ);
-      text =
-        `📖 *Review answers*\n` +
-        `📝 ${escapeMd(exam.title)}\n` +
-        `*Questions ${startQ + 1}\u2013${endQ} of ${totalQ}* (page ${page + 1}/${totalPages})\n\n`;
+      let body =
+        `${titleBlock('📖', 'Review answers')}\n` +
+        `${subtitle(exam.title)}\n` +
+        `<i>Questions ${startQ + 1}–${endQ} of ${totalQ} · page ${page + 1}/${totalPages}</i>\n\n` +
+        `${DIV}\n`;
 
       for (let i = startQ; i < endQ; i++) {
         const q = exam.questions[i];
@@ -1480,9 +1499,11 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
           const rShort = String(correct).slice(0, 40);
           extra = ok ? `Yours: ${cShort}` : `Yours: ${cShort} · Correct: ${rShort}`;
         }
-        const short = escapeMd((q.question || '').slice(0, 55));
-        text += `${mark} *Q${i + 1}.* ${short}${ (q.question || '').length > 55 ? '…' : ''}\n   ${escapeMd(extra)}\n`;
+        const short = escapeHtml((q.question || '').slice(0, 55));
+        body += `\n${mark} <b>Q${i + 1}.</b> ${short}${(q.question || '').length > 55 ? '…' : ''}\n`;
+        body += `<i>${escapeHtml(extra)}</i>\n`;
       }
+      text = body;
 
       const nav: InlineKeyboardButton[] = [];
       if (page > 0) {
@@ -1494,34 +1515,16 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
       if (nav.length) keyboard.push(nav);
       keyboard.push([{ text: '📊 Score summary', callback_data: `revatt_${attempt.id}_sum` }]);
     }
-} else {
-    text += `🔒 Results are hidden by the teacher for now.\n`;
-  }
-
-
-  const rows: string[][] = [];
-  if (reviewPage !== null && reviewPage !== undefined) {
-    const totalQ = exam.questions?.length || 0;
-    const PER_PAGE = 5;
-    const totalPages = Math.max(1, Math.ceil(totalQ / PER_PAGE));
-    const page = Math.max(0, Math.min(reviewPage, totalPages - 1));
-    const nav: string[] = [];
-    if (page > 0) nav.push(LABELS.prev);
-    if (page < totalPages - 1) nav.push(LABELS.next);
-    if (nav.length) rows.push(nav);
-    rows.push([LABELS.scoreSum]);
-    rows.push([LABELS.home]);
   } else {
-    // My Results → select attempt: only Review / Practice again / Main menu
-    if (exam.resultVisibility === 'PUBLISHED' && (exam.questions?.length || 0) > 0) {
-      rows.push([LABELS.review]);
-    }
-    rows.push([LABELS.practiceAgain]);
-    rows.push([LABELS.home]);
+    text = quote(
+      `${titleBlock('🔒', 'Results hidden')}\n\n` +
+        `${subtitle(exam.title)}\n` +
+        `Your teacher has not published results yet.`
+    ) + brandFooter();
   }
 
   if (text.length > 3900) {
-    text = text.slice(0, 3890) + '\n…';
+    text = text.slice(0, 3890) + '…';
   }
 
   setKbSession(chatId, {
@@ -1531,10 +1534,32 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
     reviewPage: reviewPage != null ? reviewPage : undefined,
   });
 
+  if (reviewPage !== null && reviewPage !== undefined) {
+    const sess = getKbSession(chatId);
+    const messageId = sess?.lastMessageId;
+    return {
+      chatId,
+      text,
+      replyMarkup: { inline_keyboard: keyboard },
+      messageId,
+      parseMode: 'HTML',
+      type: messageId ? 'editMessageText' : 'sendMessage',
+    };
+  }
+
+  const rows: string[][] = [];
+  if (exam.resultVisibility === 'PUBLISHED' && totalQ > 0) {
+    rows.push([LABELS.review]);
+  }
+  rows.push([LABELS.practiceAgain]);
+  rows.push([LABELS.home]);
+
   return {
     chatId,
     text,
+    replyMarkup: keyboard.length ? { inline_keyboard: keyboard } : undefined,
     replyKeyboard: kbMarkup(rows),
+    parseMode: 'HTML',
     type: 'sendMessage',
   };
 }
@@ -1557,47 +1582,35 @@ function renderStudentResults(student: Student): SimulatorResponse {
   if (attempts.length === 0) {
     return {
       chatId: student.telegramUserId!,
-      text: `📊 *My Results*\n\nYou have not submitted any exams yet.\nOpen the link from your teacher to start.`,
-      replyMarkup: { inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]] },
+      text: emptyState(
+        '📊',
+        'My Results',
+        'You have not submitted any exams yet.\nOpen the link from your teacher to start.'
+      ),
+      replyKeyboard: mainNavReplyKeyboard(),
+      parseMode: 'HTML',
       type: 'sendMessage',
     };
   }
 
-  // Cap list text length — details open via Review buttons
-  const MAX_LIST = 12;
-  const shown = attempts.slice(0, MAX_LIST);
-  let text = `📊 *My Results — ${escapeMd(student.name)}*\n\n`;
-  text += `_Showing ${shown.length} of ${attempts.length}. Tap an exam to open score & answers._\n\n`;
+  const shown = attempts.slice(0, 12);
+  let body =
+    `${titleBlock('📊', 'My Results')}\n` +
+    `${subtitle(student.name)}\n\n` +
+    `${DIV}\n` +
+    `${subtitle('Tap an attempt below to open it.')}\n`;
 
-  const keyboard: InlineKeyboardButton[][] = [];
   shown.forEach((att, idx) => {
     const exam = store.getExamById(att.examId);
-    const title = exam ? exam.title : att.examId;
-    const practice = att.isOfficial === false ? ' (practice)' : '';
-    let line = `*${idx + 1}. ${escapeMd(title)}*${practice}\n`;
-    if (exam && exam.resultVisibility === 'PUBLISHED') {
-      line += `   Score: *${att.score}/${att.maxScore}* (${att.percentage}%)`;
-      if (att.isOfficial !== false && isExamTimeEnded(exam) && att.rank) {
-        line += ` · Rank #${att.rank}`;
-      }
-      line += `\n`;
+    const title = exam?.title || 'Exam';
+    const practice = att.isOfficial === false ? ' · practice' : '';
+    body += `\n<b>${idx + 1}.</b> ${escapeHtml(title)}${escapeHtml(practice)}\n`;
+    if (exam?.resultVisibility === 'PUBLISHED') {
+      body += `<i>⭐ ${att.score}/${att.maxScore} (${att.percentage}%)</i>\n`;
     } else {
-      line += `   🔒 Results hidden\n`;
-    }
-    text += line;
-    if (exam && exam.resultVisibility === 'PUBLISHED') {
-      const kind = att.isOfficial === false ? 'Practice' : 'Official';
-      keyboard.push([
-        {
-          text: `📖 ${idx + 1}. ${(title || 'Exam').slice(0, 22)} (${kind})`,
-          callback_data: `revatt_${att.id}_sum`,
-        },
-      ]);
+      body += `<i>🔒 Results hidden</i>\n`;
     }
   });
-
-  if (text.length > 3500) text = text.slice(0, 3490) + '\n…';
-
 
   const titles = shown.map((att) => {
     const exam = store.getExamById(att.examId);
@@ -1622,61 +1635,34 @@ function renderStudentResults(student: Student): SimulatorResponse {
 
   return {
     chatId: student.telegramUserId!,
-    text,
+    text: quote(body) + brandFooter(),
     replyKeyboard: kbMarkup(numbered.rows),
+    parseMode: 'HTML',
     type: 'sendMessage',
   };
 }
 
-
-function matchesClass(studentClass?: string, examClass?: string): boolean {
-  if (!studentClass || !examClass) return true;
-  const s = studentClass.trim().toLowerCase();
-  const e = examClass.trim().toLowerCase();
-  if (s === 'all' || s === 'all students' || e === 'all' || e === 'all students') return true;
-  return s === e;
-}
-
 function renderLeaderboardExamPicker(student: Student): SimulatorResponse {
-  const myExamIds = [
-    ...new Set(
-      store
-        .getAttempts()
-        .filter(
-          (a) =>
-            a.telegramUserId === student.telegramUserId || a.studentId === student.studentId
-        )
-        .map((a) => a.examId)
-    ),
-  ];
-  const exams = myExamIds
-    .map((id) => store.getExamById(id))
-    .filter((e): e is Exam => !!e && isExamTimeEnded(e));
+  const myAttempts = store.getAttempts().filter(
+    (a) => a.telegramUserId === student.telegramUserId || a.studentId === student.studentId
+  );
+  const examIds = [...new Set(myAttempts.map((a) => a.examId))];
+  const exams = examIds.map((id) => store.getExamById(id)).filter(Boolean) as Exam[];
 
   if (exams.length === 0) {
     return {
       chatId: student.telegramUserId!,
-      text:
-        `🏆 *Leaderboard*\n\n` +
-        `Rankings appear only *after an exam ends*.\n` +
-        `Official attempts only.`,
-      replyMarkup: {
-        inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]],
-      },
-      type: 'editMessageText',
+      text: emptyState(
+        '🏆',
+        'Leaderboard',
+        'No exams yet.\nComplete an exam from your teacher’s link to unlock rankings.'
+      ),
+      replyKeyboard: mainNavReplyKeyboard(),
+      parseMode: 'HTML',
+      type: 'sendMessage',
     };
   }
 
-  let text = `🏆 *Leaderboard*\n\n_Select an exam to view rankings (official attempts only)._\n\n`;
-  const keyboard: InlineKeyboardButton[][] = [];
-  exams.forEach((exam, idx) => {
-    keyboard.push([
-      {
-        text: `${idx + 1}. ${(exam.title || 'Exam').slice(0, 40)}`,
-        callback_data: `lb_exam_${exam.id}`,
-      },
-    ]);
-  });
   const { rows, labels } = numberedListRows(
     exams.map((e) => e.title),
     [[LABELS.home]]
@@ -1693,10 +1679,19 @@ function renderLeaderboardExamPicker(student: Student): SimulatorResponse {
     });
   }
 
+  let body =
+    `${titleBlock('🏆', 'Leaderboard')}\n` +
+    `${subtitle('Pick an exam to see rankings.')}\n\n` +
+    `${DIV}\n`;
+  exams.forEach((exam, idx) => {
+    body += `\n<b>${idx + 1}.</b> ${escapeHtml(exam.title)}\n`;
+  });
+
   return {
     chatId: student.telegramUserId!,
-    text,
+    text: quote(body) + brandFooter(),
     replyKeyboard: kbMarkup(rows),
+    parseMode: 'HTML',
     type: 'sendMessage',
   };
 }
@@ -1710,27 +1705,23 @@ function renderExamLeaderboard(
   if (!exam) {
     return {
       chatId: student.telegramUserId!,
-      text: '❌ Exam not found.',
-      replyMarkup: {
-        inline_keyboard: [[{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]],
-      },
-      type: 'editMessageText',
+      text: emptyState('❌', 'Exam not found', 'Pick another exam from the leaderboard list.'),
+      replyKeyboard: mainNavReplyKeyboard(),
+      parseMode: 'HTML',
+      type: 'sendMessage',
     };
   }
 
   if (!isExamTimeEnded(exam)) {
     return {
       chatId: student.telegramUserId!,
-      text:
-        `🏆 *${escapeMd(exam.title)}*\n\n` +
-        `Rankings unlock after the exam time ends.`,
-      replyMarkup: {
-        inline_keyboard: [
-          [{ text: '🏆 Other exams', callback_data: 'btn_leaderboard' }],
-          [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
-        ],
-      },
-      type: 'editMessageText',
+      text: quote(
+        `${titleBlock('🏆', exam.title)}\n\n` +
+          `⏳ Rankings unlock after the exam time ends.`
+      ) + brandFooter(),
+      replyKeyboard: kbMarkup([[LABELS.otherLb], [LABELS.home]]),
+      parseMode: 'HTML',
+      type: 'sendMessage',
     };
   }
 
@@ -1747,29 +1738,29 @@ function renderExamLeaderboard(
       return 0;
     });
 
-  let text = `🏆 *${escapeMd(exam.title)}*\n_Official attempts only_\n\n`;
-  const keyboard: InlineKeyboardButton[][] = [];
+  let body =
+    `${titleBlock('🏆', exam.title)}\n` +
+    `${subtitle('Official attempts only')}\n\n` +
+    `${DIV}\n`;
 
   if (attempts.length === 0) {
-    text += `_No ranked submissions yet._`;
+    body += `\nNo submissions yet.`;
   } else {
-    const limit = showAll ? attempts.length : 10;
-    attempts.slice(0, limit).forEach((att, idx) => {
-      const rankNum = att.rank || idx + 1;
-      const medal =
-        rankNum === 1 ? '🥇' : rankNum === 2 ? '🥈' : rankNum === 3 ? '🥉' : `#${rankNum}`;
+    const list = showAll ? attempts : attempts.slice(0, 10);
+    list.forEach((att, i) => {
+      const rank = i + 1;
+      const medal2 = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
       const isMe =
         att.telegramUserId === student.telegramUserId || att.studentId === student.studentId
-          ? ' *(You)*'
+          ? ' ← you'
           : '';
-      text += `${medal} ${escapeMd(att.studentName)}${isMe} — *${att.score}/${att.maxScore}*\n`;
+      body += `\n${medal2} <b>${escapeHtml(att.studentName || 'Student')}</b>${escapeHtml(isMe)}\n`;
+      body += `<i>⭐ ${att.score}/${att.maxScore} · ${att.percentage}%</i>\n`;
     });
     if (!showAll && attempts.length > 10) {
-      text += `\n_…and ${attempts.length - 10} more_`;
-      keyboard.push([{ text: 'Show full ranking', callback_data: `lb_more_${exam.id}` }]);
+      body += `\n<i>…and ${attempts.length - 10} more</i>`;
     }
   }
-
 
   const rows: string[][] = [];
   if (!showAll && attempts.length > 10) {
@@ -1778,8 +1769,6 @@ function renderExamLeaderboard(
   rows.push([LABELS.otherLb]);
   rows.push([LABELS.exams, LABELS.home]);
 
-  if (text.length > 3900) text = text.slice(0, 3890) + '\n…';
-
   if (student.telegramUserId) {
     setKbSession(student.telegramUserId, {
       screen: 'lb_exam',
@@ -1787,10 +1776,14 @@ function renderExamLeaderboard(
     });
   }
 
+  let text = quote(body) + brandFooter();
+  if (text.length > 3900) text = text.slice(0, 3890) + '…';
+
   return {
     chatId: student.telegramUserId!,
     text,
     replyKeyboard: kbMarkup(rows),
+    parseMode: 'HTML',
     type: 'sendMessage',
   };
 }
