@@ -206,6 +206,13 @@ function renderMainMenu(student: Student): SimulatorResponse {
   };
 }
 
+function needsNameSetup(student: Student): boolean {
+  const n = (student.name || '').trim();
+  if (!n) return true;
+  if (/^student(\s*#?\d*)?$/i.test(n)) return true;
+  return false;
+}
+
 /** Bounded in-memory dedup — avoids a Turso round-trip on every button press. */
 const recentUpdateIds = new Set<number>();
 const RECENT_UPDATE_MAX = 4000;
@@ -276,12 +283,22 @@ This name will appear on results and the leaderboard.`,
       };
     } else if (data === 'btn_exams') {
       response = renderExamsList(student);
+    } else if (data.startsWith('exam_view_')) {
+      const examId = data.replace('exam_view_', '');
+      response = renderExamOptions(examId, student);
     } else if (data === 'btn_results') {
       response = renderStudentResults(student);
     } else if (data === 'btn_leaderboard') {
-      response = renderStudentLeaderboard(student, false);
+      response = renderLeaderboardExamPicker(student);
+    } else if (data.startsWith('lb_exam_')) {
+      const examId = data.replace('lb_exam_', '');
+      response = renderExamLeaderboard(examId, student, false);
+    } else if (data.startsWith('lb_more_')) {
+      const examId = data.replace('lb_more_', '');
+      response = renderExamLeaderboard(examId, student, true);
     } else if (data === 'leaderboard_more') {
-      response = renderStudentLeaderboard(student, true);
+      // legacy — show picker
+      response = renderLeaderboardExamPicker(student);
     } else if (data.startsWith('start_exam_') || data.startsWith('resume_exam_')) {
       const examId = data.replace('start_exam_', '').replace('resume_exam_', '');
       response = await handleStartOrResumeExam(examId, student, user);
@@ -310,6 +327,42 @@ This name will appear on results and the leaderboard.`,
       if (parsed) {
         const page = parsed.trailing[0] ?? 0;
         response = await renderQuestionGrid(parsed.examId, student, user, page);
+      }
+    } else if (data.startsWith('revatt_')) {
+      // revatt_ATTEMPTID_sum | revatt_ATTEMPTID_PAGE
+      const rest = data.slice(7);
+      let attemptId = '';
+      let pagePart = '';
+      const lastUnderscore = rest.lastIndexOf('_');
+      if (lastUnderscore !== -1) {
+        attemptId = rest.slice(0, lastUnderscore);
+        pagePart = rest.slice(lastUnderscore + 1);
+      }
+      const att = store.getAttempts().find((a) => a.id === attemptId);
+      const exam = att ? store.getExamById(att.examId) : undefined;
+      if (att && exam && (att.telegramUserId === student.telegramUserId || att.studentId === student.studentId)) {
+        if (!att.answers || Object.keys(att.answers).length === 0) {
+          try {
+            await store.loadAttemptAnswers(att.id);
+          } catch (e: any) {
+            console.error('[telegram] loadAttemptAnswers:', e?.message || e);
+          }
+        }
+        const loaded = store.getAttempts().find((a) => a.id === attemptId) || att;
+        if (pagePart === 'sum') {
+          response = renderAttemptSummary(exam, loaded, null);
+        } else {
+          response = renderAttemptSummary(exam, loaded, parseInt(pagePart, 10) || 0);
+        }
+      } else {
+        response = {
+          chatId: user.id,
+          text: '❌ Result not found.',
+          replyMarkup: {
+            inline_keyboard: [[{ text: '📊 My Results', callback_data: 'btn_results' }]],
+          },
+          type: 'editMessageText',
+        };
       }
     } else if (data.startsWith('rev_')) {
       // rev_EXAMID_sum | rev_EXAMID_PAGE
@@ -462,24 +515,29 @@ This name will appear on results and the leaderboard.`,
         return await handleStartOrResumeExam(examId, student, user);
       }
 
-      const notice = store.getSettings().systemNotice;
-      return {
-        chatId: user.id,
-        text: `👋 *Welcome to Quiz Bot by Pusparghya!*\n\n` +
-          (notice ? `📢 ${notice}\n\n` : '') +
-          `You are registered as *${student.name}*.\n` +
-          `Teachers share a special link for each exam. Open that link to start.\n` +
-          `You can also view your past attempts below.`,
-        replyMarkup: {
-          inline_keyboard: [
-            [{ text: '📚 My Exams', callback_data: 'btn_exams' }],
-            [{ text: '📊 My Results', callback_data: 'btn_results' }],
-            [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }],
-            [{ text: '✏️ Set your name', callback_data: 'btn_setname' }]
-          ]
-        },
-        type: 'sendMessage'
-      };
+      if (needsNameSetup(student)) {
+        pendingNameUsers.add(user.id);
+        return {
+          chatId: user.id,
+          text:
+            `👋 *Welcome to Quiz Bot by Pusparghya!*
+
+` +
+            `✏️ *Set my name* (one-time setup)
+
+` +
+            `Please type your full name and send it as a message.
+` +
+            `This name appears on results and the leaderboard.`,
+          replyMarkup: {
+            inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]],
+          },
+          type: 'sendMessage',
+        };
+      }
+
+      const menu = renderMainMenu(student);
+      return { ...menu, type: 'sendMessage', chatId: user.id };
     }
 
     if (text === '/exams') {
@@ -507,69 +565,134 @@ function renderUnlinkedMsg(chatId: number): SimulatorResponse {
 }
 
 function renderExamsList(student: Student): SimulatorResponse {
-  const now = new Date();
-  // Only exams this student has already opened (via teacher link) or attempted
-  const myAttempts = store.getAttempts().filter(a =>
-    a.telegramUserId === student.telegramUserId || a.studentId === student.studentId
+  // Flow: My Exams → list of exam *names only* → tap to open Exam Options
+  const myAttempts = store.getAttempts().filter(
+    (a) => a.telegramUserId === student.telegramUserId || a.studentId === student.studentId
   );
-  const examIds = [...new Set(myAttempts.map(a => a.examId))];
-  const exams = examIds.map(id => store.getExamById(id)).filter(Boolean) as Exam[];
+  const examIds = [...new Set(myAttempts.map((a) => a.examId))];
+  const exams = examIds.map((id) => store.getExamById(id)).filter(Boolean) as Exam[];
 
   if (exams.length === 0) {
     return {
       chatId: student.telegramUserId!,
-      text: `📚 *My Exams*\n\nYou have no exams yet.\n\nAsk your teacher for the *exam link*. Opening that link starts the exam.`,
+      text:
+        `📚 *My Exams*\n\n` +
+        `You have no exams yet.\n\n` +
+        `Ask your teacher for the *exam link*. Opening that link starts the exam.`,
       replyMarkup: {
         inline_keyboard: [
-          [{ text: '📊 My Results', callback_data: 'btn_results' }],
-          [{ text: '🏆 Leaderboards', callback_data: 'btn_leaderboard' }]
-        ]
+          [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
+        ],
       },
-      type: 'sendMessage'
+      type: 'editMessageText',
     };
   }
 
-  let text = `📚 *My Exams*\n\n`;
+  let text = `📚 *My Exams*\n\n_Tap an exam to see options._\n\n`;
   const keyboard: InlineKeyboardButton[][] = [];
 
   exams.forEach((exam, idx) => {
-    const startDate = new Date(exam.startDate);
-    const isLocked = now < startDate;
-    const attempts = store.getStudentAttempts(exam.id, student.telegramUserId!);
-    const active = attempts.find(a => a.status === 'IN_PROGRESS');
-    const officialDone = attempts.find(a => a.isOfficial !== false && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'));
-    const anyDone = attempts.some(a => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED');
-
-    text += `*${idx + 1}. ${exam.title}*\n`;
-    text += `   ${exam.subject || ''} · ${exam.totalQuestions} Qs · ${exam.durationMinutes} min\n`;
-
-    if (isLocked) {
-      text += `   🔒 Locked until ${formatInIST(startDate)}\n\n`;
-      keyboard.push([{ text: `🔒 ${exam.title}`, callback_data: `start_exam_${exam.id}` }]);
-    } else if (active) {
-      text += `   ⚡ In progress (${formatRemaining(active.expiresAt)} left)\n\n`;
-      keyboard.push([{ text: `▶ Resume · ${exam.title}`, callback_data: `resume_exam_${exam.id}` }]);
-    } else if (anyDone) {
-      const score = officialDone ? `${officialDone.score}/${officialDone.maxScore}` : 'done';
-      text += `   ✅ Attempted (${score}) — you can reattempt for practice\n\n`;
-      keyboard.push([
-        { text: `📊 Result · ${exam.title}`, callback_data: `start_exam_${exam.id}` },
-        { text: `🔁 Reattempt`, callback_data: `reattempt_${exam.id}` }
-      ]);
-    } else {
-      text += `   🟢 Ready to start\n\n`;
-      keyboard.push([{ text: `🚀 Start · ${exam.title}`, callback_data: `start_exam_${exam.id}` }]);
-    }
+    text += `*${idx + 1}. ${escapeMd(exam.title)}*\n`;
+    keyboard.push([
+      {
+        text: `${idx + 1}. ${(exam.title || 'Exam').slice(0, 40)}`,
+        callback_data: `exam_view_${exam.id}`,
+      },
+    ]);
   });
 
-  keyboard.push([{ text: '📊 My Results', callback_data: 'btn_results' }]);
   keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
   return {
     chatId: student.telegramUserId!,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText'
+    type: 'editMessageText',
+  };
+}
+
+function renderExamOptions(examId: string, student: Student): SimulatorResponse {
+  const exam = store.getExamById(examId);
+  if (!exam) {
+    return {
+      chatId: student.telegramUserId!,
+      text: '❌ Exam not found.',
+      replyMarkup: {
+        inline_keyboard: [[{ text: '📚 My Exams', callback_data: 'btn_exams' }]],
+      },
+      type: 'editMessageText',
+    };
+  }
+
+  const attempts = store.getStudentAttempts(exam.id, student.telegramUserId!);
+  const active = attempts.find((a) => a.status === 'IN_PROGRESS');
+  const submitted = attempts
+    .filter((a) => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED')
+    .slice()
+    .sort((a, b) => {
+      const ta = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+      const tb = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+      return tb - ta;
+    });
+  const officialDone = submitted.find((a) => a.isOfficial !== false);
+  const anyDone = submitted.length > 0;
+  const now = Date.now();
+  const locked = now < new Date(exam.startDate).getTime();
+
+  let text = `👁 *${escapeMd(exam.title)}*\n\n`;
+  text += `${escapeMd(exam.subject || '')} · ${exam.totalQuestions || exam.questions?.length || 0} Qs · ${exam.durationMinutes} min\n\n`;
+  text += `_Choose an option:_`;
+
+  const keyboard: InlineKeyboardButton[][] = [];
+
+  if (locked) {
+    text += `\n\n🔒 Locked until ${formatInIST(new Date(exam.startDate))}`;
+  } else if (active) {
+    keyboard.push([
+      {
+        text: '▶️ Continue Exam',
+        callback_data: `resume_exam_${exam.id}`,
+      },
+    ]);
+  } else if (!anyDone) {
+    keyboard.push([
+      {
+        text: '▶️ Start Exam',
+        callback_data: `start_exam_${exam.id}`,
+      },
+    ]);
+  }
+
+  if (anyDone) {
+    const latest = officialDone || submitted[0];
+    keyboard.push([
+      {
+        text: '📊 View Result',
+        callback_data: `revatt_${latest.id}_sum`,
+      },
+    ]);
+    keyboard.push([
+      {
+        text: '🔁 Re-attempt (Practice)',
+        callback_data: `reattempt_${exam.id}`,
+      },
+    ]);
+  }
+
+  keyboard.push([
+    {
+      text: '🏆 Leaderboard',
+      callback_data: `lb_exam_${exam.id}`,
+    },
+  ]);
+  keyboard.push([{ text: '📚 Back to My Exams', callback_data: 'btn_exams' }]);
+  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+
+  return {
+    chatId: student.telegramUserId!,
+    text,
+    replyMarkup: { inline_keyboard: keyboard },
+    type: 'editMessageText',
   };
 }
 
@@ -1026,7 +1149,7 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
       // Summary only — stays under Telegram limit even with 100+ questions
       text += `\n📖 Tap *Review answers* to see each question (page by page).`;
       if (totalQ > 0) {
-        keyboard.push([{ text: `📖 Review answers (1/${totalPages})`, callback_data: `rev_${exam.id}_0` }]);
+        keyboard.push([{ text: `📖 Review answers (1/${totalPages})`, callback_data: `revatt_${attempt.id}_0` }]);
       }
     } else {
       const page = Math.max(0, Math.min(reviewPage, totalPages - 1));
@@ -1057,24 +1180,27 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
 
       const nav: InlineKeyboardButton[] = [];
       if (page > 0) {
-        nav.push({ text: '◀ Previous', callback_data: `rev_${exam.id}_${page - 1}` });
+        nav.push({ text: '◀ Previous', callback_data: `revatt_${attempt.id}_${page - 1}` });
       }
       if (page < totalPages - 1) {
-        nav.push({ text: 'Next ▶', callback_data: `rev_${exam.id}_${page + 1}` });
+        nav.push({ text: 'Next ▶', callback_data: `revatt_${attempt.id}_${page + 1}` });
       }
       if (nav.length) keyboard.push(nav);
-      keyboard.push([{ text: '📊 Score summary', callback_data: `rev_${exam.id}_sum` }]);
+      keyboard.push([{ text: '📊 Score summary', callback_data: `revatt_${attempt.id}_sum` }]);
     }
   } else {
     text += `🔒 Results are hidden by the teacher for now.\n`;
   }
 
+  if (attempt.isOfficial !== false) {
+    keyboard.push([{ text: '🏆 Leaderboard', callback_data: `lb_exam_${exam.id}` }]);
+  } else {
+    keyboard.push([{ text: '🔁 Practice again', callback_data: `reattempt_${exam.id}` }]);
+  }
+  keyboard.push([{ text: '📊 My Results', callback_data: 'btn_results' }]);
   keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
-  keyboard.push([{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]);
-  keyboard.push([{ text: '🔁 Reattempt (practice)', callback_data: `reattempt_${exam.id}` }]);
   keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
-  // Hard safety: never exceed Telegram limit in one edit
   if (text.length > 3900) {
     text = text.slice(0, 3890) + '\n…';
   }
@@ -1134,10 +1260,11 @@ function renderStudentResults(student: Student): SimulatorResponse {
     }
     text += line;
     if (exam && exam.resultVisibility === 'PUBLISHED') {
+      const kind = att.isOfficial === false ? 'Practice' : 'Official';
       keyboard.push([
         {
-          text: `📖 ${idx + 1}. ${(title || 'Exam').slice(0, 28)}`,
-          callback_data: `rev_${att.examId}_sum`,
+          text: `📖 ${idx + 1}. ${(title || 'Exam').slice(0, 22)} (${kind})`,
+          callback_data: `revatt_${att.id}_sum`,
         },
       ]);
     }
@@ -1165,69 +1292,142 @@ function matchesClass(studentClass?: string, examClass?: string): boolean {
   return s === e;
 }
 
-function renderStudentLeaderboard(student: Student, showAll = false): SimulatorResponse {
-  const myExamIds = [...new Set(
-    store.getAttempts().filter(a => a.telegramUserId === student.telegramUserId || a.studentId === student.studentId).map(a => a.examId)
-  )];
-  const exams = myExamIds.map(id => store.getExamById(id)).filter((e): e is Exam => !!e && isExamTimeEnded(e));
+function renderLeaderboardExamPicker(student: Student): SimulatorResponse {
+  const myExamIds = [
+    ...new Set(
+      store
+        .getAttempts()
+        .filter(
+          (a) =>
+            a.telegramUserId === student.telegramUserId || a.studentId === student.studentId
+        )
+        .map((a) => a.examId)
+    ),
+  ];
+  const exams = myExamIds
+    .map((id) => store.getExamById(id))
+    .filter((e): e is Exam => !!e && isExamTimeEnded(e));
 
   if (exams.length === 0) {
     return {
       chatId: student.telegramUserId!,
-      text: `🏆 *Leaderboard*\n\nRankings appear only *after an exam ends*.`,
-      replyMarkup: { inline_keyboard: [
-        [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
-        [{ text: '📚 My Exams', callback_data: 'btn_exams' }]
-      ] },
-      type: 'editMessageText'
+      text:
+        `🏆 *Leaderboard*\n\n` +
+        `Rankings appear only *after an exam ends*.\n` +
+        `Official attempts only.`,
+      replyMarkup: {
+        inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]],
+      },
+      type: 'editMessageText',
     };
   }
 
-  let text = `🏆 *Leaderboard*\n_(First attempt only)_\n\n`;
-  let hasMore = false;
+  let text = `🏆 *Leaderboard*\n\n_Select an exam to view rankings (official attempts only)._\n\n`;
   const keyboard: InlineKeyboardButton[][] = [];
-
-  exams.forEach((exam) => {
-    text += `📝 *${exam.title}*\n`;
-    const attempts = store.getAttempts(exam.id)
-      .filter(a => (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false)
-      .slice()
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        if (a.timeTakenSeconds !== b.timeTakenSeconds) return a.timeTakenSeconds - b.timeTakenSeconds;
-        return 0;
-      });
-
-    if (attempts.length === 0) {
-      text += `   _No ranked submissions._\n\n`;
-      return;
-    }
-    const limit = showAll ? attempts.length : 10;
-    if (!showAll && attempts.length > 10) hasMore = true;
-    attempts.slice(0, limit).forEach((att, idx) => {
-      const rankNum = att.rank || (idx + 1);
-      const medal = rankNum === 1 ? '🥇' : rankNum === 2 ? '🥈' : rankNum === 3 ? '🥉' : `#${rankNum}`;
-      const isMe = (att.telegramUserId === student.telegramUserId || att.studentId === student.studentId) ? ' (You)' : '';
-      text += `   ${medal} ${att.studentName}${isMe} — *${att.score}* (${att.percentage}%)\n`;
-    });
-    if (!showAll && attempts.length > 10) {
-      text += `   _…and ${attempts.length - 10} more_\n`;
-    }
-    text += `\n`;
+  exams.forEach((exam, idx) => {
+    keyboard.push([
+      {
+        text: `${idx + 1}. ${(exam.title || 'Exam').slice(0, 40)}`,
+        callback_data: `lb_exam_${exam.id}`,
+      },
+    ]);
   });
-
-  if (hasMore && !showAll) {
-    keyboard.push([{ text: 'Show full leaderboard', callback_data: 'leaderboard_more' }]);
-  }
-  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
   keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
 
   return {
     chatId: student.telegramUserId!,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    type: 'editMessageText'
+    type: 'editMessageText',
   };
+}
+
+function renderExamLeaderboard(
+  examId: string,
+  student: Student,
+  showAll = false
+): SimulatorResponse {
+  const exam = store.getExamById(examId);
+  if (!exam) {
+    return {
+      chatId: student.telegramUserId!,
+      text: '❌ Exam not found.',
+      replyMarkup: {
+        inline_keyboard: [[{ text: '🏆 Leaderboard', callback_data: 'btn_leaderboard' }]],
+      },
+      type: 'editMessageText',
+    };
+  }
+
+  if (!isExamTimeEnded(exam)) {
+    return {
+      chatId: student.telegramUserId!,
+      text:
+        `🏆 *${escapeMd(exam.title)}*\n\n` +
+        `Rankings unlock after the exam time ends.`,
+      replyMarkup: {
+        inline_keyboard: [
+          [{ text: '🏆 Other exams', callback_data: 'btn_leaderboard' }],
+          [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
+        ],
+      },
+      type: 'editMessageText',
+    };
+  }
+
+  const attempts = store
+    .getAttempts(exam.id)
+    .filter(
+      (a) =>
+        (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false
+    )
+    .slice()
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.timeTakenSeconds !== b.timeTakenSeconds) return a.timeTakenSeconds - b.timeTakenSeconds;
+      return 0;
+    });
+
+  let text = `🏆 *${escapeMd(exam.title)}*\n_Official attempts only_\n\n`;
+  const keyboard: InlineKeyboardButton[][] = [];
+
+  if (attempts.length === 0) {
+    text += `_No ranked submissions yet._`;
+  } else {
+    const limit = showAll ? attempts.length : 10;
+    attempts.slice(0, limit).forEach((att, idx) => {
+      const rankNum = att.rank || idx + 1;
+      const medal =
+        rankNum === 1 ? '🥇' : rankNum === 2 ? '🥈' : rankNum === 3 ? '🥉' : `#${rankNum}`;
+      const isMe =
+        att.telegramUserId === student.telegramUserId || att.studentId === student.studentId
+          ? ' *(You)*'
+          : '';
+      text += `${medal} ${escapeMd(att.studentName)}${isMe} — *${att.score}/${att.maxScore}*\n`;
+    });
+    if (!showAll && attempts.length > 10) {
+      text += `\n_…and ${attempts.length - 10} more_`;
+      keyboard.push([{ text: 'Show full ranking', callback_data: `lb_more_${exam.id}` }]);
+    }
+  }
+
+  keyboard.push([{ text: '🏆 Other exams', callback_data: 'btn_leaderboard' }]);
+  keyboard.push([{ text: '📚 My Exams', callback_data: 'btn_exams' }]);
+  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+
+  if (text.length > 3900) text = text.slice(0, 3890) + '\n…';
+
+  return {
+    chatId: student.telegramUserId!,
+    text,
+    replyMarkup: { inline_keyboard: keyboard },
+    type: 'editMessageText',
+  };
+}
+
+/** @deprecated — kept for any legacy callback; redirects to picker */
+function renderStudentLeaderboard(student: Student, _showAll = false): SimulatorResponse {
+  return renderLeaderboardExamPicker(student);
 }
 
 export async function sendTelegramResponse(resp: SimulatorResponse): Promise<void> {
