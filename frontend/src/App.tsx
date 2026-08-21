@@ -4,6 +4,7 @@ import { ProtectedRoute } from './components/routing/ProtectedRoute';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { Login } from './components/Login';
 import { getToken } from './api';
+import { HomeSkeleton } from './components/ui/HomeSkeleton';
 
 const HomePage = lazy(() => import('./pages/routePages').then((m) => ({ default: m.HomePage })));
 const ExamsPage = lazy(() => import('./pages/routePages').then((m) => ({ default: m.ExamsPage })));
@@ -41,8 +42,8 @@ function NotFound() {
 
 function LazyFallback() {
   return (
-    <div className="min-h-[40vh] flex items-center justify-center">
-      <div className="w-8 h-8 rounded-xl border-2 border-blue-200 border-t-blue-600 animate-spin" />
+    <div className="max-w-3xl mx-auto px-4 pt-3">
+      <HomeSkeleton />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
   useInvalidateDashboard,
   dashboardKeys,
 } from '../../hooks/useDashboardData';
+import { HomeSkeleton, PageSkeleton } from '../ui/HomeSkeleton';
 
 const nav = [
   { to: '/', label: 'Home', Icon: IconHome, end: true },
@@ -23,12 +24,8 @@ const nav = [
 ] as const;
 
 function RouteFallback() {
-  return (
-    <div className="py-24 text-center">
-      <div className="mx-auto w-8 h-8 rounded-xl border-2 border-blue-200 border-t-blue-600 animate-spin" />
-      <div className="mt-3 text-sm text-slate-500">Loading…</div>
-    </div>
-  );
+  // Prefer homepage skeleton for initial load / route suspense
+  return <HomeSkeleton />;
 }
 
 export function DashboardLayout() {
@@ -162,7 +159,11 @@ export function DashboardLayout() {
 
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 pt-3 safe-pb">
         {isLoading && exams.length === 0 ? (
-          <RouteFallback />
+          location.pathname === '/' || location.pathname === '' ? (
+            <HomeSkeleton />
+          ) : (
+            <PageSkeleton />
+          )
         ) : isError && exams.length === 0 ? (
           <div className="py-16 text-center text-sm text-slate-600">
             <p className="mb-3">{(error as Error)?.message || 'Failed to load'}</p>
