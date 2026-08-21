@@ -502,11 +502,12 @@ This name will appear on results and the leaderboard.`,
       response = await handleFinalSubmit(examId, student, user);
     }
 
-    // Keep single-chat edits for pure inline (MCQ). ReplyKeyboard needs sendMessage.
-    if (response && cbMessageId && !response.replyKeyboard) {
+    // Keep single-chat edits for pure inline (MCQ). ReplyKeyboard / remove needs sendMessage.
+    const needsSendKb = Boolean(response?.replyKeyboard);
+    if (response && cbMessageId && !needsSendKb) {
       response.messageId = cbMessageId;
       response.type = 'editMessageText';
-    } else if (response && response.replyKeyboard) {
+    } else if (response && needsSendKb) {
       response.type = 'sendMessage';
       delete (response as any).messageId;
     }
@@ -1134,7 +1135,7 @@ async function renderQuestionView(
   });
 
   const messageId = prevSess?.lastMessageId;
-  // Prefer edit-in-place when we have a prior message id
+  // Prefer edit-in-place when we have a prior message id (inline only)
   if (messageId && opts.refreshKeyboard !== true) {
     return {
       chatId: user.id,
@@ -1144,10 +1145,13 @@ async function renderQuestionView(
       type: 'editMessageText',
     };
   }
+  // Entering exam: one send that REMOVES the sticky bottom menu (Continue/View Result/…)
+  // and shows question + A–D + Prev/Next/Grid/Submit under the message.
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
+    replyKeyboard: { remove_keyboard: true },
     type: 'sendMessage',
   };
 }
