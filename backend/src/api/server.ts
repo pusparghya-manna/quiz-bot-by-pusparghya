@@ -14,6 +14,7 @@ import { parseQuestionsFromMedia } from '../services/geminiOcr.js';
 import { Exam, Question, Student } from '../types/index.js';
 import { effectiveExamStatus, withEffectiveStatus } from '../examStatus.js';
 import { enqueueBroadcast } from '../jobs/broadcastQueue.js';
+import { l1Cache, tenantKey, invalidateTeacherCache } from '../cache/l1Cache.js';
 dotenv.config();
 
 async function startServer(app?: import('express').Express) {
@@ -62,63 +63,78 @@ async function startServer(app?: import('express').Express) {
     return authMiddleware(req, res, next);
   });
 
-  // 1. Dashboard Overview Stats & Complete Data Batch
-  app.get('/api/data', (req, res) => {
+  // 1. Dashboard Overview Stats & Complete Data Batch (tenant-scoped L1 cache)
+  app.get('/api/data', async (req, res) => {
     const teacher = (req as any).teacher;
     const teacherId = teacher?.username as string | undefined;
-    // Strict isolation: only this teacher's exams
-    let exams = store.getExams();
-    if (teacherId) {
-      exams = exams.filter((e: any) => e.teacherId === teacherId);
-    } else {
-      exams = [];
+    try {
+      const payload = await l1Cache.getOrSet(
+        tenantKey(teacherId || '', 'dashboard-data'),
+        12_000,
+        () => {
+          let exams = store.getExams();
+          if (teacherId) {
+            exams = exams.filter((e: any) => e.teacherId === teacherId);
+          } else {
+            exams = [];
+          }
+          exams = exams.map((e: any) => withEffectiveStatus(e));
+          const examIds = new Set(exams.map((e: any) => e.id));
+          const attempts = store.getAttempts().filter((a: any) => examIds.has(a.examId));
+          const attemptTgIds = new Set<number>();
+          const attemptStudentIds = new Set<string>();
+          for (const a of attempts) {
+            if (a.telegramUserId) attemptTgIds.add(Number(a.telegramUserId));
+            if (a.studentId) attemptStudentIds.add(String(a.studentId));
+          }
+          let students = store.getStudents();
+          if (teacherId) {
+            students = students.filter((s: any) => {
+              if (Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId)) return true;
+              if (s.telegramUserId && attemptTgIds.has(Number(s.telegramUserId))) return true;
+              if (s.studentId && attemptStudentIds.has(String(s.studentId))) return true;
+              return false;
+            });
+            const seen = new Set<string>();
+            students = students.filter((s: any) => {
+              const key = s.telegramUserId ? `tg:${s.telegramUserId}` : `id:${s.id}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+          } else {
+            students = [];
+          }
+          const rawSettings = store.getSettings();
+          const settings = {
+            ...rawSettings,
+            telegramBotToken: rawSettings.telegramBotToken ? '••••••••' : '',
+            botUsername: rawSettings.botUsername || '@quizbotbypusparghya_bot',
+            botActive: true,
+          };
+          return {
+            exams,
+            questions: [],
+            students,
+            attempts,
+            settings,
+            auditLogs: store
+              .getAuditLogs()
+              .filter(
+                (l: any) =>
+                  !teacherId ||
+                  (l.details || '').includes(teacherId) ||
+                  l.actor === teacherId
+              )
+              .slice(0, 30),
+          };
+        }
+      );
+      res.json(payload);
+    } catch (e: any) {
+      console.error('[api/data]', e?.message || e);
+      res.status(500).json({ error: 'Failed to load dashboard data' });
     }
-    exams = exams.map((e: any) => withEffectiveStatus(e));
-    const examIds = new Set(exams.map((e: any) => e.id));
-    // Single pass over attempts for this teacher
-    const attempts = store.getAttempts().filter((a: any) => examIds.has(a.examId));
-    const attemptTgIds = new Set<number>();
-    const attemptStudentIds = new Set<string>();
-    for (const a of attempts) {
-      if (a.telegramUserId) attemptTgIds.add(Number(a.telegramUserId));
-      if (a.studentId) attemptStudentIds.add(String(a.studentId));
-    }
-    // Students linked to this teacher only — O(n) with Sets (no nested .some)
-    let students = store.getStudents();
-    if (teacherId) {
-      students = students.filter((s: any) => {
-        if (Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId)) return true;
-        if (s.telegramUserId && attemptTgIds.has(Number(s.telegramUserId))) return true;
-        if (s.studentId && attemptStudentIds.has(String(s.studentId))) return true;
-        return false;
-      });
-      const seen = new Set<string>();
-      students = students.filter((s: any) => {
-        const key = s.telegramUserId ? `tg:${s.telegramUserId}` : `id:${s.id}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    } else {
-      students = [];
-    }
-    // Shared bot settings (token from env preferred)
-    const rawSettings = store.getSettings();
-    const settings = {
-      ...rawSettings,
-      // Never expose full bot token to the browser
-      telegramBotToken: rawSettings.telegramBotToken ? '••••••••' : '',
-      botUsername: rawSettings.botUsername || '@quizbotbypusparghya_bot',
-      botActive: true
-    };
-    res.json({
-      exams,
-      questions: [],
-      students,
-      attempts,
-      settings,
-      auditLogs: store.getAuditLogs().filter((l: any) => !teacherId || (l.details || '').includes(teacherId) || l.actor === teacherId).slice(0, 30)
-    });
   });
 
   app.post('/api/reseed', (req, res) => {
@@ -218,6 +234,7 @@ async function startServer(app?: import('express').Express) {
     };
 
     await store.saveExam(newExam);
+        try { const tid = (req as any).teacher?.username; if (tid) invalidateTeacherCache(tid); } catch {}
     await store.addAuditLog('EXAM_CREATED', `Created exam "${newExam.title}" for ${newExam.className}`, teacherId);
     res.json(withEffectiveStatus(newExam));
   });
@@ -244,6 +261,7 @@ async function startServer(app?: import('express').Express) {
     updated.status = effectiveExamStatus(updated);
 
     await store.saveExam(updated);
+        try { const tid = (req as any).teacher?.username; if (tid) invalidateTeacherCache(tid); } catch {}
     await store.addAuditLog('EXAM_UPDATED', `Updated exam "${updated.title}" (${updated.status})`, teacherId);
     res.json(withEffectiveStatus(updated));
   });
@@ -254,6 +272,7 @@ async function startServer(app?: import('express').Express) {
     const exam = getOwnedExam(req.params.id, teacherId);
     if (!exam) return res.status(404).json({ error: 'Exam not found' });
     await store.deleteExam(req.params.id);
+    try { const tid = (req as any).teacher?.username; if (tid) invalidateTeacherCache(tid); } catch {}
     await store.addAuditLog('EXAM_DELETED', `Deleted exam "${exam.title}"`, teacherId);
     return res.json({ success: true });
   });

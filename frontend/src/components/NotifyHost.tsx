@@ -5,7 +5,10 @@ import { IconCheck, IconAlert, IconInfo, IconClose } from '../icons';
 
 export function NotifyHost() {
   const [, setTick] = useState(0);
-  useEffect(() => subscribeNotify(() => setTick((n) => n + 1)), []);
+  useEffect(() => {
+    const unsub = subscribeNotify(() => setTick((n) => n + 1));
+    return () => { unsub?.(); };
+  }, []);
 
   const toasts = getToasts();
   const confirm = getConfirm();

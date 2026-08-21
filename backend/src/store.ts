@@ -200,16 +200,22 @@ class Store {
       }
     }
 
-    // Students (cap relationship queries)
-    const sres = await db.execute('SELECT * FROM students');
+    // Students — one query for links (no N+1)
+    const sres = await db.execute(
+      'SELECT id, student_code, name, class_name, telegram_user_id, telegram_username, link_code, status, joined_at FROM students'
+    );
+    const linkRes = await db.execute('SELECT student_id, teacher_id FROM student_teachers');
+    const linksByStudent = new Map<string, string[]>();
+    for (const row of linkRes.rows as any[]) {
+      const sid = String(row.student_id);
+      if (!linksByStudent.has(sid)) linksByStudent.set(sid, []);
+      linksByStudent.get(sid)!.push(String(row.teacher_id));
+    }
     this.data.students = [];
     for (const r of sres.rows as any[]) {
-      const tres = await db.execute({
-        sql: 'SELECT teacher_id FROM student_teachers WHERE student_id = ?',
-        args: [r.id],
-      });
+      const id = String(r.id);
       this.data.students.push({
-        id: String(r.id),
+        id,
         studentId: String(r.student_code),
         name: String(r.name),
         className: r.class_name ? String(r.class_name) : undefined,
@@ -218,7 +224,7 @@ class Store {
         linkCode: r.link_code ? String(r.link_code) : undefined,
         status: (r.status as any) || 'ACTIVE',
         joinedAt: r.joined_at ? String(r.joined_at) : undefined,
-        teacherIds: (tres.rows as any[]).map((t) => String(t.teacher_id)),
+        teacherIds: linksByStudent.get(id) || [],
       });
     }
 

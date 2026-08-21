@@ -15,10 +15,10 @@ import {
   IconChevronDown, IconClock, IconExam, IconUsers, IconBook
 } from '../icons';
 
-export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUsername: string; onRefresh: () => void }) {
+export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }: { exams: Exam[]; botUsername: string; onRefresh: () => void; defaultOpenNew?: boolean }) {
   const [shareLink, setShareLink] = useState('');
   const [search, setSearch] = useState('');
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!defaultOpenNew);
   const [editId, setEditId] = useState<string | null>(null);
   const [step, setStep] = useState<'info' | 'questions' | 'review'>('info');
   const [saving, setSaving] = useState(false);
@@ -32,7 +32,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
   const [editQ, setEditQ] = useState<Question | null>(null);
   const [jsonText, setJsonText] = useState('');
   const [ocrBusy, setOcrBusy] = useState(false);
-  const [toast, setToast] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
   const examLink = (id: string) => {
     const u = (botUsername || '').replace(/^@/, '').trim() || 'YourBot';
     return `https://t.me/${u}?start=exam_${id}`;
@@ -56,7 +56,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
       await navigator.clipboard.writeText(link);
       toastSuccess('Link ready below (also copied)');
     } catch {
-      toast('Link ready below — use Copy or Share');
+      toastSuccess('Link ready below — use Copy or Share');
     }
   };
 
@@ -70,7 +70,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
         });
         return;
       }
-      toast('System share not supported on this device — use Copy link');
+      toastSuccess('System share not supported on this device — use Copy link');
     } catch {
       /* cancelled */
     }
@@ -193,8 +193,8 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
       setQs((prev) => [...prev, ...mapped.filter((q) => q.question)]);
       setJsonText('');
       setQMode('list');
-      setToast(`Added ${mapped.length} questions`);
-      setTimeout(() => setToast(''), 2000);
+      setToastMsg(`Added ${mapped.length} questions`);
+      setTimeout(() => setToastMsg(''), 2000);
     } catch {
       toastError('Invalid JSON');
     }
@@ -202,7 +202,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
 
   const onOcr = async (file: File) => {
     setOcrBusy(true);
-    setToast('');
+    setToastMsg('');
     try {
       const b64: string = await new Promise((resolve, reject) => {
         const r = new FileReader();
@@ -229,8 +229,8 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
       }));
       setQs((prev) => [...prev, ...mapped.filter((q) => q.question)]);
       setQMode('list');
-      setToast(`OCR added ${mapped.length} questions — please review`);
-      setTimeout(() => setToast(''), 3000);
+      setToastMsg(`OCR added ${mapped.length} questions — please review`);
+      setTimeout(() => setToastMsg(''), 3000);
     } catch (e: any) {
       toastError(e.message || 'OCR failed');
     } finally {
@@ -393,7 +393,7 @@ export function Exams({ exams, botUsername, onRefresh }: { exams: Exam[]; botUse
                 ))}
               </div>
 
-              {toast && <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2"><IconCheck className="w-3.5 h-3.5 shrink-0" />{toast}</div>}
+              {toastMsg && <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2"><IconCheck className="w-3.5 h-3.5 shrink-0" />{toastMsg}</div>}
 
               {qMode === 'list' && (
                 <>
