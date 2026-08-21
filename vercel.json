@@ -1,8 +1,8 @@
 {
-  "buildCommand": "cd frontend && npm ci && npm run build",
+  "installCommand": "cd frontend && npm ci --registry=https://registry.npmjs.org",
+  "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "cd frontend && npm ci",
-  "framework": "vite",
+  "framework": null,
   "rewrites": [
     {
       "source": "/api/:path*",
