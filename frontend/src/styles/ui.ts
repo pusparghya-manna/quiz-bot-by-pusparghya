@@ -13,7 +13,7 @@ export const btnS = btn + ' bg-white text-slate-700 border border-slate-200 hove
 export const btnD = btn + ' text-red-600 hover:bg-red-50 px-2.5 py-1.5';
 export const card = 'bg-white rounded-xl border border-slate-200/80 shadow-sm';
 
-/** Field with leading icon (exam form) */
-export const inpIconWrap = 'flex items-center gap-2.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 sm:py-3 text-slate-900 transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15';
-export const inpBare = 'flex-1 min-w-0 bg-transparent outline-none text-[13px] sm:text-sm placeholder:text-slate-400';
-export const labelReq = 'text-[11px] sm:text-xs font-semibold text-slate-600 mb-1.5 block';
+/** Field with leading icon — compact for mobile 100% zoom */
+export const inpIconWrap = 'flex items-center gap-2 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 sm:py-2 text-slate-900 transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/10';
+export const inpBare = 'flex-1 min-w-0 bg-transparent outline-none text-[12px] sm:text-[13px] placeholder:text-slate-400';
+export const labelReq = 'text-[10px] sm:text-[11px] font-semibold text-slate-600 mb-1 block';

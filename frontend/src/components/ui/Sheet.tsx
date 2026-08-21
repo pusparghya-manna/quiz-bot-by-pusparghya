@@ -7,24 +7,24 @@ type Props = {
   icon?: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
+  /** Optional sticky footer (e.g. primary action) — stays visible while body scrolls */
+  footer?: React.ReactNode;
 };
 
 /**
- * Responsive modal/sheet:
- * - Portrait phone: bottom sheet, full width
- * - Landscape / tablet / desktop: centered card, larger max width
+ * Compact responsive sheet — fits 100% mobile Chrome zoom.
+ * z-index above bottom nav; no extra bottom margin wasted on nav clearance.
  */
-export function Sheet({ title, subtitle, icon, onClose, children }: Props) {
+export function Sheet({ title, subtitle, icon, onClose, children, footer }: Props) {
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 landscape:items-center landscape:p-3"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-3"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
       <div
-        className="absolute inset-0 bg-slate-900/45 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-slate-900/45 backdrop-blur-[1px]"
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -32,26 +32,28 @@ export function Sheet({ title, subtitle, icon, onClose, children }: Props) {
         }}
       />
       <div
-        className="relative w-full sm:max-w-lg md:max-w-xl landscape:max-w-2xl flex flex-col bg-white rounded-t-[1.25rem] sm:rounded-2xl landscape:rounded-2xl shadow-2xl shadow-slate-900/15 border border-slate-100/80"
+        className="relative w-full sm:max-w-md md:max-w-lg flex flex-col bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-100/80"
         style={{
-          maxHeight: 'min(92dvh, 92vh)',
-          marginBottom: 'max(4.25rem, env(safe-area-inset-bottom, 0px))',
+          // Use almost full viewport — sheet covers bottom nav (z-100 > z-40)
+          maxHeight: 'min(96dvh, 96vh)',
+          height: 'auto',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-start gap-3 border-b border-slate-100 bg-white px-4 py-3.5 sm:px-5 rounded-t-[1.25rem] sm:rounded-t-2xl shrink-0">
+        {/* Compact header */}
+        <div className="flex items-center gap-2.5 border-b border-slate-100 px-3 py-2.5 sm:px-4 sm:py-3 rounded-t-2xl shrink-0">
           {icon ? (
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 ring-1 ring-blue-100">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 ring-1 ring-blue-100">
               {icon}
             </div>
           ) : null}
-          <div className="min-w-0 flex-1 pt-0.5">
-            <h2 className="text-[15px] sm:text-base font-bold text-slate-900 leading-tight truncate">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[13px] sm:text-sm font-bold text-slate-900 leading-tight truncate">
               {title}
             </h2>
             {subtitle ? (
-              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate">{subtitle}</p>
+              <p className="text-[10px] text-slate-500 leading-tight truncate">{subtitle}</p>
             ) : null}
           </div>
           <button
@@ -61,18 +63,22 @@ export function Sheet({ title, subtitle, icon, onClose, children }: Props) {
               e.stopPropagation();
               onClose();
             }}
-            className="w-10 h-10 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-500 shrink-0 hover:bg-slate-100 active:scale-95 transition"
+            className="w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-500 shrink-0 active:bg-slate-100"
             aria-label="Close"
           >
-            <IconClose className="w-5 h-5" />
+            <IconClose className="w-4 h-4" />
           </button>
         </div>
-        <div
-          className="px-4 sm:px-5 py-4 overflow-y-auto flex-1 overscroll-contain"
-          style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom, 0px))' }}
-        >
+
+        <div className="px-3 sm:px-4 py-2.5 sm:py-3 overflow-y-auto flex-1 overscroll-contain min-h-0">
           {children}
         </div>
+
+        {footer ? (
+          <div className="shrink-0 border-t border-slate-100 px-3 sm:px-4 py-2.5 bg-white rounded-b-none sm:rounded-b-2xl">
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   );

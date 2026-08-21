@@ -337,11 +337,11 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
         <Sheet
           title={editId ? 'Edit exam' : 'New exam'}
           subtitle={editId ? 'Update exam details' : 'Create a new examination'}
-          icon={<IconEdit className="w-5 h-5" />}
+          icon={<IconEdit className="w-4 h-4" />}
           onClose={() => setOpen(false)}
         >
           {/* Stepper — matches design, responsive */}
-          <div className="mb-5">
+          <div className="mb-3">
             <div className="flex items-start justify-between gap-1 sm:gap-2 relative">
               <div className="absolute top-4 left-[12%] right-[12%] h-0.5 bg-slate-100 -z-0 hidden xs:block sm:block" aria-hidden />
               {([
@@ -361,7 +361,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                     className="relative z-[1] flex-1 flex flex-col items-center text-center min-w-0"
                   >
                     <span
-                      className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold border-2 transition ${
+                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-[11px] sm:text-xs font-bold border-2 transition ${
                         active
                           ? 'bg-white border-blue-600 text-blue-600 shadow-sm shadow-blue-600/20'
                           : done
@@ -371,7 +371,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                     >
                       {done && !active ? <IconCheck className="w-4 h-4" /> : s.n}
                     </span>
-                    <span className={`mt-1.5 text-[11px] sm:text-xs font-bold truncate w-full ${active ? 'text-blue-600' : 'text-slate-600'}`}>
+                    <span className={`mt-1 text-[10px] sm:text-[11px] font-bold truncate w-full ${active ? 'text-blue-600' : 'text-slate-600'}`}>
                       {s.label}
                     </span>
                     <span className="text-[9px] sm:text-[10px] text-slate-400 truncate w-full hidden sm:block">
@@ -381,7 +381,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                 );
               })}
             </div>
-            <div className="mt-3 h-1 rounded-full bg-slate-100 overflow-hidden">
+            <div className="mt-2 h-0.5 rounded-full bg-slate-100 overflow-hidden">
               <div
                 className="h-full bg-blue-600 rounded-full transition-all duration-300"
                 style={{
@@ -392,7 +392,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
           </div>
 
           {step === 'info' && (
-            <div className="space-y-3.5 sm:space-y-4">
+            <div className="space-y-2.5 sm:space-y-3">
               <div>
                 <label className={labelReq}>
                   Exam title <span className="text-red-500">*</span>
@@ -435,7 +435,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                 </datalist>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-3.5">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
                 <div>
                   <label className={labelReq}>
                     Class / group <span className="text-red-500">*</span>
@@ -481,7 +481,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-3.5">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
                 <div>
                   <label className={labelReq}>
                     Duration (minutes) <span className="text-red-500">*</span>
@@ -513,60 +513,58 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                 </div>
               </div>
 
-              <div className="space-y-2.5 pt-0.5">
+              <div className="space-y-1.5 pt-0.5">
                 <label
-                  className={`flex items-start gap-3 cursor-pointer rounded-xl border px-3.5 py-3 transition ${
+                  className={`flex items-center gap-2 cursor-pointer rounded-lg border px-2.5 py-2 transition ${
                     form.randomizeQuestions
                       ? 'border-blue-400 bg-blue-50/70 ring-1 ring-blue-200'
-                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                      : 'border-slate-200 bg-white'
                   }`}
                 >
                   <input
                     type="checkbox"
                     checked={form.randomizeQuestions}
                     onChange={(e) => setForm({ ...form, randomizeQuestions: e.target.checked })}
-                    className="mt-0.5 w-4 h-4 accent-blue-600 rounded"
+                    className="w-3.5 h-3.5 accent-blue-600 rounded shrink-0"
                   />
                   <span className="flex-1 min-w-0">
-                    <span className="flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
-                      <IconShuffle className="w-3.5 h-3.5 text-blue-600" />
+                    <span className="flex items-center gap-1 text-[12px] font-bold text-slate-800">
+                      <IconShuffle className="w-3 h-3 text-blue-600" />
                       Shuffle questions
                     </span>
-                    <span className="block text-[11px] text-slate-500 mt-0.5">
-                      Questions will be shown in random order
+                    <span className="block text-[9px] text-slate-500 leading-tight">
+                      Random question order
                     </span>
                   </span>
-                  <IconInfo className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                 </label>
                 <label
-                  className={`flex items-start gap-3 cursor-pointer rounded-xl border px-3.5 py-3 transition ${
+                  className={`flex items-center gap-2 cursor-pointer rounded-lg border px-2.5 py-2 transition ${
                     form.randomizeOptions
                       ? 'border-blue-400 bg-blue-50/70 ring-1 ring-blue-200'
-                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                      : 'border-slate-200 bg-white'
                   }`}
                 >
                   <input
                     type="checkbox"
                     checked={form.randomizeOptions}
                     onChange={(e) => setForm({ ...form, randomizeOptions: e.target.checked })}
-                    className="mt-0.5 w-4 h-4 accent-blue-600 rounded"
+                    className="w-3.5 h-3.5 accent-blue-600 rounded shrink-0"
                   />
                   <span className="flex-1 min-w-0">
-                    <span className="flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
-                      <IconShuffle className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="flex items-center gap-1 text-[12px] font-bold text-slate-800">
+                      <IconShuffle className="w-3 h-3 text-slate-500" />
                       Shuffle options
                     </span>
-                    <span className="block text-[11px] text-slate-500 mt-0.5">
-                      Options within each question will be shuffled
+                    <span className="block text-[9px] text-slate-500 leading-tight">
+                      Random option order
                     </span>
                   </span>
-                  <IconInfo className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                 </label>
               </div>
 
               <button
                 type="button"
-                className="w-full mt-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-3.5 shadow-md shadow-blue-600/25 active:scale-[0.99] transition"
+                className="w-full mt-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[13px] py-2.5 shadow-sm shadow-blue-600/20 active:scale-[0.99] transition"
                 onClick={() => setStep('questions')}
               >
                 Next: Questions →
