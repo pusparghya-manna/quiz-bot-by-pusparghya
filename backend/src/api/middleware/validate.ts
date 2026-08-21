@@ -1,6 +1,9 @@
-/** Escape Telegram Markdown V1 special characters in user-controlled text */
+/** Escape Telegram legacy Markdown special characters in user-controlled text.
+ *  Legacy Markdown (parse_mode=Markdown) only treats _ * ` [ as markup.
+ *  Do NOT escape () — that produces visible backslash-paren in MCQ text.
+ */
 export function escapeMd(text: string): string {
-  return String(text || '').replace(/([_*`\[\]()])/g, '\\$1');
+  return String(text || '').replace(/([_*`\[\]])/g, '\\$1');
 }
 
 export function clampStr(s: unknown, max: number): string {

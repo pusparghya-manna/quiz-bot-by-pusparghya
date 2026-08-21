@@ -8,7 +8,7 @@ import { escapeMd, csvCell, isSafeUsername } from '../middleware/validate.js';
 assert.equal(escapeMd('hello'), 'hello');
 assert.equal(escapeMd('a_b*c'), 'a\\_b\\*c');
 assert.ok(escapeMd('x`y[z]').includes('\\`'));
-assert.ok(escapeMd('(test)').includes('\\('));
+assert.equal(escapeMd('(test)'), '(test)'); // () not escaped in legacy Markdown
 
 // CSV formula injection + quoting
 assert.equal(csvCell('normal'), '"normal"');
