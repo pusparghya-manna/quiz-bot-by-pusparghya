@@ -1,5 +1,10 @@
 import { store } from '../store.js';
 import { processTelegramUpdate, sendTelegramResponse } from './bot.js';
+import {
+  classifySlowCallback,
+  sendLoadingEdit,
+  answerCallbackLoading,
+} from './loadingFeedback.js';
 
 let isPollingRunning = false;
 
@@ -54,13 +59,34 @@ export function startTelegramPolling() {
           for (const update of data.result) {
             offset = update.update_id + 1;
 
-            // Unblock Telegram client spinner immediately
-            if (update.callback_query?.id) {
-              fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ callback_query_id: update.callback_query.id }),
-              }).catch(() => {});
+            const cb = update.callback_query;
+            const slowKind = cb?.data ? classifySlowCallback(String(cb.data)) : null;
+
+            // Immediate toast on button (unblocks UI + shows "Submitting…")
+            if (cb?.id) {
+              if (slowKind) {
+                void answerCallbackLoading(token, cb.id, slowKind);
+              } else {
+                fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ callback_query_id: cb.id }),
+                }).catch(() => {});
+              }
+            }
+
+            // Interim message body for slow ops so chat isn't frozen
+            if (slowKind && cb) {
+              const chatId = cb.message?.chat?.id || cb.from?.id;
+              const messageId = cb.message?.message_id;
+              if (chatId) {
+                void sendLoadingEdit({
+                  token,
+                  chatId: Number(chatId),
+                  messageId: messageId ? Number(messageId) : undefined,
+                  kind: slowKind,
+                });
+              }
             }
 
             try {

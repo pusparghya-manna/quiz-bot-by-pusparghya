@@ -1,9 +1,10 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ProtectedRoute } from './components/routing/ProtectedRoute';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { Login } from './components/Login';
 import { getToken } from './api';
+import { NotFound } from './pages/NotFound';
 import { HomeSkeleton } from './components/ui/HomeSkeleton';
 
 const HomePage = lazy(() => import('./pages/routePages').then((m) => ({ default: m.HomePage })));
@@ -25,18 +26,6 @@ function LoginRoute() {
         navigate(dest, { replace: true });
       }}
     />
-  );
-}
-
-function NotFound() {
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-slate-50">
-      <div className="text-4xl font-bold text-slate-800">404</div>
-      <p className="mt-2 text-sm text-slate-500">Page not found</p>
-      <Link to="/" className="mt-4 text-blue-600 text-sm font-semibold">
-        Go home
-      </Link>
-    </div>
   );
 }
 
