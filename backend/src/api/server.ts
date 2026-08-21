@@ -63,6 +63,52 @@ async function startServer(app?: import('express').Express) {
     return authMiddleware(req, res, next);
   });
 
+
+  /** Build tenant-scoped dashboard slices (shared by focused routes). */
+  function teacherExamSlice(teacherId: string | undefined) {
+    let exams = store.getExams();
+    if (teacherId) exams = exams.filter((e: any) => e.teacherId === teacherId);
+    else exams = [];
+    exams = exams.map((e: any) => withEffectiveStatus(e));
+    const examIds = new Set(exams.map((e: any) => e.id));
+    const attempts = store.getAttempts().filter((a: any) => examIds.has(a.examId));
+    const attemptTgIds = new Set<number>();
+    const attemptStudentIds = new Set<string>();
+    for (const a of attempts) {
+      if (a.telegramUserId) attemptTgIds.add(Number(a.telegramUserId));
+      if (a.studentId) attemptStudentIds.add(String(a.studentId));
+    }
+    let students = store.getStudents();
+    if (teacherId) {
+      students = students.filter((s: any) => {
+        if (Array.isArray(s.teacherIds) && s.teacherIds.includes(teacherId)) return true;
+        if (s.telegramUserId && attemptTgIds.has(Number(s.telegramUserId))) return true;
+        if (s.studentId && attemptStudentIds.has(String(s.studentId))) return true;
+        return false;
+      });
+      const seen = new Set<string>();
+      students = students.filter((s: any) => {
+        const key = s.telegramUserId ? `tg:${s.telegramUserId}` : `id:${s.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    } else {
+      students = [];
+    }
+    return { exams, attempts, students, examIds };
+  }
+
+  function publicSettings() {
+    const rawSettings = store.getSettings();
+    return {
+      ...rawSettings,
+      telegramBotToken: rawSettings.telegramBotToken ? '••••••••' : '',
+      botUsername: rawSettings.botUsername || '@quizbotbypusparghya_bot',
+      botActive: true,
+    };
+  }
+
   // 1. Dashboard Overview Stats & Complete Data Batch (tenant-scoped L1 cache)
   app.get('/api/data', async (req, res) => {
     const teacher = (req as any).teacher;
@@ -137,6 +183,124 @@ async function startServer(app?: import('express').Express) {
     }
   });
 
+
+  app.get('/api/dashboard/summary', async (req, res) => {
+    const teacherId = (req as any).teacher?.username as string | undefined;
+    try {
+      const payload = await l1Cache.getOrSet(tenantKey(teacherId || '', 'summary'), 12_000, () => {
+        const { exams, attempts, students } = teacherExamSlice(teacherId);
+        const live = exams.filter((e: any) => e.status === 'LIVE').length;
+        const done = attempts.filter(
+          (a: any) => a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED'
+        ).length;
+        return {
+          examCount: exams.length,
+          liveCount: live,
+          submissionCount: done,
+          studentCount: students.length,
+        };
+      });
+      res.json(payload);
+    } catch (e: any) {
+      res.status(500).json({ error: 'summary failed' });
+    }
+  });
+
+  app.get('/api/students', async (req, res) => {
+    const teacherId = (req as any).teacher?.username as string | undefined;
+    try {
+      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '200'), 10) || 200));
+      const offset = Math.max(0, parseInt(String(req.query.offset || '0'), 10) || 0);
+      const payload = await l1Cache.getOrSet(
+        tenantKey(teacherId || '', `students:${limit}:${offset}`),
+        12_000,
+        () => {
+          const { students } = teacherExamSlice(teacherId);
+          return {
+            students: students.slice(offset, offset + limit),
+            total: students.length,
+            limit,
+            offset,
+          };
+        }
+      );
+      res.json(payload);
+    } catch {
+      res.status(500).json({ error: 'students failed' });
+    }
+  });
+
+  app.get('/api/results', async (req, res) => {
+    const teacherId = (req as any).teacher?.username as string | undefined;
+    try {
+      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '200'), 10) || 200));
+      const offset = Math.max(0, parseInt(String(req.query.offset || '0'), 10) || 0);
+      const payload = await l1Cache.getOrSet(
+        tenantKey(teacherId || '', `results:${limit}:${offset}`),
+        10_000,
+        () => {
+          const { exams, attempts } = teacherExamSlice(teacherId);
+          // Strip heavy fields — no answer maps in list
+          const slim = attempts.slice(offset, offset + limit).map((a: any) => ({
+            id: a.id,
+            examId: a.examId,
+            studentId: a.studentId,
+            telegramUserId: a.telegramUserId,
+            studentName: a.studentName,
+            status: a.status,
+            score: a.score,
+            maxScore: a.maxScore,
+            percentage: a.percentage,
+            rank: a.rank,
+            isOfficial: a.isOfficial,
+            attemptNumber: a.attemptNumber,
+            submittedAt: a.submittedAt,
+            startedAt: a.startedAt,
+            timeTakenSeconds: a.timeTakenSeconds,
+          }));
+          return {
+            attempts: slim,
+            exams: exams.map((e: any) => ({
+              id: e.id,
+              title: e.title,
+              startDate: e.startDate,
+              durationMinutes: e.durationMinutes,
+              status: e.status,
+              totalMarks: e.totalMarks,
+            })),
+            total: attempts.length,
+            limit,
+            offset,
+          };
+        }
+      );
+      res.json(payload);
+    } catch {
+      res.status(500).json({ error: 'results failed' });
+    }
+  });
+
+  app.get('/api/settings', async (req, res) => {
+    const teacherId = (req as any).teacher?.username as string | undefined;
+    try {
+      const payload = await l1Cache.getOrSet(tenantKey(teacherId || '', 'settings'), 30_000, () => ({
+        settings: publicSettings(),
+        auditLogs: store
+          .getAuditLogs()
+          .filter(
+            (l: any) =>
+              !teacherId ||
+              (l.details || '').includes(teacherId) ||
+              l.actor === teacherId
+          )
+          .slice(0, 30),
+      }));
+      res.json(payload);
+    } catch {
+      res.status(500).json({ error: 'settings failed' });
+    }
+  });
+
   app.post('/api/reseed', (req, res) => {
     if (!env.enableDangerousReseed) {
       return res.status(403).json({ error: 'Reseed disabled. Set ENABLE_RESEED=true to allow.' });
@@ -176,21 +340,24 @@ async function startServer(app?: import('express').Express) {
   });
 
   // 2. Exams Management
-  app.get('/api/exams', (req, res) => {
-    const teacherId = requireTeacher(req, res);
-    if (!teacherId) return;
-    let exams = store.getExams().filter((e: any) => e.teacherId === teacherId);
-    const { className, status } = req.query;
-
-    if (className) {
-      exams = exams.filter(e => e.className === className);
+  app.get('/api/exams', async (req, res) => {
+    const teacherId = (req as any).teacher?.username as string | undefined;
+    try {
+      const payload = await l1Cache.getOrSet(tenantKey(teacherId || '', 'exams-list'), 12_000, () => {
+        const { exams } = teacherExamSlice(teacherId);
+        // List view without full question banks when possible
+        return {
+          exams: exams.map((e: any) => ({
+            ...e,
+            // keep questions for create/edit flows that expect them on full /api/data
+            questions: e.questions || [],
+          })),
+        };
+      });
+      res.json(payload);
+    } catch {
+      res.status(500).json({ error: 'exams failed' });
     }
-    if (status) {
-      exams = exams.filter(e => effectiveExamStatus(e) === status);
-    }
-    exams = exams.map(e => withEffectiveStatus(e));
-
-    res.json(exams);
   });
 
   app.get('/api/exams/:id', (req, res) => {

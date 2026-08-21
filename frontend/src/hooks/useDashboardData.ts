@@ -19,19 +19,32 @@ const defaultSettings: SystemSettings = {
   systemNotice: '',
 };
 
-export const dashboardQueryKey = ['dashboard', 'data'] as const;
+export const dashboardKeys = {
+  all: ['dashboard'] as const,
+  data: ['dashboard', 'data'] as const,
+  summary: ['dashboard', 'summary'] as const,
+  exams: ['exams'] as const,
+  students: ['students'] as const,
+  results: ['results'] as const,
+  settings: ['settings'] as const,
+};
+
+/** @deprecated use dashboardKeys.data */
+export const dashboardQueryKey = dashboardKeys.data;
+
+async function parseJson(res: Response) {
+  return res.json().catch(() => ({}));
+}
 
 async function fetchDashboard(): Promise<DashboardData> {
-  if (!getToken()) {
-    throw new Error('UNAUTHORIZED');
-  }
+  if (!getToken()) throw new Error('UNAUTHORIZED');
   const res = await api('/api/data');
   if (res.status === 401) {
     clearToken();
     throw new Error('UNAUTHORIZED');
   }
   if (!res.ok) {
-    const d = await res.json().catch(() => ({}));
+    const d = await parseJson(res);
     throw new Error((d as any).error || `Failed to load (${res.status})`);
   }
   const d = await res.json();
@@ -46,7 +59,7 @@ async function fetchDashboard(): Promise<DashboardData> {
 
 export function useDashboardData(enabled: boolean) {
   return useQuery({
-    queryKey: dashboardQueryKey,
+    queryKey: dashboardKeys.data,
     queryFn: fetchDashboard,
     enabled,
     staleTime: 30_000,
@@ -61,5 +74,93 @@ export function useDashboardData(enabled: boolean) {
 
 export function useInvalidateDashboard() {
   const qc = useQueryClient();
-  return () => qc.invalidateQueries({ queryKey: dashboardQueryKey });
+  return () => {
+    void qc.invalidateQueries({ queryKey: dashboardKeys.all });
+    void qc.invalidateQueries({ queryKey: dashboardKeys.exams });
+    void qc.invalidateQueries({ queryKey: dashboardKeys.students });
+    void qc.invalidateQueries({ queryKey: dashboardKeys.results });
+    void qc.invalidateQueries({ queryKey: dashboardKeys.settings });
+  };
+}
+
+/** Page-focused: exams list (falls back to dashboard cache slice). */
+export function useExamsQuery(enabled: boolean) {
+  const dash = useDashboardData(enabled);
+  return useQuery({
+    queryKey: dashboardKeys.exams,
+    enabled,
+    staleTime: 30_000,
+    queryFn: async () => {
+      if (!getToken()) throw new Error('UNAUTHORIZED');
+      const res = await api('/api/exams');
+      if (res.status === 401) {
+        clearToken();
+        throw new Error('UNAUTHORIZED');
+      }
+      if (res.ok) {
+        const d = await res.json();
+        return (d.exams || d) as Exam[];
+      }
+      // Fallback: dashboard bundle
+      const full = await fetchDashboard();
+      return full.exams;
+    },
+    initialData: dash.data?.exams,
+    initialDataUpdatedAt: dash.dataUpdatedAt,
+  });
+}
+
+export function useStudentsQuery(enabled: boolean) {
+  const dash = useDashboardData(enabled);
+  return useQuery({
+    queryKey: dashboardKeys.students,
+    enabled,
+    staleTime: 30_000,
+    queryFn: async () => {
+      if (!getToken()) throw new Error('UNAUTHORIZED');
+      const res = await api('/api/students');
+      if (res.status === 401) {
+        clearToken();
+        throw new Error('UNAUTHORIZED');
+      }
+      if (res.ok) {
+        const d = await res.json();
+        return (d.students || d) as Student[];
+      }
+      const full = await fetchDashboard();
+      return full.students;
+    },
+    initialData: dash.data?.students,
+    initialDataUpdatedAt: dash.dataUpdatedAt,
+  });
+}
+
+export function useResultsQuery(enabled: boolean) {
+  const dash = useDashboardData(enabled);
+  return useQuery({
+    queryKey: dashboardKeys.results,
+    enabled,
+    staleTime: 20_000,
+    queryFn: async () => {
+      if (!getToken()) throw new Error('UNAUTHORIZED');
+      const res = await api('/api/results');
+      if (res.status === 401) {
+        clearToken();
+        throw new Error('UNAUTHORIZED');
+      }
+      if (res.ok) {
+        const d = await res.json();
+        return {
+          attempts: (d.attempts || []) as Attempt[],
+          exams: (d.exams || []) as Exam[],
+        };
+      }
+      const full = await fetchDashboard();
+      return { attempts: full.attempts, exams: full.exams };
+    },
+    initialData: dash.data
+      ? { attempts: dash.data.attempts, exams: dash.data.exams }
+      : undefined,
+    initialDataUpdatedAt: dash.dataUpdatedAt,
+  });
 }
