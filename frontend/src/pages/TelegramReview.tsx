@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 
 type QStatus = 'correct' | 'wrong' | 'unattempted';
 type Filter = 'all' | 'correct' | 'wrong' | 'unattempted';
@@ -67,11 +67,6 @@ export default function TelegramReview() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
   const [bookmarks, setBookmarks] = useState<Record<string, boolean>>({});
-  const [gridCollapsed, setGridCollapsed] = useState(false);
-  const [gridManualOpen, setGridManualOpen] = useState(false);
-
-  const lastScrollY = useRef(0);
-  const scrollTicking = useRef(false);
 
   const attemptId = useMemo(() => {
     const q = new URLSearchParams(window.location.search);
@@ -130,43 +125,10 @@ export default function TelegramReview() {
     return data.questions.filter((q) => q.status === filter);
   }, [data, filter]);
 
-  const onScroll = useCallback(() => {
-    if (scrollTicking.current) return;
-    scrollTicking.current = true;
-    requestAnimationFrame(() => {
-      const y = window.scrollY || document.documentElement.scrollTop;
-      const prev = lastScrollY.current;
-      const delta = y - prev;
-
-      if (y < 48) {
-        setGridCollapsed(false);
-        setGridManualOpen(false);
-      } else if (delta > 8 && y > 80) {
-        // Scrolling down through questions — collapse grid for space
-        setGridCollapsed(true);
-        setGridManualOpen(false);
-      } else if (delta < -8) {
-        // Scrolling up — expand grid again
-        setGridCollapsed(false);
-      }
-
-      lastScrollY.current = y;
-      scrollTicking.current = false;
-    });
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [onScroll]);
 
   const jumpTo = (index: number) => {
     const el = document.getElementById(`q-${index}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setGridCollapsed(true);
-      setGridManualOpen(false);
-    }
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const toggleBookmark = (id: string) => {
@@ -194,8 +156,6 @@ export default function TelegramReview() {
 
   const { summary, exam, attempt } = data;
   const scorePct = Math.round(attempt.percentage ?? summary.accuracy ?? 0);
-  const showGrid = !gridCollapsed || gridManualOpen;
-
   return (
     <div style={s.shell}>
       {/* Header */}
@@ -256,75 +216,46 @@ export default function TelegramReview() {
         </div>
       </header>
 
-      {/* Sticky collapsible question grid */}
-      <div style={s.gridSticky}>
-        <button
-          type="button"
-          style={s.gridToggle}
-          onClick={() => {
-            if (gridCollapsed) {
-              setGridManualOpen(true);
-              setGridCollapsed(false);
-            } else {
-              setGridCollapsed(true);
-              setGridManualOpen(false);
-            }
-          }}
-        >
-          <span style={s.hintText}>
-            {showGrid
-              ? 'Scroll down to view all questions. Tap any question number to jump to it.'
-              : `Question grid hidden · ${filtered.length} questions · tap to expand`}
-          </span>
-          <span style={s.chevron}>{showGrid ? '▾' : '▸'}</span>
-        </button>
-
-        <div
-          style={{
-            ...s.gridWrap,
-            maxHeight: showGrid ? 220 : 0,
-            opacity: showGrid ? 1 : 0,
-            marginBottom: showGrid ? 8 : 0,
-          }}
-        >
-          <div style={s.grid}>
-            {filtered.map((q) => {
-              const bg =
-                q.status === 'correct'
-                  ? '#dcfce7'
-                  : q.status === 'wrong'
-                    ? '#fee2e2'
-                    : '#f1f5f9';
-              const color =
-                q.status === 'correct'
-                  ? '#15803d'
-                  : q.status === 'wrong'
-                    ? '#b91c1c'
-                    : '#64748b';
-              const border =
-                q.status === 'correct'
-                  ? '#86efac'
-                  : q.status === 'wrong'
-                    ? '#fca5a5'
-                    : '#e2e8f0';
-              return (
-                <button
-                  key={q.id}
-                  type="button"
-                  onClick={() => jumpTo(q.index)}
-                  style={{
-                    ...s.gridBtn,
-                    background: bg,
-                    color,
-                    borderColor: border,
-                  }}
-                  aria-label={`Go to question ${q.index + 1}`}
-                >
-                  {q.index + 1}
-                </button>
-              );
-            })}
-          </div>
+      {/* Question number grid */}
+      <div style={s.gridSection}>
+        <p style={s.gridHint}>Tap a question number to jump to it.</p>
+        <div style={s.grid}>
+          {filtered.map((q) => {
+            const bg =
+              q.status === 'correct'
+                ? '#dcfce7'
+                : q.status === 'wrong'
+                  ? '#fee2e2'
+                  : '#f1f5f9';
+            const color =
+              q.status === 'correct'
+                ? '#15803d'
+                : q.status === 'wrong'
+                  ? '#b91c1c'
+                  : '#64748b';
+            const border =
+              q.status === 'correct'
+                ? '#86efac'
+                : q.status === 'wrong'
+                  ? '#fca5a5'
+                  : '#e2e8f0';
+            return (
+              <button
+                key={q.id}
+                type="button"
+                onClick={() => jumpTo(q.index)}
+                style={{
+                  ...s.gridBtn,
+                  background: bg,
+                  color,
+                  borderColor: border,
+                }}
+                aria-label={`Go to question ${q.index + 1}`}
+              >
+                {q.index + 1}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -524,40 +455,15 @@ const s: Record<string, CSSProperties> = {
     textAlign: 'center',
     lineHeight: 1.25,
   },
-  gridSticky: {
-    position: 'sticky',
-    top: 0,
-    zIndex: 30,
+  gridSection: {
+    padding: '12px 12px 8px',
     background: '#f8fafc',
     borderBottom: '1px solid #e2e8f0',
-    padding: '0 12px',
   },
-  gridToggle: {
-    width: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    padding: '10px 4px',
-    border: 'none',
-    background: 'transparent',
-    cursor: 'pointer',
-    WebkitTapHighlightColor: 'transparent',
-  },
-  hintText: {
+  gridHint: {
+    margin: '0 0 8px',
     fontSize: 12,
     color: '#64748b',
-    textAlign: 'left',
-    lineHeight: 1.35,
-  },
-  chevron: {
-    fontSize: 14,
-    color: '#94a3b8',
-    flexShrink: 0,
-  },
-  gridWrap: {
-    overflow: 'hidden',
-    transition: 'max-height 0.28s ease, opacity 0.22s ease, margin 0.22s ease',
   },
   grid: {
     display: 'grid',
