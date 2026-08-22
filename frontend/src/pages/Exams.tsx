@@ -687,8 +687,8 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                     {ocrBusy ? (
                       <div className="space-y-1.5">
                         <p className="text-xs font-medium text-slate-700">
-                          {ocrPhase === 'extract' && 'Reading questions from photo…'}
-                          {ocrPhase === 'diagrams' && 'Locating diagrams for each question…'}
+                          {ocrPhase === 'extract' && 'Detecting question blocks on the page…'}
+                          {ocrPhase === 'diagrams' && 'Extracting text and cropping diagram questions…'}
                           {ocrPhase !== 'extract' && ocrPhase !== 'diagrams' && 'Processing…'}
                         </p>
                         <div className="h-1.5 w-full max-w-[200px] mx-auto rounded-full bg-slate-200 overflow-hidden">

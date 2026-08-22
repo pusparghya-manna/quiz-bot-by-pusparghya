@@ -76,8 +76,8 @@ export function normalizeBBox(
   if (top + h > imgHeight) h = imgHeight - top;
   if (w < 12 || h < 12) return null;
 
-  // Reject near-full-page crops (almost certainly wrong — whole question block)
-  if (w > imgWidth * 0.92 && h > imgHeight * 0.5) return null;
+  // Reject only near-entire-page crops (single question should never be the whole page)
+  if (w > imgWidth * 0.96 && h > imgHeight * 0.85) return null;
 
   // Reject thin horizontal strips (usually option text, not a diagram)
   if (w > imgWidth * 0.35 && h < imgHeight * 0.06) return null;

@@ -397,3 +397,151 @@ Return JSON only.`;
         : null,
   }));
 }
+
+
+export type QuestionLayoutItem = {
+  question_number: number | null;
+  type: 'image' | 'text';
+  /** Normalized 0–1000 absolute box on full page */
+  bbox: { x1: number; y1: number; x2: number; y2: number };
+};
+
+/**
+ * Layout-only pass: detect each question block + classify image vs text.
+ * AI returns coordinates only — backend crops with Sharp.
+ */
+export async function analyzePageLayout(
+  fileBase64: string,
+  mimeType: string
+): Promise<QuestionLayoutItem[]> {
+  const ai = createGeminiClient();
+  const imagePart = {
+    inlineData: {
+      mimeType: mimeType || 'image/jpeg',
+      data: fileBase64,
+    },
+  };
+
+  const prompt = `Analyze this full examination page image.
+
+For EVERY distinct multiple-choice question on the page, return:
+1. question_number — printed number if visible, else null
+2. type — "image" if the question has a diagram/figure/drawing needed to answer it; otherwise "text"
+3. bbox — the exact bounding box of the COMPLETE question block as {x1,y1,x2,y2}
+
+bbox rules (normalized 0–1000 on the FULL page):
+- (x1,y1) = top-left of this question block
+- (x2,y2) = bottom-right of this question block
+- Include: question number, stem text, ALL options (a/b/c/d), and any diagram/labels that belong to THIS question
+- Do NOT include neighboring questions
+- Boxes must not significantly overlap other questions
+- x1 < x2, y1 < y2, all values between 0 and 1000
+
+Order questions top-to-bottom (then left-to-right if two columns).
+
+Do NOT extract option text here. Do NOT generate or crop images. Coordinates only.`;
+
+  const modelCandidates = ocrModelCandidates();
+  let response: any = null;
+  let lastErr: any = null;
+
+  for (const model of modelCandidates) {
+    try {
+      response = await ai.models.generateContent({
+        model,
+        contents: { parts: [imagePart, { text: prompt }] },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              questions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question_number: { type: Type.NUMBER, nullable: true },
+                    type: { type: Type.STRING, description: 'image or text' },
+                    bbox: {
+                      type: Type.OBJECT,
+                      properties: {
+                        x1: { type: Type.NUMBER },
+                        y1: { type: Type.NUMBER },
+                        x2: { type: Type.NUMBER },
+                        y2: { type: Type.NUMBER },
+                      },
+                      required: ['x1', 'y1', 'x2', 'y2'],
+                    },
+                  },
+                  required: ['type', 'bbox'],
+                },
+              },
+            },
+            required: ['questions'],
+          },
+        },
+      });
+      console.log('[ocr] layout analysis model:', model);
+      lastErr = null;
+      break;
+    } catch (e: any) {
+      lastErr = e;
+      const msg = String(e?.message || e || '');
+      console.warn('[ocr] layout analysis failed:', model, msg.slice(0, 180));
+      if (!/high demand|UNAVAILABLE|503|429|resource exhausted|quota|timed out|timeout|unavailable/i.test(msg)) {
+        break;
+      }
+    }
+  }
+
+  if (!response) {
+    throw new Error(String(lastErr?.message || lastErr || 'Layout analysis failed'));
+  }
+
+  const text = response.text;
+  if (!text) return [];
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(parsed?.questions) ? parsed.questions : [];
+  const out: QuestionLayoutItem[] = [];
+  for (const r of rows) {
+    const b = r?.bbox;
+    if (!b) continue;
+    let x1 = Number(b.x1);
+    let y1 = Number(b.y1);
+    let x2 = Number(b.x2);
+    let y2 = Number(b.y2);
+    if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+    // normalize order
+    if (x2 < x1) [x1, x2] = [x2, x1];
+    if (y2 < y1) [y1, y2] = [y2, y1];
+    x1 = Math.max(0, Math.min(1000, x1));
+    y1 = Math.max(0, Math.min(1000, y1));
+    x2 = Math.max(0, Math.min(1000, x2));
+    y2 = Math.max(0, Math.min(1000, y2));
+    if (x2 - x1 < 5 || y2 - y1 < 5) continue;
+    const typ = String(r.type || '').toLowerCase() === 'image' ? 'image' : 'text';
+    out.push({
+      question_number: r.question_number != null && Number.isFinite(Number(r.question_number))
+        ? Number(r.question_number)
+        : null,
+      type: typ,
+      bbox: { x1, y1, x2, y2 },
+    });
+  }
+  return out;
+}
+
+/** Convert x1,y1,x2,y2 (0–1000) → {x,y,width,height} for Sharp normalizeBBox */
+export function bboxXYXYToXYWH(b: { x1: number; y1: number; x2: number; y2: number }) {
+  return {
+    x: b.x1,
+    y: b.y1,
+    width: Math.max(1, b.x2 - b.x1),
+    height: Math.max(1, b.y2 - b.y1),
+  };
+}

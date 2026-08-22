@@ -1355,8 +1355,22 @@ ${optionBox(letter, String(optText || ''), isSelected)}`;
   });
   const messageId = prevMessageId;
 
-  // Caption limit for Telegram photos is 1024 chars
-  const caption = text.length > 1000 ? text.slice(0, 997) + '…' : text;
+  // Caption limit for Telegram photos is 1024 chars.
+  // Image-type: photo is the full question block (stem + figure + options).
+  let caption = text;
+  if (photoFileId) {
+    const sel =
+      selectedOpt !== null && selectedOpt !== undefined && !Number.isNaN(Number(selectedOpt))
+        ? ` · Selected ${String.fromCharCode(65 + Number(selectedOpt))}`
+        : '';
+    caption =
+      `📝 <b>${escapeHtml(exam.title)}</b>
+` +
+      `⏱️ <b>${escapeHtml(remaining)}</b> left · Q${qIdx + 1}/${total}${sel}
+` +
+      `<i>Answer using A B C D below</i>`;
+  }
+  if (caption.length > 1000) caption = caption.slice(0, 997) + '…';
 
   if (messageId && !refreshKb) {
     // Same media kind → edit in place; cross kind → force new send (handler deletes old)

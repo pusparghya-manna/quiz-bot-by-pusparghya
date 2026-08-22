@@ -10,7 +10,11 @@ import { loginTeacher, registerTeacher, authMiddleware, ensureTeachersTable } fr
 import { store } from '../store.js';
 import { processTelegramUpdate, updateExamRanks, calculateAttemptScore, sendTelegramResponse } from '../telegram/bot.js';
 import { startTelegramPolling } from '../telegram/polling.js';
-import { parseQuestionsFromMedia, locateDiagramBboxes } from '../services/geminiOcr.js';
+import {
+    parseQuestionsFromMedia,
+    analyzePageLayout,
+    bboxXYXYToXYWH,
+  } from '../services/geminiOcr.js';
 import { attachCroppedImagesToOcrQuestions } from '../services/questionImageMedia.js';
 import { Exam, Question, Student } from '../types/index.js';
 import { effectiveExamStatus, withEffectiveStatus } from '../examStatus.js';
@@ -651,56 +655,65 @@ async function startServer(app?: import('express').Express) {
         return res.status(400).json({ error: 'fileBase64 string is required.' });
       }
 
-      const result = await parseQuestionsFromMedia(fileBase64, mimeType || 'image/jpeg');
-      const rawQuestions = Array.isArray(result?.questions) ? result.questions : Array.isArray(result) ? result : [];
+      // 1) Layout: question blocks + image/text classification (coordinates only)
+      let layout: Awaited<ReturnType<typeof analyzePageLayout>> = [];
+      try {
+        layout = await analyzePageLayout(fileBase64, mimeType || 'image/jpeg');
+      } catch (layoutErr: any) {
+        console.warn('[ocr] layout analysis failed, continuing with OCR only:', layoutErr?.message || layoutErr);
+      }
 
-      // First pass: keep text + has_image flags; clear OCR bboxes (not used for final crop)
-      for (const q of rawQuestions) {
-        if (q && typeof q === 'object') {
+      // 2) Text OCR for structured question data (existing extractor)
+      const result = await parseQuestionsFromMedia(fileBase64, mimeType || 'image/jpeg');
+      const rawQuestions = Array.isArray(result?.questions)
+        ? result.questions
+        : Array.isArray(result)
+          ? result
+          : [];
+
+      // 3) Merge layout → assign full-question bbox for image type; text keeps OCR only
+      const n = Math.max(rawQuestions.length, layout.length);
+      // Pad OCR list if layout found more blocks
+      while (rawQuestions.length < layout.length) {
+        rawQuestions.push({
+          question: '',
+          options: ['', '', '', ''],
+          answer: null,
+          marks: 1,
+          negativeMarks: 0,
+        });
+      }
+
+      for (let i = 0; i < rawQuestions.length; i++) {
+        const q = rawQuestions[i] || {};
+        // Match layout by question_number when possible, else by index order
+        let lay = layout.find(
+          (L) =>
+            L.question_number != null &&
+            q.question_number != null &&
+            Number(L.question_number) === Number(q.question_number)
+        );
+        if (!lay && i < layout.length) lay = layout[i];
+
+        if (lay) {
+          q.question_number = q.question_number ?? lay.question_number;
+          q.question_type = lay.type;
+          if (lay.type === 'image') {
+            q.has_image = true;
+            // Full question block for student photo display
+            q.image_bbox = bboxXYXYToXYWH(lay.bbox);
+          } else {
+            q.has_image = false;
+            q.image_bbox = null;
+          }
+        } else {
+          q.has_image = false;
           q.image_bbox = null;
         }
+        rawQuestions[i] = q;
       }
 
-      // Second pass: localize diagrams only when needed
-      const diagramTargets = rawQuestions
-        .map((q: any, index: number) => ({ q, index }))
-        .filter(({ q }) => q && (q.has_image === true || q.has_image === 'true'));
-
-      if (diagramTargets.length > 0) {
-        try {
-          const locations = await locateDiagramBboxes(
-            fileBase64,
-            mimeType || 'image/jpeg',
-            diagramTargets.map(({ q, index }) => ({
-              index,
-              question_number: q.question_number ?? q.questionNumber ?? null,
-              question: q.question || q.text || '',
-              options: Array.isArray(q.options) ? q.options : [],
-            }))
-          );
-          for (const loc of locations) {
-            const idx = Number(loc.question_index);
-            if (!Number.isFinite(idx) || idx < 0 || idx >= rawQuestions.length) continue;
-            if (loc.image_bbox) {
-              rawQuestions[idx].has_image = true;
-              rawQuestions[idx].image_bbox = loc.image_bbox;
-            } else {
-              rawQuestions[idx].has_image = false;
-              rawQuestions[idx].image_bbox = null;
-            }
-          }
-        } catch (locErr: any) {
-          console.warn('[ocr] diagram localization skipped:', locErr?.message || locErr);
-          // continue without images rather than failing whole OCR
-          for (const { index } of diagramTargets) {
-            if (rawQuestions[index]) {
-              rawQuestions[index].has_image = false;
-              rawQuestions[index].image_bbox = null;
-            }
-          }
-        }
-      }
-
+      // 4) Sharp crop original page for image-type questions only
       const { questions, imageErrors } = await attachCroppedImagesToOcrQuestions(
         fileBase64,
         mimeType || 'image/jpeg',
