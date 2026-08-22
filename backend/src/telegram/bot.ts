@@ -970,6 +970,7 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
   }
   inline.push([{ text: LABELS.examLb, callback_data: `lb_exam_${exam.id}` }]);
   inline.push([{ text: LABELS.backExams, callback_data: 'btn_exams' }]);
+  inline.push([{ text: LABELS.home, callback_data: 'btn_home' }]);
 
   if (student.telegramUserId) {
     setKbSession(student.telegramUserId, {
@@ -979,6 +980,8 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
     });
   }
 
+  // Inline actions are authoritative (always sent). ReplyKeyboard Main menu is applied
+  // only when it does not require dropping the inline buttons (see sendTelegramResponse).
   return {
     chatId: student.telegramUserId!,
     text: quote(body),
@@ -1891,6 +1894,14 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    * That path must not run for questions (they never pass both).
    */
   if (hasReplyKb && hasInline) {
+    /**
+     * INLINE FIRST. ReplyKeyboard-first caused exam-options actions to vanish when
+     * editMessageReplyMarkup failed (user saw only Main menu, no Continue/Start).
+     * Send content + InlineKeyboard in one shot so actions always appear.
+     * Then apply ReplyKeyboard (Main menu) without a second content message:
+     * reply_markup on a silent follow-up is optional; chat-level KB from prior
+     * screens often already suppresses the native keyboard.
+     */
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const raw = resp.text || '';
     if (
@@ -1900,56 +1911,27 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       mode = 'HTML';
     }
 
-    // 1) Chat-level Main menu (or whatever ReplyKeyboard) + screen text
     let r1 = await sendSafeTelegramMessage(token, chatId, raw, {
       parseMode: mode,
-      replyKeyboard: resp.replyKeyboard,
+      replyMarkup: resp.replyMarkup,
     });
     if (!r1.ok && mode) {
       r1 = await sendSafeTelegramMessage(token, chatId, raw, {
-        replyKeyboard: resp.replyKeyboard,
+        replyMarkup: resp.replyMarkup,
       });
       mode = undefined;
     }
     if (!r1.ok) {
-      // Fall back to inline-only so actions still work
-      const rOnly = await sendSafeTelegramMessage(token, chatId, raw, {
-        parseMode: mode,
-        replyMarkup: resp.replyMarkup,
-      });
-      if (rOnly.ok) rememberId(rOnly.messageIds);
+      console.warn('[Telegram] menu+inline send failed:', r1.error);
       return;
     }
     rememberId(r1.messageIds);
-    const mid = r1.messageIds?.[0];
-    if (!mid) return;
 
-    await new Promise((r) => setTimeout(r, 80));
-    try {
-      const res = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          message_id: mid,
-          reply_markup: resp.replyMarkup,
-        }),
-        signal: AbortSignal.timeout(5000),
-      });
-      const data: any = await res.json().catch(() => ({}));
-      if (!data?.ok) {
-        // Full text+inline edit
-        await sendSafeTelegramMessage(token, chatId, raw, {
-          parseMode: mode,
-          replyMarkup: resp.replyMarkup,
-          messageId: mid,
-          preferEdit: true,
-          editOnly: true,
-        });
-      }
-    } catch {
-      /* menu inline is best-effort */
-    }
+    // Apply Main-menu ReplyKeyboard without a visible extra bubble when possible:
+    // re-use nothing — Telegram requires sendMessage for ReplyKeyboard.
+    // Sending a blank carrier was rejected by product; skip it.
+    // Native keyboard stays closed if a ReplyKeyboard is already active in the chat
+    // (My Exams / Main menu from earlier). Inline Main menu covers exit either way.
     return;
   }
 
