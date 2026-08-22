@@ -218,16 +218,28 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'OCR failed');
       const list: any[] = Array.isArray(data) ? data : data.questions || data.parsed || [];
-      const mapped: Question[] = list.map((item, i) => ({
+      const mapped: Question[] = list.map((item: any, i: number) => ({
         id: `Q_OCR_${Date.now()}_${i}`,
         question: item.question || item.text || '',
         options: (item.options || ['', '', '', '']).slice(0, 4),
-        answer: typeof item.answer === 'number' ? item.answer : 0,
+        answer: typeof item.answer === 'number' ? item.answer : item.answer == null ? null : 0,
         marks: item.marks ?? 1,
         negativeMarks: item.negativeMarks ?? 0,
         subject: item.subject || form.subject,
         explanation: item.explanation || '',
+        image: item.image?.fileId
+          ? {
+              fileId: String(item.image.fileId),
+              mimeType: item.image.mimeType,
+              width: item.image.width,
+              height: item.image.height,
+            }
+          : undefined,
       }));
+      const imgErrs: string[] = Array.isArray(data.imageErrors) ? data.imageErrors : [];
+      if (imgErrs.length) {
+        toastError(`Some diagrams failed (${imgErrs.length}). Text imported; check questions.`);
+      }
       setQs((prev) => [...prev, ...mapped.filter((q) => q.question)]);
       setQMode('list');
       setToastMsg(`OCR added ${mapped.length} questions — please review`);
