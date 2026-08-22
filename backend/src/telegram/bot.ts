@@ -1195,16 +1195,19 @@ async function renderQuestionView(
   // No Main menu under exam message (per product request)
 
   const prevSess = getKbSession(user.id);
+  const refreshKb = opts.refreshKeyboard === true;
+  // On exam entry, drop prior message id so we send fresh + replace sticky exam-options keyboard
+  const messageId = refreshKb ? undefined : prevSess?.lastMessageId;
+
   setKbSession(user.id, {
     screen: 'in_exam',
     examId: exam.id,
     qIdx,
-    lastMessageId: prevSess?.lastMessageId,
+    lastMessageId: messageId,
   });
 
-  const messageId = prevSess?.lastMessageId;
-  // Prefer edit-in-place when we have a prior message id (inline only)
-  if (messageId && opts.refreshKeyboard !== true) {
+  // Answer / Next / Prev: edit same bubble (inline only) — bottom KB already Main menu
+  if (messageId && !refreshKb) {
     return {
       chatId: user.id,
       text,
@@ -1214,12 +1217,14 @@ async function renderQuestionView(
       type: 'editMessageText',
     };
   }
-  // Inline only — one message with A/B/C/D + nav. ReplyKeyboard stays from prior menu.
-  // Never combine replyKeyboard+inline here (that caused Q1 twice: once without buttons).
+
+  // Exam start / resume entry: replace Continue/View Result/… with Main menu only,
+  // then one question bubble with A–D (dual path in sendTelegramResponse).
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
+    replyKeyboard: kbMarkup([[LABELS.home]]),
     parseMode: 'HTML',
     type: 'sendMessage',
   };
