@@ -29,13 +29,38 @@ CRITICAL RULES:
 4. Default "marks" to 1 unless explicitly specified otherwise.
 5. Default "negativeMarks" to 0 unless explicitly specified otherwise.
 6. Extract EVERY single question accurately without skipping.
-7. IMAGE / DIAGRAM DETECTION:
-   - If a question includes a photograph, diagram, graph, chart, map, biological figure, chemical structure, or any visual that belongs to that question, set has_image=true.
-   - Provide image_bbox as pixel coordinates on THIS source image: { x, y, width, height } with origin at the top-left of the full page image.
-   - The bbox must tightly crop only that question's visual (not the whole page, not option text).
-   - Do NOT describe the diagram in text as a replacement for the image. Keep has_image/image_bbox instead.
-   - For text-only questions set has_image=false and image_bbox=null.
-8. question_number should be the printed number when visible.`;
+7. question_number should be the printed number when visible.
+
+IMAGE / DIAGRAM DETECTION (per question — be careful):
+For every question, carefully determine whether it contains an actual visual element such as a diagram, photograph, graph, chart, map, figure, illustration, chemical structure, or biological image.
+
+has_image / image_bbox rules:
+- If the question has NO actual visual element: set "has_image": false and "image_bbox": null.
+- If the question HAS a visual: set "has_image": true and provide "image_bbox".
+
+CRITICAL image_bbox CROPPING RULE:
+"image_bbox" must contain ONLY the actual visual/diagram belonging to that question.
+
+DO NOT include in image_bbox:
+- question number
+- question text
+- surrounding paragraphs
+- answer options A/B/C/D
+- unrelated text
+- content from neighboring questions
+
+The question text and options are separate JSON fields and must NOT be part of image_bbox.
+
+- If a diagram appears below the question text, crop only the diagram.
+- If it appears above or between parts of the question, crop only the visual itself.
+- If the diagram contains labels, arrows, legends, axis labels, annotations, or text that is physically part of the diagram, INCLUDE those in the crop.
+- Before returning image_bbox, verify the selected region actually contains a visual/diagram. If the region would contain only printed question text, it is INVALID — use has_image=false and image_bbox=null instead.
+- Do NOT use the bounding box of the entire question block as image_bbox.
+- Prioritize accurate visual boundaries over the question's text boundaries.
+- Coordinates must be relative to the ORIGINAL uploaded image dimensions (top-left origin). Do not use coordinates from a resized or internally scaled representation.
+- image_bbox format: { "x": number, "y": number, "width": number, "height": number }
+
+Do NOT convert the diagram into text and do NOT invent a replacement image. Preserve the original visual via bbox only.`;
 
   const imagePart = {
     inlineData: {
@@ -77,16 +102,19 @@ CRITICAL RULES:
                 subject: { type: Type.STRING, nullable: true },
                 has_image: {
                   type: Type.BOOLEAN,
-                  description: 'True when a diagram/photo/graph belongs to this question',
+                  description:
+                    'True only if this question has a real visual (diagram/photo/graph/chart/map/figure). False for text-only questions.',
                 },
                 image_bbox: {
                   type: Type.OBJECT,
                   nullable: true,
+                  description:
+                    'Pixel bbox of ONLY the diagram/photo on the original image (not question text, not options, not question number). null when has_image is false.',
                   properties: {
-                    x: { type: Type.NUMBER },
-                    y: { type: Type.NUMBER },
-                    width: { type: Type.NUMBER },
-                    height: { type: Type.NUMBER },
+                    x: { type: Type.NUMBER, description: 'Left edge in original image pixels' },
+                    y: { type: Type.NUMBER, description: 'Top edge in original image pixels' },
+                    width: { type: Type.NUMBER, description: 'Width of visual only in pixels' },
+                    height: { type: Type.NUMBER, description: 'Height of visual only in pixels' },
                   },
                   required: ['x', 'y', 'width', 'height'],
                 },
