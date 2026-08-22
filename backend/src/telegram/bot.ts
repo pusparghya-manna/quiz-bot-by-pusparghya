@@ -1257,21 +1257,77 @@ async function renderQuestionView(
   const refreshKb = opts.refreshKeyboard === true;
   const messageId = refreshKb ? undefined : prevSess?.lastMessageId;
 
+  const photoFileId = question.image?.fileId || undefined;
+  const mediaKind = photoFileId ? 'photo' : 'text';
+  const prevKind = prevSess?.lastMessageKind || 'text';
+
   setKbSession(user.id, {
     screen: 'in_exam',
     examId: exam.id,
     qIdx,
     lastMessageId: messageId,
+    lastMessageKind: mediaKind,
   });
 
+  // Caption limit for Telegram photos is 1024 chars
+  const caption = text.length > 1000 ? text.slice(0, 997) + '…' : text;
+
   if (messageId && !refreshKb) {
+    // Same media kind → edit in place; cross kind → force new send (handler deletes old)
+    if (photoFileId && prevKind === 'photo') {
+      return {
+        chatId: user.id,
+        text: caption,
+        caption,
+        photoFileId,
+        replyMarkup: { inline_keyboard: keyboard },
+        messageId,
+        parseMode: 'HTML',
+        type: 'editMessageMedia',
+      };
+    }
+    if (!photoFileId && prevKind === 'text') {
+      return {
+        chatId: user.id,
+        text,
+        replyMarkup: { inline_keyboard: keyboard },
+        messageId,
+        parseMode: 'HTML',
+        type: 'editMessageText',
+      };
+    }
+    // text↔photo transition: new message; sendTelegramResponse deletes previous
+    if (photoFileId) {
+      return {
+        chatId: user.id,
+        text: caption,
+        caption,
+        photoFileId,
+        replyMarkup: { inline_keyboard: keyboard },
+        messageId, // previous id to delete
+        parseMode: 'HTML',
+        type: 'sendPhoto',
+      };
+    }
     return {
       chatId: user.id,
       text,
       replyMarkup: { inline_keyboard: keyboard },
       messageId,
       parseMode: 'HTML',
-      type: 'editMessageText',
+      type: 'sendMessage',
+    };
+  }
+
+  if (photoFileId) {
+    return {
+      chatId: user.id,
+      text: caption,
+      caption,
+      photoFileId,
+      replyMarkup: { inline_keyboard: keyboard },
+      parseMode: 'HTML',
+      type: 'sendPhoto',
     };
   }
 
@@ -1279,7 +1335,6 @@ async function renderQuestionView(
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    // Inline only — no status carrier, no second message for Main menu
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -1880,7 +1935,8 @@ function renderStudentLeaderboard(student: Student, _showAll = false): Simulator
   return renderLeaderboardExamPicker(student);
 }
 
-export async function sendTelegramResponse(resp: SimulatorResponse): Promise<void> {
+export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<void> {
+  let resp = respIn;
   const token = process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken;
   if (!token) return;
 
@@ -1918,6 +1974,119 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    * use: send text+ReplyKeyboard, then editMessageReplyMarkup for inline on the SAME id.
    * That path must not run for questions (they never pass both).
    */
+
+  // ── Photo questions (diagram MCQ) ─────────────────────────────────────────
+  if (resp.photoFileId) {
+    const mode: 'HTML' | 'Markdown' | undefined = resp.parseMode || 'HTML';
+    const caption = (resp.caption || resp.text || '').slice(0, 1024);
+    const prevId = resp.messageId;
+
+    const sendPhoto = async () => {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            photo: resp.photoFileId,
+            caption,
+            parse_mode: mode,
+            reply_markup: resp.replyMarkup || undefined,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const data: any = await res.json().catch(() => ({}));
+        if (data?.ok && data.result?.message_id != null) {
+          rememberId([data.result.message_id]);
+          const sess = getKbSession(chatId);
+          if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'photo' });
+          return true;
+        }
+        console.warn('[Telegram] sendPhoto failed:', data?.description);
+        return false;
+      } catch (e: any) {
+        console.warn('[Telegram] sendPhoto error:', e?.message || e);
+        return false;
+      }
+    };
+
+    if (resp.type === 'editMessageMedia' && prevId) {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/editMessageMedia`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: prevId,
+            media: {
+              type: 'photo',
+              media: resp.photoFileId,
+              caption,
+              parse_mode: mode,
+            },
+            reply_markup: resp.replyMarkup || undefined,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const data: any = await res.json().catch(() => ({}));
+        if (data?.ok) {
+          rememberId([prevId]);
+          const sess = getKbSession(chatId);
+          if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'photo' });
+          return;
+        }
+      } catch {
+        /* fall through to delete+send */
+      }
+    }
+
+    // Cross-type transition or failed edit: delete previous bubble then send photo once
+    if (prevId) {
+      try {
+        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: prevId }),
+          signal: AbortSignal.timeout(4000),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    const ok = await sendPhoto();
+    if (!ok) {
+      // Fallback: text-only so exam can continue
+      const r = await sendSafeTelegramMessage(token, chatId, resp.text || caption, {
+        parseMode: mode,
+        replyMarkup: resp.replyMarkup,
+      });
+      if (r.ok) {
+        rememberId(r.messageIds);
+        const sess = getKbSession(chatId);
+        if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text' });
+      }
+    }
+    return;
+  }
+
+  // Text question after a photo: delete previous photo message, then send text once
+  if (resp.messageId && (resp.type === 'sendMessage' || resp.type === 'editMessageText')) {
+    const sess0 = getKbSession(chatId);
+    if (sess0?.lastMessageKind === 'photo' && resp.messageId) {
+      try {
+        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: resp.messageId }),
+          signal: AbortSignal.timeout(4000),
+        });
+      } catch {
+        /* ignore */
+      }
+      resp = { ...resp, messageId: undefined, type: 'sendMessage' };
+    }
+  }
+
   if (hasReplyKb && hasInline) {
     /**
      * One content message with InlineKeyboard only.
@@ -1946,6 +2115,8 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     }
     if (rQ.ok) {
       rememberId(rQ.messageIds);
+      const sess = getKbSession(chatId);
+      if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text' });
     } else {
       console.warn('[Telegram] content+inline send failed:', rQ.error);
     }
@@ -1990,4 +2161,8 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     return;
   }
   rememberId(result.messageIds);
+  {
+    const sess = getKbSession(chatId);
+    if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text' });
+  }
 }
