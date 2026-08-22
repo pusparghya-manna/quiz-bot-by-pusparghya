@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 type QStatus = 'correct' | 'wrong' | 'unattempted';
 type Filter = 'all' | 'correct' | 'wrong' | 'unattempted';
@@ -67,6 +67,9 @@ export default function TelegramReview() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
   const [bookmarks, setBookmarks] = useState<Record<string, boolean>>({});
+  const [gridCollapsed, setGridCollapsed] = useState(false);
+  const lastScrollY = useRef(0);
+  const ticking = useRef(false);
 
   const attemptId = useMemo(() => {
     const q = new URLSearchParams(window.location.search);
@@ -125,10 +128,38 @@ export default function TelegramReview() {
     return data.questions.filter((q) => q.status === filter);
   }, [data, filter]);
 
+  const onScroll = useCallback(() => {
+    if (ticking.current) return;
+    ticking.current = true;
+    requestAnimationFrame(() => {
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      const prev = lastScrollY.current;
+      const delta = y - prev;
+
+      if (y < 40) {
+        setGridCollapsed(false);
+      } else if (delta > 10 && y > 100) {
+        setGridCollapsed(true);
+      } else if (delta < -12) {
+        setGridCollapsed(false);
+      }
+
+      lastScrollY.current = y;
+      ticking.current = false;
+    });
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [onScroll]);
 
   const jumpTo = (index: number) => {
     const el = document.getElementById(`q-${index}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (el) {
+      setGridCollapsed(true);
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const toggleBookmark = (id: string) => {
@@ -156,9 +187,9 @@ export default function TelegramReview() {
 
   const { summary, exam, attempt } = data;
   const scorePct = Math.round(attempt.percentage ?? summary.accuracy ?? 0);
+
   return (
     <div style={s.shell}>
-      {/* Header */}
       <header style={s.header}>
         <div style={s.headerTop}>
           <div style={{ minWidth: 0, flex: 1 }}>
@@ -179,7 +210,6 @@ export default function TelegramReview() {
           </div>
         </div>
 
-        {/* Filter row */}
         <div style={s.filterRow}>
           {(
             [
@@ -216,50 +246,68 @@ export default function TelegramReview() {
         </div>
       </header>
 
-      {/* Question number grid */}
-      <div style={s.gridSection}>
-        <p style={s.gridHint}>Tap a question number to jump to it.</p>
-        <div style={s.grid}>
-          {filtered.map((q) => {
-            const bg =
-              q.status === 'correct'
-                ? '#dcfce7'
-                : q.status === 'wrong'
-                  ? '#fee2e2'
-                  : '#f1f5f9';
-            const color =
-              q.status === 'correct'
-                ? '#15803d'
-                : q.status === 'wrong'
-                  ? '#b91c1c'
-                  : '#64748b';
-            const border =
-              q.status === 'correct'
-                ? '#86efac'
-                : q.status === 'wrong'
-                  ? '#fca5a5'
-                  : '#e2e8f0';
-            return (
-              <button
-                key={q.id}
-                type="button"
-                onClick={() => jumpTo(q.index)}
-                style={{
-                  ...s.gridBtn,
-                  background: bg,
-                  color,
-                  borderColor: border,
-                }}
-                aria-label={`Go to question ${q.index + 1}`}
-              >
-                {q.index + 1}
+      {/* Sticky collapsible question grid */}
+      <div style={s.gridSticky}>
+        {gridCollapsed ? (
+          <button
+            type="button"
+            style={s.compactBar}
+            onClick={() => setGridCollapsed(false)}
+            aria-expanded={false}
+          >
+            <span style={s.compactBarLeft}>☰ Questions · {filtered.length}</span>
+            <span style={s.compactBarRight}>Show grid ▾</span>
+          </button>
+        ) : (
+          <div style={s.gridPanel}>
+            <div style={s.gridPanelHead}>
+              <span style={s.gridHint}>Tap a number to jump · scroll down to hide</span>
+              <button type="button" style={s.collapseBtn} onClick={() => setGridCollapsed(true)}>
+                Hide ▴
               </button>
-            );
-          })}
-        </div>
+            </div>
+            <div style={s.grid}>
+              {filtered.map((q) => {
+                const bg =
+                  q.status === 'correct'
+                    ? '#dcfce7'
+                    : q.status === 'wrong'
+                      ? '#fee2e2'
+                      : '#f1f5f9';
+                const color =
+                  q.status === 'correct'
+                    ? '#15803d'
+                    : q.status === 'wrong'
+                      ? '#b91c1c'
+                      : '#64748b';
+                const border =
+                  q.status === 'correct'
+                    ? '#86efac'
+                    : q.status === 'wrong'
+                      ? '#fca5a5'
+                      : '#e2e8f0';
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => jumpTo(q.index)}
+                    style={{
+                      ...s.gridBtn,
+                      background: bg,
+                      color,
+                      borderColor: border,
+                    }}
+                    aria-label={`Go to question ${q.index + 1}`}
+                  >
+                    {q.index + 1}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Continuous question cards */}
       <main style={s.main}>
         {filtered.map((q) => {
           const bookmarked = !!bookmarks[q.id];
@@ -455,27 +503,77 @@ const s: Record<string, CSSProperties> = {
     textAlign: 'center',
     lineHeight: 1.25,
   },
-  gridSection: {
-    padding: '12px 12px 8px',
+  gridSticky: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 40,
     background: '#f8fafc',
     borderBottom: '1px solid #e2e8f0',
   },
-  gridHint: {
-    margin: '0 0 8px',
+  compactBar: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    padding: '10px 14px',
+    border: 'none',
+    background: '#fff',
+    cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+    boxShadow: '0 1px 2px rgba(15,23,42,0.06)',
+  },
+  compactBarLeft: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#0f172a',
+  },
+  compactBarRight: {
     fontSize: 12,
+    fontWeight: 600,
+    color: '#2563eb',
+  },
+  gridPanel: {
+    padding: '8px 10px 10px',
+    background: '#fff',
+  },
+  gridPanelHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 8,
+  },
+  gridHint: {
+    fontSize: 11,
     color: '#64748b',
+    lineHeight: 1.3,
+  },
+  collapseBtn: {
+    border: 'none',
+    background: 'transparent',
+    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: 'pointer',
+    padding: '4px 0',
+    whiteSpace: 'nowrap',
+    WebkitTapHighlightColor: 'transparent',
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(10, 1fr)',
-    gap: 6,
-    paddingBottom: 4,
+    gridTemplateColumns: 'repeat(10, minmax(0, 1fr))',
+    gap: 5,
+    width: '100%',
+    boxSizing: 'border-box',
   },
   gridBtn: {
+    width: '100%',
+    minWidth: 0,
     aspectRatio: '1',
-    borderRadius: 10,
+    borderRadius: 8,
     border: '1px solid',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 700,
     cursor: 'pointer',
     WebkitTapHighlightColor: 'transparent',
@@ -483,7 +581,8 @@ const s: Record<string, CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     padding: 0,
-    minHeight: 32,
+    overflow: 'hidden',
+    boxSizing: 'border-box',
   },
   main: {
     padding: '12px 12px 48px',
