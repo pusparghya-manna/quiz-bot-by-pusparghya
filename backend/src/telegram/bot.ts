@@ -1848,12 +1848,13 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Keep ReplyKeyboard on the chat (suppresses native Gboard) and attach
-     * InlineKeyboard to the same message via editMessageReplyMarkup.
-     * Never delete the keyboard-setter message — that lets the system keyboard pop up.
-     * Never send the question text twice.
+     * Reliable dual markup:
+     * 1) sendMessage with text + ReplyKeyboard (keeps Gboard closed)
+     * 2) editMessageText same message with text + InlineKeyboard (A–D / nav)
+     * ReplyKeyboard is chat-level and stays; inline appears under the question.
+     * Fallback: plain sendMessage with inline only if edit fails.
      */
-    let mode = resp.parseMode || 'Markdown';
+    let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const rawDual = resp.text || '';
     if (
       !resp.parseMode &&
@@ -1870,6 +1871,7 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
         replyKeyboard: resp.replyKeyboard,
       });
+      mode = undefined;
     }
     if (!r1.ok) {
       console.warn('[Telegram] question+keyboard send failed:', r1.error);
@@ -1878,19 +1880,30 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     rememberId(r1.messageIds);
     const mid = r1.messageIds?.[0];
     if (mid && resp.replyMarkup) {
-      try {
-        await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: chatId,
-            message_id: mid,
-            reply_markup: resp.replyMarkup,
-          }),
-          signal: AbortSignal.timeout(5000),
+      // Prefer editMessageText with inline (more reliable than reply_markup-only edit)
+      let edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
+        parseMode: mode,
+        replyMarkup: resp.replyMarkup,
+        messageId: mid,
+        preferEdit: true,
+      });
+      if (!edited.ok) {
+        edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
+          replyMarkup: resp.replyMarkup,
+          messageId: mid,
+          preferEdit: true,
         });
-      } catch (e) {
-        console.warn('[Telegram] editMessageReplyMarkup failed', e);
+      }
+      if (!edited.ok) {
+        // Last resort: new message with buttons only (keyboard may already be set)
+        const r2 = await sendSafeTelegramMessage(token, chatId, rawDual, {
+          parseMode: mode,
+          replyMarkup: resp.replyMarkup,
+        });
+        if (r2.ok) rememberId(r2.messageIds);
+        else console.warn('[Telegram] inline attach failed:', edited.error);
+      } else {
+        rememberId([mid]);
       }
     }
     return;
