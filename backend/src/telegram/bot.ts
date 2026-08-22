@@ -1854,11 +1854,13 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Buttons first, then bottom keyboard — never leave the student without A/B/C/D.
+     * Telegram: only ONE reply_markup per sendMessage.
+     * Goal: Main menu ReplyKeyboard (no system/Gboard) + inline A/B/C/D under the question.
      *
-     * Telegram allows only ONE reply_markup per sendMessage.
-     * 1) Apply ReplyKeyboard via a zero-width carrier (deleted) so Main menu sticks / Gboard stays closed
-     * 2) Single sendMessage with question text + InlineKeyboard (A/B/C/D, Grid, Submit)
+     * 1) sendMessage(question + ReplyKeyboard) → custom keyboard sticks, input stays closed
+     * 2) editMessageReplyMarkup(same id, InlineKeyboard) → attach A/B/C/D without resending text
+     * 3) if (2) fails → editMessageText(same id, text + InlineKeyboard)
+     * Never delete the keyboard-setter message (deleting it re-opens the system keyboard on many clients).
      * Never send the question text twice.
      */
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
@@ -1870,37 +1872,19 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       mode = 'HTML';
     }
 
-    // 1) Stick bottom ReplyKeyboard without a visible spam message
-    try {
-      const r0 = await sendSafeTelegramMessage(token, chatId, '\u2060', {
-        replyKeyboard: resp.replyKeyboard,
-      });
-      const carrierId = r0.messageIds?.[0];
-      if (carrierId) {
-        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
-          signal: AbortSignal.timeout(4000),
-        }).catch(() => {});
-      }
-    } catch {
-      /* best-effort keyboard apply */
-    }
-
-    // 2) One visible question bubble with inline A/B/C/D + Grid + Submit
+    // 1) Question + Main menu ReplyKeyboard (suppresses native keyboard)
     let r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
       parseMode: mode,
-      replyMarkup: resp.replyMarkup,
+      replyKeyboard: resp.replyKeyboard,
     });
     if (!r1.ok && mode) {
       r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
-        replyMarkup: resp.replyMarkup,
+        replyKeyboard: resp.replyKeyboard,
       });
       mode = undefined;
     }
     if (!r1.ok) {
-      // Last resort: still prioritize inline answer buttons over bottom keyboard
+      // Fallback: still show question with inline buttons even if ReplyKeyboard failed
       const rOnly = await sendSafeTelegramMessage(token, chatId, rawDual, {
         parseMode: mode,
         replyMarkup: resp.replyMarkup,
@@ -1911,6 +1895,56 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     }
 
     rememberId(r1.messageIds);
+    const mid = r1.messageIds?.[0];
+    if (!mid || !resp.replyMarkup) return;
+
+    // Brief pause so Telegram indexes the new message before edit (reduces race on mobile)
+    await new Promise((r) => setTimeout(r, 80));
+
+    // 2) Prefer lightweight markup-only edit (keeps text, attaches A/B/C/D)
+    let attached = false;
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: mid,
+          reply_markup: resp.replyMarkup,
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      if (data?.ok) {
+        attached = true;
+      } else {
+        console.warn('[Telegram] editMessageReplyMarkup:', data?.description || 'failed');
+      }
+    } catch (e) {
+      console.warn('[Telegram] editMessageReplyMarkup error', e);
+    }
+
+    // 3) Full text edit if markup-only failed
+    if (!attached) {
+      let edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
+        parseMode: mode,
+        replyMarkup: resp.replyMarkup,
+        messageId: mid,
+        preferEdit: true,
+        editOnly: true,
+      });
+      if (!edited.ok && mode) {
+        edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
+          replyMarkup: resp.replyMarkup,
+          messageId: mid,
+          preferEdit: true,
+          editOnly: true,
+        });
+      }
+      if (!edited.ok) {
+        console.warn('[Telegram] could not attach inline buttons after exam start:', edited.error);
+      }
+    }
     return;
   }
 
