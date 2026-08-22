@@ -70,6 +70,9 @@ export default function TelegramReview() {
   const [gridCollapsed, setGridCollapsed] = useState(false);
   const lastScrollY = useRef(0);
   const ticking = useRef(false);
+  /** While set, scroll handler must not auto-collapse (user just opened the grid). */
+  const ignoreCollapseUntil = useRef(0);
+  const pinnedOpen = useRef(false);
 
   const attemptId = useMemo(() => {
     const q = new URLSearchParams(window.location.search);
@@ -135,12 +138,38 @@ export default function TelegramReview() {
       const y = window.scrollY || document.documentElement.scrollTop || 0;
       const prev = lastScrollY.current;
       const delta = y - prev;
+      const now = Date.now();
 
-      if (y < 40) {
+      // Near top: always show full grid
+      if (y < 48) {
+        pinnedOpen.current = false;
         setGridCollapsed(false);
-      } else if (delta > 10 && y > 100) {
+        lastScrollY.current = y;
+        ticking.current = false;
+        return;
+      }
+
+      // Right after user taps "Show grid" — ignore layout-shift scroll noise
+      if (now < ignoreCollapseUntil.current) {
+        lastScrollY.current = y;
+        ticking.current = false;
+        return;
+      }
+
+      // User explicitly opened grid: only collapse on clear downward scroll
+      if (pinnedOpen.current) {
+        if (delta > 24) {
+          pinnedOpen.current = false;
+          setGridCollapsed(true);
+        }
+        lastScrollY.current = y;
+        ticking.current = false;
+        return;
+      }
+
+      if (delta > 12 && y > 90) {
         setGridCollapsed(true);
-      } else if (delta < -12) {
+      } else if (delta < -16) {
         setGridCollapsed(false);
       }
 
@@ -154,11 +183,26 @@ export default function TelegramReview() {
     return () => window.removeEventListener('scroll', onScroll);
   }, [onScroll]);
 
+  const openGrid = () => {
+    pinnedOpen.current = true;
+    ignoreCollapseUntil.current = Date.now() + 800;
+    setGridCollapsed(false);
+  };
+
+  const closeGrid = () => {
+    pinnedOpen.current = false;
+    setGridCollapsed(true);
+  };
+
   const jumpTo = (index: number) => {
     const el = document.getElementById(`q-${index}`);
     if (el) {
+      pinnedOpen.current = false;
       setGridCollapsed(true);
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Small delay so sticky bar height settles before scroll
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     }
   };
 
@@ -252,7 +296,7 @@ export default function TelegramReview() {
           <button
             type="button"
             style={s.compactBar}
-            onClick={() => setGridCollapsed(false)}
+            onClick={openGrid}
             aria-expanded={false}
           >
             <span style={s.compactBarLeft}>☰ Questions · {filtered.length}</span>
@@ -262,7 +306,7 @@ export default function TelegramReview() {
           <div style={s.gridPanel}>
             <div style={s.gridPanelHead}>
               <span style={s.gridHint}>Tap a number to jump · scroll down to hide</span>
-              <button type="button" style={s.collapseBtn} onClick={() => setGridCollapsed(true)}>
+              <button type="button" style={s.collapseBtn} onClick={closeGrid}>
                 Hide ▴
               </button>
             </div>
