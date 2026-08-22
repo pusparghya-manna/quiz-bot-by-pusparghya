@@ -11,6 +11,7 @@ import { store } from '../store.js';
 import { processTelegramUpdate, updateExamRanks, calculateAttemptScore, sendTelegramResponse } from '../telegram/bot.js';
 import { startTelegramPolling } from '../telegram/polling.js';
 import { parseQuestionsFromMedia } from '../services/geminiOcr.js';
+import { attachCroppedImagesToOcrQuestions } from '../services/questionImageMedia.js';
 import { Exam, Question, Student } from '../types/index.js';
 import { effectiveExamStatus, withEffectiveStatus } from '../examStatus.js';
 import { enqueueBroadcast } from '../jobs/broadcastQueue.js';
@@ -651,8 +652,18 @@ async function startServer(app?: import('express').Express) {
       }
 
       const result = await parseQuestionsFromMedia(fileBase64, mimeType || 'image/jpeg');
-      store.addAuditLog('OCR_PARSED', `Extracted ${result.questions?.length || 0} questions via Gemini OCR`);
-      res.json(result);
+      const rawQuestions = Array.isArray(result?.questions) ? result.questions : Array.isArray(result) ? result : [];
+      const { questions, imageErrors } = await attachCroppedImagesToOcrQuestions(
+        fileBase64,
+        mimeType || 'image/jpeg',
+        rawQuestions
+      );
+      store.addAuditLog(
+        'OCR_PARSED',
+        `Extracted ${questions.length} questions via Gemini OCR` +
+          (imageErrors.length ? ` (${imageErrors.length} image warnings)` : '')
+      );
+      res.json({ questions, imageErrors });
     } catch (err: any) {
       console.error('OCR error:', err);
       res.status(500).json({ error: err.message || 'Failed to extract questions using AI OCR.' });
