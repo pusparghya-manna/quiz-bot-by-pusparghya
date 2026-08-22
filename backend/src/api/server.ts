@@ -10,7 +10,7 @@ import { loginTeacher, registerTeacher, authMiddleware, ensureTeachersTable } fr
 import { store } from '../store.js';
 import { processTelegramUpdate, updateExamRanks, calculateAttemptScore, sendTelegramResponse } from '../telegram/bot.js';
 import { startTelegramPolling } from '../telegram/polling.js';
-import { parseQuestionsFromMedia } from '../services/geminiOcr.js';
+import { parseQuestionsFromMedia, locateDiagramBboxes } from '../services/geminiOcr.js';
 import { attachCroppedImagesToOcrQuestions } from '../services/questionImageMedia.js';
 import { Exam, Question, Student } from '../types/index.js';
 import { effectiveExamStatus, withEffectiveStatus } from '../examStatus.js';
@@ -653,6 +653,54 @@ async function startServer(app?: import('express').Express) {
 
       const result = await parseQuestionsFromMedia(fileBase64, mimeType || 'image/jpeg');
       const rawQuestions = Array.isArray(result?.questions) ? result.questions : Array.isArray(result) ? result : [];
+
+      // First pass: keep text + has_image flags; clear OCR bboxes (not used for final crop)
+      for (const q of rawQuestions) {
+        if (q && typeof q === 'object') {
+          q.image_bbox = null;
+        }
+      }
+
+      // Second pass: localize diagrams only when needed
+      const diagramTargets = rawQuestions
+        .map((q: any, index: number) => ({ q, index }))
+        .filter(({ q }) => q && (q.has_image === true || q.has_image === 'true'));
+
+      if (diagramTargets.length > 0) {
+        try {
+          const locations = await locateDiagramBboxes(
+            fileBase64,
+            mimeType || 'image/jpeg',
+            diagramTargets.map(({ q, index }) => ({
+              index,
+              question_number: q.question_number ?? q.questionNumber ?? null,
+              question: q.question || q.text || '',
+              options: Array.isArray(q.options) ? q.options : [],
+            }))
+          );
+          for (const loc of locations) {
+            const idx = Number(loc.question_index);
+            if (!Number.isFinite(idx) || idx < 0 || idx >= rawQuestions.length) continue;
+            if (loc.image_bbox) {
+              rawQuestions[idx].has_image = true;
+              rawQuestions[idx].image_bbox = loc.image_bbox;
+            } else {
+              rawQuestions[idx].has_image = false;
+              rawQuestions[idx].image_bbox = null;
+            }
+          }
+        } catch (locErr: any) {
+          console.warn('[ocr] diagram localization skipped:', locErr?.message || locErr);
+          // continue without images rather than failing whole OCR
+          for (const { index } of diagramTargets) {
+            if (rawQuestions[index]) {
+              rawQuestions[index].has_image = false;
+              rawQuestions[index].image_bbox = null;
+            }
+          }
+        }
+      }
+
       const { questions, imageErrors } = await attachCroppedImagesToOcrQuestions(
         fileBase64,
         mimeType || 'image/jpeg',

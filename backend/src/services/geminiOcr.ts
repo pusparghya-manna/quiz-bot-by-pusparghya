@@ -63,6 +63,7 @@ export async function parseQuestionsFromMedia(fileBase64: string, mimeType: stri
       headers: {
         'User-Agent': 'QuizBotByPusparghya',
       },
+      timeout: 180_000,
     },
   });
 
@@ -91,24 +92,10 @@ has_image / image_bbox rules:
 - NO visual → "has_image": false, "image_bbox": null.
 - HAS visual → "has_image": true AND a precise "image_bbox" for THAT question only.
 
-CRITICAL image_bbox RULES (wrong crops break the exam):
-1. image_bbox = ONLY the diagram/drawing for THIS question number.
-2. NEVER put option lines (a)(b)(c)(d), question stem text, question numbers, or neighboring questions inside the box.
-3. DO include labels that are part of the drawing (A,B,C,D,E on a figure; X,Y,Z,Q on circles; arrows; axis text printed ON the figure).
-4. On typical exam pages the figure is often on the RIGHT of the options — box the figure on the right, not the option list on the left.
-5. Each question with a figure must get its OWN unique bbox. Do not reuse the same box for two questions.
-6. The full diagram must fit inside the box (not half a sperm cell, not half a Venn set). Prefer a slightly larger tight box over a clipped figure.
-7. If you cannot locate the diagram confidently, set has_image=false and image_bbox=null (text-only is better than a wrong crop).
-
-COORDINATE SYSTEM (mandatory):
-- image_bbox uses NORMALIZED 0–1000 on the FULL page image you received.
-- x=0,y=0 top-left; x=1000 right edge; y=1000 bottom edge.
-- Example right-side figure: {"x": 620, "y": 120, "width": 340, "height": 280}
-- Always 0–1000 units. Never raw pixel coordinates of a different resolution.
-
-image_bbox format: { "x", "y", "width", "height" } all numbers in 0..1000.
-
-Do NOT invent a replacement image. Preserve the original visual via bbox only.`;
+has_image only (bbox is optional and NOT used for final cropping):
+- Set has_image true when the question has a real diagram/figure.
+- You may omit image_bbox or set it null — a separate localization pass will crop diagrams.
+- Prefer correct has_image flags over imperfect boxes.`;
 
   const modelCandidates = [
     process.env.GEMINI_MODEL,
@@ -236,4 +223,177 @@ Do NOT invent a replacement image. Preserve the original visual via bbox only.`;
     ...parsed,
     questions: Array.isArray(parsed?.questions) ? parsed.questions.map(normalizeOcrQuestion) : [],
   };
+}
+
+
+function ocrModelCandidates(): string[] {
+  return [
+    process.env.GEMINI_MODEL,
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+  ].filter((m, i, arr) => Boolean(m) && arr.indexOf(m) === i) as string[];
+}
+
+function createGeminiClient() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY environment variable is not configured.');
+  }
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: { 'User-Agent': 'QuizBotByPusparghya' },
+      timeout: 180_000,
+    },
+  });
+}
+
+export type DiagramBBoxResult = {
+  question_index: number;
+  question_number: number | null;
+  image_bbox: { x: number; y: number; width: number; height: number } | null;
+};
+
+/**
+ * Second-pass: locate correct diagram bboxes for questions marked has_image.
+ * Does not extract text. Uses full-page image + question list for disambiguation.
+ */
+export async function locateDiagramBboxes(
+  fileBase64: string,
+  mimeType: string,
+  diagramQuestions: Array<{
+    index: number;
+    question_number?: number | null;
+    question?: string;
+    options?: string[];
+  }>
+): Promise<DiagramBBoxResult[]> {
+  if (!diagramQuestions.length) return [];
+
+  const ai = createGeminiClient();
+  const imagePart = {
+    inlineData: {
+      mimeType: mimeType || 'image/jpeg',
+      data: fileBase64,
+    },
+  };
+
+  const catalog = diagramQuestions
+    .map((q) => {
+      const num = q.question_number != null ? `Q${q.question_number}` : `index ${q.index}`;
+      const stem = String(q.question || '').slice(0, 160).replace(/\s+/g, ' ');
+      const opts = (q.options || [])
+        .slice(0, 4)
+        .map((o, i) => `${String.fromCharCode(65 + i)}:${String(o || '').slice(0, 40)}`)
+        .join(' | ');
+      return `- ${num} (question_index=${q.index}): "${stem}" Options: ${opts}`;
+    })
+    .join('\n');
+
+  const prompt = `You are a precise diagram localizer for exam papers.
+
+TASK: For EACH listed question below, find the diagram/figure on the FULL PAGE image that belongs to that question and return its bounding box.
+
+QUESTIONS THAT NEED DIAGRAMS:
+${catalog}
+
+RULES:
+1. Analyze the complete page layout. Diagrams for adjacent questions must not be mixed up.
+2. image_bbox must cover the COMPLETE visual for that question: drawing, labels (A/B/C/X/Y…), arrows, lines, markers, and connected parts needed to understand it.
+3. Do NOT include the question stem text, option list (a)(b)(c)(d), or other questions' diagrams.
+4. On many papers the figure is to the RIGHT of the options — box the figure, not the text.
+5. Each question_index must get its own unique box when figures are different.
+6. If a question has no clear diagram on the page, set image_bbox to null for that entry.
+7. COORDINATES: normalized 0–1000 on the FULL page (x=0,y=0 top-left; x=1000 right; y=1000 bottom). Never raw pixels of another resolution.
+8. Do not generate, redraw, or describe the image — only return bboxes.
+
+Return JSON only.`;
+
+  const modelCandidates = ocrModelCandidates();
+  let response: any = null;
+  let lastErr: any = null;
+
+  for (const model of modelCandidates) {
+    try {
+      response = await ai.models.generateContent({
+        model,
+        contents: { parts: [imagePart, { text: prompt }] },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              diagrams: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question_index: { type: Type.INTEGER },
+                    question_number: { type: Type.NUMBER, nullable: true },
+                    image_bbox: {
+                      type: Type.OBJECT,
+                      nullable: true,
+                      properties: {
+                        x: { type: Type.NUMBER },
+                        y: { type: Type.NUMBER },
+                        width: { type: Type.NUMBER },
+                        height: { type: Type.NUMBER },
+                      },
+                      required: ['x', 'y', 'width', 'height'],
+                    },
+                  },
+                  required: ['question_index'],
+                },
+              },
+            },
+            required: ['diagrams'],
+          },
+        },
+      });
+      console.log('[ocr] diagram localization model:', model);
+      lastErr = null;
+      break;
+    } catch (e: any) {
+      lastErr = e;
+      const msg = String(e?.message || e || '');
+      console.warn('[ocr] diagram locate failed:', model, msg.slice(0, 180));
+      if (!/high demand|UNAVAILABLE|503|429|resource exhausted|quota|timed out|timeout|unavailable/i.test(msg)) {
+        break;
+      }
+    }
+  }
+
+  if (!response) {
+    throw new Error(
+      String(lastErr?.message || lastErr || 'Diagram localization failed')
+    );
+  }
+
+  const text = response.text;
+  if (!text) return [];
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(parsed?.diagrams) ? parsed.diagrams : Array.isArray(parsed) ? parsed : [];
+  return rows.map((r: any) => ({
+    question_index: Number(r.question_index),
+    question_number: r.question_number != null ? Number(r.question_number) : null,
+    image_bbox:
+      r.image_bbox &&
+      Number.isFinite(Number(r.image_bbox.x)) &&
+      Number.isFinite(Number(r.image_bbox.y)) &&
+      Number.isFinite(Number(r.image_bbox.width)) &&
+      Number.isFinite(Number(r.image_bbox.height))
+        ? {
+            x: Number(r.image_bbox.x),
+            y: Number(r.image_bbox.y),
+            width: Number(r.image_bbox.width),
+            height: Number(r.image_bbox.height),
+          }
+        : null,
+  }));
 }

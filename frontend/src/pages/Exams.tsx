@@ -34,6 +34,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   const [editQ, setEditQ] = useState<Question | null>(null);
   const [jsonText, setJsonText] = useState('');
   const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrPhase, setOcrPhase] = useState<'idle' | 'extract' | 'diagrams' | 'done'>('idle');
   const [toastMsg, setToastMsg] = useState('');
   const examLink = (id: string) => {
     const u = (botUsername || '').replace(/^@/, '').trim() || 'YourBot';
@@ -204,12 +205,15 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
 
   const onOcr = async (file: File) => {
     setOcrBusy(true);
+    setOcrPhase('extract');
     setToastMsg('');
     try {
       const prepared = await prepareImageForOcr(file);
+      setOcrPhase('diagrams');
       const res = await api('/api/ocr/parse', {
         method: 'POST',
         body: JSON.stringify({ fileBase64: prepared.base64, mimeType: prepared.mimeType }),
+        timeoutMs: 180_000,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'OCR failed');
@@ -245,6 +249,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       toastError(e.message || 'OCR failed');
     } finally {
       setOcrBusy(false);
+      setOcrPhase('idle');
     }
   };
 
@@ -672,16 +677,39 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
               {qMode === 'ocr' && (
                 <div className="space-y-2.5">
                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-4 text-center">
-                    <div className="mx-auto w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-500 mb-1.5"><IconSparkles className="w-5 h-5" /></div>
-                    <p className="text-xs text-slate-600">Upload a photo of questions.</p>
+                    <div className="mx-auto w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-500 mb-1.5">
+                      {ocrBusy ? (
+                        <span className="inline-block w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" aria-hidden />
+                      ) : (
+                        <IconSparkles className="w-5 h-5" />
+                      )}
+                    </div>
+                    {ocrBusy ? (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium text-slate-700">
+                          {ocrPhase === 'extract' && 'Reading questions from photo…'}
+                          {ocrPhase === 'diagrams' && 'Locating diagrams for each question…'}
+                          {ocrPhase !== 'extract' && ocrPhase !== 'diagrams' && 'Processing…'}
+                        </p>
+                        <div className="h-1.5 w-full max-w-[200px] mx-auto rounded-full bg-slate-200 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-blue-500 animate-pulse"
+                            style={{ width: ocrPhase === 'extract' ? '45%' : ocrPhase === 'diagrams' ? '85%' : '60%' }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-500">This can take up to a few minutes for diagram pages.</p>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-600">Upload a photo of questions.</p>
+                    )}
                   </div>
-                  <label className={btnP + ' w-full cursor-pointer'}>
+                  <label className={btnP + ' w-full cursor-pointer' + (ocrBusy ? ' opacity-70 pointer-events-none' : '')}>
                     <IconUpload className="w-4 h-4" />
-                    {ocrBusy ? 'Parsing…' : 'Choose photo'}
+                    {ocrBusy ? 'Working…' : 'Choose photo'}
                     <input type="file" accept="image/*" className="hidden" disabled={ocrBusy}
                       onChange={(e) => e.target.files?.[0] && onOcr(e.target.files[0])} />
                   </label>
-                  <button type="button" className={btnS + ' w-full'} onClick={() => setQMode('list')}>Back to list</button>
+                  <button type="button" className={btnS + ' w-full'} disabled={ocrBusy} onClick={() => setQMode('list')}>Back to list</button>
                 </div>
               )}
             </div>

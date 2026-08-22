@@ -3,6 +3,7 @@
  */
 const API_BASE = '';
 const FETCH_TIMEOUT_MS = 45_000;
+export const OCR_FETCH_TIMEOUT_MS = 180_000;
 
 export const getToken = () => {
   try {
@@ -31,9 +32,13 @@ export const clearToken = () => {
   }
 };
 
-export async function api(path: string, options: RequestInit = {}) {
-  const headers: Record<string, string> = { ...(options.headers as any || {}) };
-  if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+export async function api(
+  path: string,
+  options: RequestInit & { timeoutMs?: number } = {}
+) {
+  const { timeoutMs, ...fetchOptions } = options;
+  const headers: Record<string, string> = { ...(fetchOptions.headers as any || {}) };
+  if (!(fetchOptions.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
   const token = getToken();
@@ -41,13 +46,13 @@ export async function api(path: string, options: RequestInit = {}) {
 
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs ?? FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
-      ...options,
+      ...fetchOptions,
       headers,
       credentials: 'include',
-      signal: options.signal || ctrl.signal,
+      signal: fetchOptions.signal || ctrl.signal,
     });
     if (
       res.status === 401 &&

@@ -86,9 +86,9 @@ export function normalizeBBox(
   // Reject tiny incomplete crops
   if (w < imgWidth * 0.04 || h < imgHeight * 0.03) return null;
 
-  // Expand slightly so figure labels (A/B/X/Y) are not clipped
-  const padX = Math.max(4, Math.round(w * 0.06));
-  const padY = Math.max(4, Math.round(h * 0.06));
+  // Small safety padding only (do not enlarge into neighboring diagrams)
+  const padX = Math.max(2, Math.round(w * 0.025));
+  const padY = Math.max(2, Math.round(h * 0.025));
   left = Math.max(0, left - padX);
   top = Math.max(0, top - padY);
   w = Math.min(imgWidth - left, w + padX * 2);
