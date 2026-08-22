@@ -1192,8 +1192,7 @@ async function renderQuestionView(
     { text: '📋 Question Grid', callback_data: `grid_${exam.id}` },
     { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` },
   ]);
-  // Main menu also as inline so exit works even if ReplyKeyboard apply lags
-  keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
+  // Main menu only on bottom ReplyKeyboard — not under the question
 
   const prevSess = getKbSession(user.id);
   const refreshKb = opts.refreshKeyboard === true;
@@ -1219,13 +1218,12 @@ async function renderQuestionView(
     };
   }
 
-  // Exam start / resume: one question bubble with inline A–D / Grid / Submit / Main menu.
-  // Do not send ReplyKeyboard here — a second message was showing as a blank bubble,
-  // and remove_keyboard / delete would open the system keyboard.
+  // Exam start / resume: question + inline A–D; bottom keyboard → Main menu only
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
+    replyKeyboard: kbMarkup([[LABELS.home]]),
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -1855,11 +1853,13 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Prefer inline answer buttons on the question. Do NOT send a second blank
-     * carrier message for ReplyKeyboard (users saw an empty bubble).
-     * Do NOT delete messages and do NOT remove_keyboard (that opens system Gboard).
-     * Main menu is available as an inline button on the question.
-     * ReplyKeyboard from the previous screen is left as-is (chat-level, no Gboard).
+     * One visible message:
+     *  1) sendMessage(question + ReplyKeyboard Main menu) — replaces Continue/View Result/…
+     *     and keeps system keyboard closed (custom KB only)
+     *  2) editMessageReplyMarkup → A/B/C/D + Grid + Submit under the same bubble
+     *  3) if (2) fails → editMessageText with inline
+     *  4) if (3) fails → sendMessage(question + inline) so buttons are never missing
+     * No blank carrier. No delete. No remove_keyboard.
      */
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const rawDual = resp.text || '';
@@ -1872,18 +1872,86 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
 
     let r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
       parseMode: mode,
-      replyMarkup: resp.replyMarkup,
+      replyKeyboard: resp.replyKeyboard,
     });
     if (!r1.ok && mode) {
       r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
-        replyMarkup: resp.replyMarkup,
+        replyKeyboard: resp.replyKeyboard,
       });
+      mode = undefined;
     }
     if (!r1.ok) {
-      console.warn('[Telegram] exam question+buttons send failed:', r1.error);
+      // At least deliver buttons
+      const rOnly = await sendSafeTelegramMessage(token, chatId, rawDual, {
+        parseMode: mode,
+        replyMarkup: resp.replyMarkup,
+      });
+      if (rOnly.ok) rememberId(rOnly.messageIds);
+      else console.warn('[Telegram] exam question send failed:', r1.error);
       return;
     }
+
     rememberId(r1.messageIds);
+    const mid = r1.messageIds?.[0];
+    if (!mid || !resp.replyMarkup) return;
+
+    await new Promise((r) => setTimeout(r, 120));
+
+    let attached = false;
+    for (let attempt = 0; attempt < 3 && !attached; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 100 * attempt));
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: mid,
+            reply_markup: resp.replyMarkup,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+        const data: any = await res.json().catch(() => ({}));
+        if (data?.ok) {
+          attached = true;
+        } else {
+          console.warn('[Telegram] editMessageReplyMarkup:', data?.description || 'failed');
+        }
+      } catch (e) {
+        console.warn('[Telegram] editMessageReplyMarkup error', e);
+      }
+    }
+
+    if (!attached) {
+      let edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
+        parseMode: mode,
+        replyMarkup: resp.replyMarkup,
+        messageId: mid,
+        preferEdit: true,
+        editOnly: true,
+      });
+      if (!edited.ok && mode) {
+        edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
+          replyMarkup: resp.replyMarkup,
+          messageId: mid,
+          preferEdit: true,
+          editOnly: true,
+        });
+      }
+      if (edited.ok) {
+        attached = true;
+      }
+    }
+
+    // Last resort: new message with buttons (better than no buttons)
+    if (!attached) {
+      console.warn('[Telegram] attaching inline failed; sending question+buttons as new message');
+      const r2 = await sendSafeTelegramMessage(token, chatId, rawDual, {
+        parseMode: mode,
+        replyMarkup: resp.replyMarkup,
+      });
+      if (r2.ok) rememberId(r2.messageIds);
+    }
     return;
   }
 
