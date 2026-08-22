@@ -10,6 +10,7 @@ import {
   numberedListRows,
   forceReplyNameMarkup,
 } from './replyNav.js';
+import { validateExamCallback, logTelegramDiag } from './examUiController.js';
 import {
   escapeHtml,
   titleBlock,
@@ -323,15 +324,24 @@ function rememberUpdateId(id: number) {
 
 export async function processTelegramUpdate(update: TelegramUpdate): Promise<SimulatorResponse | null> {
   try {
-    if (update.update_id != null && recentUpdateIds.has(Number(update.update_id))) {
-      return null;
+    const uid = update.update_id != null ? Number(update.update_id) : null;
+
+    // Atomic claim BEFORE any business logic or Telegram API side-effects
+    if (uid != null) {
+      if (recentUpdateIds.has(uid)) {
+        console.log('[tg] DUPLICATE_UPDATE_IGNORED update_id=' + uid + ' source=memory');
+        return null;
+      }
+      const claimed = await store.claimTelegramUpdate(uid);
+      if (!claimed) {
+        console.log('[tg] DUPLICATE_UPDATE_IGNORED update_id=' + uid + ' source=db');
+        rememberUpdateId(uid);
+        return null;
+      }
+      rememberUpdateId(uid);
     }
+
     const result = await processTelegramUpdateInner(update);
-    if (update.update_id != null && result !== undefined) {
-      rememberUpdateId(Number(update.update_id));
-      // Persist claim in background — do not block Telegram reply
-      void store.claimTelegramUpdate(Number(update.update_id)).catch(() => {});
-    }
     return result;
   } catch (err: any) {
     console.error('[telegram] processTelegramUpdate failed:', err?.message || err);
@@ -437,25 +447,43 @@ This name will appear on results and the leaderboard.`,
       const rest = data.slice(4);
       const parsed = resolveExamIdFromRest(rest, 2);
       if (parsed) {
-        const [qIdx, optIdx] = parsed.trailing;
-        response = await handleOptionSelect(parsed.examId, qIdx, optIdx, student, user);
+        const v = validateExamCallback({ telegramUserId: user.id, examId: parsed.examId });
+        if (!v.ok) {
+          logTelegramDiag({ event: 'STALE_CALLBACK_IGNORED', action: 'ans', reason: v.reason, uid: user.id });
+          response = null;
+        } else {
+          const [qIdx, optIdx] = parsed.trailing;
+          response = await handleOptionSelect(parsed.examId, qIdx, optIdx, student, user);
+        }
       }
     } else if (data.startsWith('nav_')) {
-      // nav_EXAMID_targetIdx
       const rest = data.slice(4);
       const parsed = resolveExamIdFromRest(rest, 1);
       if (parsed) {
-        response = await renderQuestionView(parsed.examId, parsed.trailing[0], student, user, { refreshKeyboard: false });
+        const v = validateExamCallback({ telegramUserId: user.id, examId: parsed.examId });
+        if (!v.ok) {
+          logTelegramDiag({ event: 'STALE_CALLBACK_IGNORED', action: 'nav', reason: v.reason, uid: user.id });
+          response = null;
+        } else {
+          response = await renderQuestionView(parsed.examId, parsed.trailing[0], student, user, {
+            refreshKeyboard: false,
+          });
+        }
       }
     } else if (data.startsWith('grid_')) {
-      // grid_EXAMID or grid_EXAMID_PAGE (page only if full exam id matched)
       const rest = data.slice(5);
       const parsed = resolveExamIdFromRest(rest, 0);
       if (parsed) {
-        // trailing[0] = page when present; undefined → open page of current question
-        const page = parsed.trailing.length ? parsed.trailing[0] : undefined;
-        response = await renderQuestionGrid(parsed.examId, student, user, page);
+        const v = validateExamCallback({ telegramUserId: user.id, examId: parsed.examId });
+        if (!v.ok) {
+          logTelegramDiag({ event: 'STALE_CALLBACK_IGNORED', action: 'grid', reason: v.reason, uid: user.id });
+          response = null;
+        } else {
+          const page = parsed.trailing.length ? parsed.trailing[0] : undefined;
+          response = await renderQuestionGrid(parsed.examId, student, user, page);
+        }
       }
+
     } else if (data.startsWith('revatt_')) {
       // revatt_ATTEMPTID_sum | revatt_ATTEMPTID_PAGE
       const rest = data.slice(7);
@@ -552,10 +580,22 @@ This name will appear on results and the leaderboard.`,
       }
     } else if (data.startsWith('confirm_submit_')) {
       const examId = data.replace('confirm_submit_', '');
-      response = renderSubmitConfirmation(examId, student, user);
+      const v = validateExamCallback({ telegramUserId: user.id, examId });
+      if (!v.ok) {
+        logTelegramDiag({ event: 'STALE_CALLBACK_IGNORED', action: 'confirm_submit', reason: v.reason, uid: user.id });
+        response = null;
+      } else {
+        response = renderSubmitConfirmation(examId, student, user);
+      }
     } else if (data.startsWith('do_submit_')) {
       const examId = data.replace('do_submit_', '');
-      response = await handleFinalSubmit(examId, student, user);
+      const v = validateExamCallback({ telegramUserId: user.id, examId });
+      if (!v.ok) {
+        logTelegramDiag({ event: 'STALE_CALLBACK_IGNORED', action: 'do_submit', reason: v.reason, uid: user.id });
+        response = null;
+      } else {
+        response = await handleFinalSubmit(examId, student, user);
+      }
     }
 
     // Keep single-chat edits for pure inline (MCQ). Never force editMessageText over photo ops.
@@ -1333,7 +1373,8 @@ async function renderQuestionView(
     };
   }
 
-  const entryKb = refreshKb ? kbMarkup([[LABELS.home]]) : undefined;
+  // Spec: ACTIVE_EXAM uses InlineKeyboard only — remove any ReplyKeyboard on entry
+  const entryKb = refreshKb ? ({ remove_keyboard: true } as any) : undefined;
 
   if (photoFileId) {
     return {
@@ -1565,7 +1606,13 @@ async function autoSubmitExam(exam: Exam, attempt: Attempt): Promise<SimulatorRe
   attempt.skippedCount = stats.skippedCount;
   attempt.timeTakenSeconds = stats.timeTakenSeconds;
 
-  await store.submitAttemptIfInProgress(attempt);
+  const autoSaved = await store.submitAttemptIfInProgress(attempt);
+  if (!autoSaved) {
+    logTelegramDiag({ event: 'SUBMISSION_ALREADY_COMPLETED', action: 'auto_submit', attempt: attempt.id });
+    const existing = store.getAttempt(exam.id, attempt.telegramUserId!);
+    if (existing) return renderAttemptSummary(exam, existing);
+    return { chatId: attempt.telegramUserId!, text: 'Already submitted.', type: 'sendMessage' };
+  }
   await updateExamRanks(exam.id);
   store.addAuditLog('EXAM_AUTO_SUBMITTED', `Exam ${exam.title} auto-submitted for ${attempt.studentName} due to time expiration`);
 
@@ -2135,11 +2182,23 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
         if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
       }
     }
-    // Exam entry only: replace Continue/View Result bar with Main menu (must be a real message)
-    if (resp.replyKeyboard) {
-      void sendSafeTelegramMessage(token, chatId, '✅ Exam started', {
-        replyKeyboard: resp.replyKeyboard as any,
-      });
+    // ACTIVE_EXAM: remove reply keyboard if requested (no status spam)
+    if (resp.replyKeyboard && (resp.replyKeyboard as any).remove_keyboard) {
+      try {
+        const r0 = await sendSafeTelegramMessage(token, chatId, '⁠', {
+          replyKeyboard: { remove_keyboard: true } as any,
+        });
+        const carrierId = r0.messageIds?.[0];
+        if (carrierId) {
+          await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
+            signal: AbortSignal.timeout(4000),
+          }).catch(() => {});
+        }
+        logTelegramDiag({ event: 'REPLY_KEYBOARD_REMOVED', chatId, via: 'photo' });
+      } catch { /* ignore */ }
     }
     return;
   }
@@ -2164,12 +2223,30 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
 
   if (hasReplyKb && hasInline) {
     /**
-     * One content message with InlineKeyboard only.
-     * Do NOT send "Exam ready" / "Exam Submitted" status carriers (product request).
-     * ReplyKeyboard from prior screens remains chat-level; applying a new bottom
-     * keyboard would require a second visible message — skipped to avoid spam
-     * and duplicate-question regressions.
+     * ACTIVE_EXAM entry: remove ReplyKeyboard then ONE question + InlineKeyboard.
+     * Never send a second status bubble ("Exam started") and never dual-send question text.
      */
+    const isRemove = Boolean((resp.replyKeyboard as any)?.remove_keyboard);
+    if (isRemove) {
+      try {
+        const r0 = await sendSafeTelegramMessage(token, chatId, '⁠', {
+          replyKeyboard: { remove_keyboard: true } as any,
+        });
+        const carrierId = r0.messageIds?.[0];
+        if (carrierId) {
+          await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
+            signal: AbortSignal.timeout(4000),
+          }).catch(() => {});
+        }
+        logTelegramDiag({ event: 'REPLY_KEYBOARD_REMOVED', chatId });
+      } catch {
+        /* best-effort */
+      }
+    }
+
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const raw = resp.text || '';
     if (
@@ -2192,12 +2269,7 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
       rememberId(rQ.messageIds);
       const sess = getKbSession(chatId);
       if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
-      // Exam entry only: replace Continue/View Result bar with Main menu
-      if (resp.replyKeyboard) {
-        void sendSafeTelegramMessage(token, chatId, '✅ Exam started', {
-          replyKeyboard: resp.replyKeyboard as any,
-        });
-      }
+      logTelegramDiag({ event: 'QUESTION_UI_UPDATED', chatId, mode: 'send' });
     } else {
       console.warn('[Telegram] content+inline send failed:', rQ.error);
     }

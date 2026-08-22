@@ -22,6 +22,7 @@ export function startTelegramPolling() {
   console.log('[Telegram Bot Engine] Starting live Telegram long polling service...');
 
   let offset = 0;
+  let webhookCleared = false;
 
   const pollLoop = async () => {
     while (true) {
@@ -31,6 +32,14 @@ export function startTelegramPolling() {
       if (!token || settings.botActive === false) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         continue;
+      }
+
+      if (!webhookCleared) {
+        webhookCleared = true;
+        try {
+          await fetch(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updates=false`);
+          console.log('[Telegram Bot Engine] Webhook cleared once for polling');
+        } catch { /* ignore */ }
       }
 
       try {
@@ -94,22 +103,8 @@ export function startTelegramPolling() {
               const response = await processTelegramUpdate(update);
               if (response) {
                 await sendTelegramResponse(response);
-              } else if (slowKind && cb) {
-                // Ensure loading is never left stuck if handler returned null
-                const chatId = cb.message?.chat?.id || cb.from?.id;
-                const messageId = cb.message?.message_id;
-                if (chatId) {
-                  await sendTelegramResponse({
-                    chatId: Number(chatId),
-                    messageId: messageId ? Number(messageId) : undefined,
-                    type: messageId ? 'editMessageText' : 'sendMessage',
-                    text: '⚠️ Could not load that view. Tap *Main menu* and try again.',
-                    replyMarkup: {
-                      inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]],
-                    },
-                  } as any);
-                }
               }
+              // null response = duplicate/stale/ignored — never inject Main Menu
             } catch (procErr: any) {
               console.error(
                 '[Telegram Bot Engine] Error processing update:',
