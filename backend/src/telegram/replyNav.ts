@@ -36,7 +36,9 @@ export function getKbSession(userId: number): KbSession | undefined {
 
 export function setKbSession(userId: number, s: KbSession) {
   const prev = sessions.get(userId);
-  if (prev?.lastMessageId != null && s.lastMessageId == null) {
+  // Inherit lastMessageId only when the caller omitted the field entirely.
+  // Explicit `lastMessageId: undefined` clears it (e.g. exam entry → new bubble).
+  if (prev?.lastMessageId != null && !('lastMessageId' in s)) {
     s = { ...s, lastMessageId: prev.lastMessageId };
   }
   sessions.set(userId, s);
