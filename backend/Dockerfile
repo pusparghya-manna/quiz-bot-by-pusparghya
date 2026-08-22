@@ -19,6 +19,7 @@ RUN npm install --no-audit --no-fund @google/genai@2.4.0 \
 
 COPY src ./src
 
+# sharp is a native module — must not be bundled
 RUN ./node_modules/.bin/esbuild src/index.ts \
   --bundle \
   --platform=node \
@@ -27,11 +28,12 @@ RUN ./node_modules/.bin/esbuild src/index.ts \
   --outfile=dist/index.js \
   --external:@libsql/client \
   --external:libsql \
+  --external:sharp \
   --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
   && test -f dist/index.js \
   && wc -c dist/index.js
 
-# ---- Stage 2: runtime (only native Turso driver + bundled app) ----
+# ---- Stage 2: runtime (native drivers + bundled app) ----
 FROM node:20-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
@@ -40,10 +42,11 @@ RUN apt-get update -y \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# Single small package install is reliable on Metal builders
 COPY package.json ./
-RUN npm install --no-audit --no-fund @libsql/client@0.14.0 \
-  && test -d node_modules/@libsql
+# Turso client + sharp (image crop for diagram MCQs) — native packages stay external
+RUN npm install --no-audit --no-fund @libsql/client@0.14.0 sharp@0.33.5 \
+  && test -d node_modules/@libsql \
+  && test -d node_modules/sharp
 
 COPY --from=builder /app/dist ./dist
 RUN test -f dist/index.js
