@@ -191,6 +191,14 @@ class Store {
           explanation: q.explanation ? String(q.explanation) : undefined,
           subject: q.subject ? String(q.subject) : undefined,
           teacherId: q.teacher_id ? String(q.teacher_id) : undefined,
+          image: q.image_file_id
+            ? {
+                fileId: String(q.image_file_id),
+                mimeType: q.image_mime_type ? String(q.image_mime_type) : undefined,
+                width: q.image_width != null ? Number(q.image_width) : undefined,
+                height: q.image_height != null ? Number(q.image_height) : undefined,
+              }
+            : undefined,
         };
         if (!byExam.has(examId)) byExam.set(examId, []);
         byExam.get(examId)!.push(qq);
@@ -278,6 +286,14 @@ class Store {
         negativeMarks: Number(q.negative_marks ?? 0),
         explanation: q.explanation ? String(q.explanation) : undefined,
         subject: q.subject ? String(q.subject) : undefined,
+        image: q.image_file_id
+          ? {
+              fileId: String(q.image_file_id),
+              mimeType: q.image_mime_type ? String(q.image_mime_type) : undefined,
+              width: q.image_width != null ? Number(q.image_width) : undefined,
+              height: q.image_height != null ? Number(q.image_height) : undefined,
+            }
+          : undefined,
         teacherId: String(q.teacher_id),
       } as Question;
     });
