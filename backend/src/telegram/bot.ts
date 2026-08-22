@@ -398,6 +398,27 @@ This name will appear on results and the leaderboard.`,
     } else if (data.startsWith('reattempt_')) {
       const examId = data.replace('reattempt_', '');
       response = await handleStartOrResumeExam(examId, student, user, true);
+
+    } else if (data.startsWith('viewres_')) {
+      const attemptId = data.replace('viewres_', '');
+      const att = store.getAttempts().find((a) => a.id === attemptId);
+      const exam = att ? store.getExamById(att.examId) : undefined;
+      if (att && exam && (att.telegramUserId === student.telegramUserId || att.studentId === student.studentId)) {
+        if (!att.answers || Object.keys(att.answers).length === 0) {
+          try { await store.loadAttemptAnswers(att.id); } catch {}
+        }
+        const loaded = store.getAttempts().find((a) => a.id === attemptId) || att;
+        response = renderAttemptSummary(exam, loaded, null);
+      } else {
+        response = {
+          chatId: user.id,
+          text: '❌ Result not found.',
+          replyMarkup: {
+            inline_keyboard: [[{ text: '📊 My Results', callback_data: 'btn_results' }]],
+          },
+          type: 'editMessageText',
+        };
+      }
     } else if (data.startsWith('ans_')) {
       // ans_EXAMID_qIdx_optIdx — exam IDs may contain underscores
       const rest = data.slice(4);
@@ -930,18 +951,25 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
   }
   body += `\n${subtitle('Choose an option from the buttons below.')}`;
 
-  const rows: string[][] = [];
+  // Exam actions are InlineKeyboard (not ReplyKeyboard).
+  // Bottom ReplyKeyboard stays Main-menu-only so starting the exam never needs to
+  // replace the chat-level keyboard — that was the root cause of the dual-path loop.
+  const inline: InlineKeyboardButton[][] = [];
   if (!locked) {
-    if (active) rows.push([LABELS.continueExam]);
-    else if (!anyDone) rows.push([LABELS.startExam]);
+    if (active) {
+      inline.push([{ text: LABELS.continueExam, callback_data: `resume_exam_${exam.id}` }]);
+    } else if (!anyDone) {
+      inline.push([{ text: LABELS.startExam, callback_data: `start_exam_${exam.id}` }]);
+    }
   }
-  if (anyDone) {
-    rows.push([LABELS.viewResult]);
-    rows.push([LABELS.reattempt]);
+  if (anyDone && latest) {
+    inline.push([{ text: LABELS.viewResult, callback_data: `viewres_${latest.id}` }]);
+    inline.push([{ text: LABELS.reattempt, callback_data: `reattempt_${exam.id}` }]);
+  } else if (anyDone) {
+    inline.push([{ text: LABELS.reattempt, callback_data: `reattempt_${exam.id}` }]);
   }
-  rows.push([LABELS.examLb]);
-  rows.push([LABELS.backExams]);
-  rows.push([LABELS.home]);
+  inline.push([{ text: LABELS.examLb, callback_data: `lb_exam_${exam.id}` }]);
+  inline.push([{ text: LABELS.backExams, callback_data: 'btn_exams' }]);
 
   if (student.telegramUserId) {
     setKbSession(student.telegramUserId, {
@@ -954,7 +982,8 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
   return {
     chatId: student.telegramUserId!,
     text: quote(body),
-    replyKeyboard: kbMarkup(rows),
+    replyMarkup: { inline_keyboard: inline },
+    replyKeyboard: kbMarkup([[LABELS.home]]),
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -1192,11 +1221,13 @@ async function renderQuestionView(
     { text: '📋 Question Grid', callback_data: `grid_${exam.id}` },
     { text: '✅ Submit Exam', callback_data: `confirm_submit_${exam.id}` },
   ]);
-  // Main menu only on bottom ReplyKeyboard — not under the question
+  // Single authoritative question surface: text + InlineKeyboard only.
+  // Never attach ReplyKeyboard here — chat-level Main menu is already set on exam options.
+  // One message per question state: edit in place when we have lastMessageId.
 
   const prevSess = getKbSession(user.id);
   const refreshKb = opts.refreshKeyboard === true;
-  // On exam entry, drop prior message id so we send fresh + replace sticky exam-options keyboard
+  // Fresh bubble only on exam entry/resume; otherwise edit the same question message
   const messageId = refreshKb ? undefined : prevSess?.lastMessageId;
 
   setKbSession(user.id, {
@@ -1206,7 +1237,6 @@ async function renderQuestionView(
     lastMessageId: messageId,
   });
 
-  // Answer / Next / Prev: edit same bubble (inline only) — bottom KB already Main menu
   if (messageId && !refreshKb) {
     return {
       chatId: user.id,
@@ -1218,12 +1248,10 @@ async function renderQuestionView(
     };
   }
 
-  // Exam start / resume: question + inline A–D; bottom keyboard → Main menu only
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    replyKeyboard: kbMarkup([[LABELS.home]]),
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -1851,103 +1879,89 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    * Pattern: optional silent carrier for bottom ReplyKeyboard (deleted),
    * then a SINGLE sendMessage with the question + inline A–D / nav.
    */
+  /**
+   * ROOT RULE: one visible content message → one reply_markup on that message.
+   *
+   * renderQuestionView NEVER sets replyKeyboard — only InlineKeyboard.
+   * So the question path is always a single send/edit with buttons. No dual-path,
+   * no second bubble, no button loss.
+   *
+   * Screens that need both (exam options: Main-menu ReplyKeyboard + action InlineKeyboard)
+   * use: send text+ReplyKeyboard, then editMessageReplyMarkup for inline on the SAME id.
+   * That path must not run for questions (they never pass both).
+   */
   if (hasReplyKb && hasInline) {
-    /**
-     * Avoid duplicate question bubbles (previous bug: send question without buttons,
-     * edit fails, then send question AGAIN with buttons).
-     *
-     *  1) sendMessage(short loading text + ReplyKeyboard Main menu)
-     *     → replaces Continue/View Result/… ; system keyboard stays closed
-     *  2) editMessageText(same id → full question + InlineKeyboard)
-     *     → text changes so Telegram accepts the edit; one bubble with A/B/C/D
-     *  3) if edit fails: delete loading message, sendMessage(question + inline)
-     *     → ReplyKeyboard from (1) persists at chat level after delete
-     */
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
-    const rawDual = resp.text || '';
+    const raw = resp.text || '';
     if (
       !resp.parseMode &&
-      (rawDual.includes('<blockquote>') || rawDual.includes('<b>') || rawDual.includes('<i>'))
+      (raw.includes('<blockquote>') || raw.includes('<b>') || raw.includes('<i>'))
     ) {
       mode = 'HTML';
     }
 
-    const loadingText = '⏳ Loading question…';
-    let r1 = await sendSafeTelegramMessage(token, chatId, loadingText, {
+    // 1) Chat-level Main menu (or whatever ReplyKeyboard) + screen text
+    let r1 = await sendSafeTelegramMessage(token, chatId, raw, {
+      parseMode: mode,
       replyKeyboard: resp.replyKeyboard,
     });
+    if (!r1.ok && mode) {
+      r1 = await sendSafeTelegramMessage(token, chatId, raw, {
+        replyKeyboard: resp.replyKeyboard,
+      });
+      mode = undefined;
+    }
     if (!r1.ok) {
-      // Keyboard apply failed — still deliver question with buttons
-      const rOnly = await sendSafeTelegramMessage(token, chatId, rawDual, {
+      // Fall back to inline-only so actions still work
+      const rOnly = await sendSafeTelegramMessage(token, chatId, raw, {
         parseMode: mode,
         replyMarkup: resp.replyMarkup,
       });
       if (rOnly.ok) rememberId(rOnly.messageIds);
-      else console.warn('[Telegram] exam question send failed:', r1.error);
       return;
     }
-
+    rememberId(r1.messageIds);
     const mid = r1.messageIds?.[0];
-    if (!mid) {
-      const rOnly = await sendSafeTelegramMessage(token, chatId, rawDual, {
-        parseMode: mode,
-        replyMarkup: resp.replyMarkup,
-      });
-      if (rOnly.ok) rememberId(rOnly.messageIds);
-      return;
-    }
+    if (!mid) return;
 
     await new Promise((r) => setTimeout(r, 80));
-
-    let edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
-      parseMode: mode,
-      replyMarkup: resp.replyMarkup,
-      messageId: mid,
-      preferEdit: true,
-      editOnly: true,
-    });
-    if (!edited.ok && mode) {
-      edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
-        replyMarkup: resp.replyMarkup,
-        messageId: mid,
-        preferEdit: true,
-        editOnly: true,
-      });
-    }
-
-    if (edited.ok) {
-      rememberId([mid]);
-      return;
-    }
-
-    // Edit failed: remove loading bubble, send one question with buttons.
-    // ReplyKeyboard from step 1 stays (chat-level; delete does not clear it).
     try {
-      await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+      const res = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, message_id: mid }),
-        signal: AbortSignal.timeout(4000),
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: mid,
+          reply_markup: resp.replyMarkup,
+        }),
+        signal: AbortSignal.timeout(5000),
       });
+      const data: any = await res.json().catch(() => ({}));
+      if (!data?.ok) {
+        // Full text+inline edit
+        await sendSafeTelegramMessage(token, chatId, raw, {
+          parseMode: mode,
+          replyMarkup: resp.replyMarkup,
+          messageId: mid,
+          preferEdit: true,
+          editOnly: true,
+        });
+      }
     } catch {
-      /* ignore */
+      /* menu inline is best-effort */
     }
-
-    const r2 = await sendSafeTelegramMessage(token, chatId, rawDual, {
-      parseMode: mode,
-      replyMarkup: resp.replyMarkup,
-    });
-    if (r2.ok) rememberId(r2.messageIds);
-    else console.warn('[Telegram] exam question+buttons send failed:', r2.error);
     return;
   }
+
+  const useInline = hasInline;
+  const useReplyKb = hasReplyKb;
 
   let messageId = resp.messageId;
   if (!messageId && resp.type === 'editMessageText') {
     messageId = getKbSession(chatId)?.lastMessageId;
   }
-  // Prefer in-place edit for pure inline updates (answer / next without keyboard change)
-  const preferEdit = Boolean(messageId) && !hasReplyKb;
+  // Edit in place only when not applying a new ReplyKeyboard
+  const preferEdit = Boolean(messageId) && !useReplyKb;
 
   let mode = resp.parseMode || 'Markdown';
   const rawText = resp.text || '';
@@ -1959,8 +1973,8 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
   }
   const result = await sendSafeTelegramMessage(token, chatId, rawText, {
     parseMode: mode,
-    replyMarkup: resp.replyMarkup,
-    replyKeyboard: resp.replyKeyboard,
+    replyMarkup: useInline ? resp.replyMarkup : undefined,
+    replyKeyboard: useReplyKb ? resp.replyKeyboard : undefined,
     messageId,
     preferEdit,
   });
