@@ -598,7 +598,7 @@ This name will appear on results and the leaderboard.`,
                 try { await store.loadAttemptAnswers(att.id); } catch {}
               }
               const loaded = store.getAttempts().find((a) => a.id === attemptId) || att;
-              return { ...renderAttemptSummary(exam, loaded, null), type: 'sendMessage' };
+              return { ...renderAttemptSummary(exam, loaded, null), type: 'sendMessage', parseMode: 'HTML' };
             }
           }
           if (arg.startsWith('q:') && sess?.examId) {
@@ -646,7 +646,7 @@ This name will appear on results and the leaderboard.`,
               try { await store.loadAttemptAnswers(att.id); } catch {}
             }
             const loaded = store.getAttempts().find((a) => a.id === att.id) || att;
-            return { ...renderAttemptSummary(exam, loaded, null), type: 'sendMessage' };
+            return { ...renderAttemptSummary(exam, loaded, null), type: 'sendMessage', parseMode: 'HTML' };
           }
         }
         if (action === 'reattempt' && sess?.examId) {
@@ -666,14 +666,14 @@ This name will appear on results and the leaderboard.`,
               try { await store.loadAttemptAnswers(att.id); } catch {}
             }
             const loaded = store.getAttempts().find((a) => a.id === att.id) || att;
-            return { ...renderAttemptSummary(exam, loaded, 0), type: 'sendMessage' };
+            return { ...renderAttemptSummary(exam, loaded, 0), type: 'sendMessage', parseMode: 'HTML' };
           }
         }
         if (action === 'score_sum' && sess?.attemptId) {
           const att = store.getAttempts().find((a) => a.id === sess.attemptId);
           const exam = att ? store.getExamById(att.examId) : undefined;
           if (att && exam) {
-            return { ...renderAttemptSummary(exam, att, null), type: 'sendMessage' };
+            return { ...renderAttemptSummary(exam, att, null), type: 'sendMessage', parseMode: 'HTML' };
           }
         }
         if ((action === 'prev' || action === 'next') && sess) {
@@ -682,7 +682,7 @@ This name will appear on results and the leaderboard.`,
             const att = store.getAttempts().find((a) => a.id === sess.attemptId);
             const exam = att ? store.getExamById(att.examId) : undefined;
             if (att && exam) {
-              return { ...renderAttemptSummary(exam, att, Math.max(0, page)), type: 'sendMessage' };
+              return { ...renderAttemptSummary(exam, att, Math.max(0, page)), type: 'sendMessage', parseMode: 'HTML' };
             }
           }
           if (sess.screen === 'in_exam' && sess.examId && sess.qIdx != null) {
@@ -1480,40 +1480,33 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
       let body =
         `${titleBlock('📖', 'Review answers')}\n` +
         `${subtitle(exam.title)}\n` +
-        `<i>Questions ${startQ + 1}–${endQ} of ${totalQ} · page ${page + 1}/${totalPages}</i>\n\n` +
-        `${DIV}\n`;
+        `<i>Questions ${startQ + 1}–${endQ} of ${totalQ} · Page ${page + 1}/${totalPages}</i>\n\n`;
 
       for (let i = startQ; i < endQ; i++) {
         const q = exam.questions[i];
         const sel = attempt.answers?.[q.id];
         const has = sel !== undefined && sel !== null;
         let mark = '⚪';
-        let extra = 'Skipped';
         if (has) {
           const ok = q.answer !== null && sel === q.answer;
           mark = ok ? '✅' : '❌';
-          const chosen = q.options?.[sel as number] ?? `opt ${sel}`;
-          const correct =
-            q.answer !== null && q.options?.[q.answer] !== undefined ? q.options[q.answer] : '—';
-          const cShort = String(chosen).slice(0, 40);
-          const rShort = String(correct).slice(0, 40);
-          extra = ok ? `Yours: ${cShort}` : `Yours: ${cShort} · Correct: ${rShort}`;
         }
+
         const qText = escapeHtml(q.question || '');
-        body += `\n${mark} <b>Q${i + 1}.</b>\n`;
+        body += `${mark} <b>Q${i + 1}.</b>\n`;
         body += `<blockquote><b>${qText}</b></blockquote>\n`;
+
         if (q.options && q.options.length) {
           q.options.forEach((optText: string, oi: number) => {
             const letter = String.fromCharCode(65 + oi);
-            const isSel = has && sel === oi;
             const isCorrect = q.answer !== null && q.answer === oi;
-            let prefix = isSel ? '●' : '○';
-            if (isCorrect) prefix = '✅';
-            else if (isSel && !isCorrect) prefix = '❌';
-            body += `<blockquote>${prefix} <b>${letter}.</b> ${escapeHtml(String(optText || ''))}</blockquote>`;
+            const prefix = isCorrect ? '✅' : '○';
+            body += `${prefix} <b>${letter}.</b> ${escapeHtml(String(optText ?? ''))}\n`;
           });
+        } else if (has) {
+          body += `<i>${escapeHtml('Answer recorded')}</i>\n`;
         } else {
-          body += `<i>${escapeHtml(extra)}</i>\n`;
+          body += `<i>Skipped</i>\n`;
         }
         body += `\n`;
       }
@@ -1853,8 +1846,15 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       /* keyboard apply is best-effort */
     }
 
-    const mode = resp.parseMode || 'Markdown';
-    let r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+    let mode = resp.parseMode || 'Markdown';
+    const rawDual = resp.text || '';
+    if (
+      !resp.parseMode &&
+      (rawDual.includes('<blockquote>') || rawDual.includes('<b>') || rawDual.includes('<i>'))
+    ) {
+      mode = 'HTML';
+    }
+    let r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
       parseMode: mode,
       replyMarkup: resp.replyMarkup,
     });
@@ -1878,8 +1878,15 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
   // Prefer in-place edit for pure inline updates (answer / next without keyboard change)
   const preferEdit = Boolean(messageId) && !hasReplyKb;
 
-  const mode = resp.parseMode || 'Markdown';
-  const result = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
+  let mode = resp.parseMode || 'Markdown';
+  const rawText = resp.text || '';
+  if (
+    !resp.parseMode &&
+    (rawText.includes('<blockquote>') || rawText.includes('<b>') || rawText.includes('<i>'))
+  ) {
+    mode = 'HTML';
+  }
+  const result = await sendSafeTelegramMessage(token, chatId, rawText, {
     parseMode: mode,
     replyMarkup: resp.replyMarkup,
     replyKeyboard: resp.replyKeyboard,
