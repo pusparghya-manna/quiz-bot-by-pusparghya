@@ -413,7 +413,7 @@ class Store {
   }
 
   async saveAttempt(attempt: Attempt) {
-    await this.persistAttempt(attempt, { replaceAnswers: true });
+    // Update in-memory cache first so exam start can render without waiting on SQL
     const idx = this.data.attempts.findIndex((a) => a.id === attempt.id);
     if (idx >= 0) this.data.attempts[idx] = attempt;
     else {
@@ -422,6 +422,7 @@ class Store {
         this.data.attempts.length = ATTEMPT_CACHE_MAX;
       }
     }
+    await this.persistAttempt(attempt, { replaceAnswers: true });
     return attempt;
   }
 
