@@ -59,6 +59,17 @@ export function kbMarkup(rows: string[][], opts?: { oneTime?: boolean }): ReplyK
     resize_keyboard: true,
     is_persistent: true,
     one_time_keyboard: opts?.oneTime || false,
+    // Keeps the chat input from inviting free-text focus on many clients
+    input_field_placeholder: 'Tap a button below',
+  } as ReplyKeyboardMarkup;
+}
+
+/** Only for deliberate name entry — opens the native typing keyboard. */
+export function forceReplyNameMarkup(): { force_reply: true; selective: boolean; input_field_placeholder: string } {
+  return {
+    force_reply: true,
+    selective: true,
+    input_field_placeholder: 'Type your name…',
   };
 }
 

@@ -8,6 +8,7 @@ import {
   LABELS,
   mainNavRows,
   numberedListRows,
+  forceReplyNameMarkup,
 } from './replyNav.js';
 import {
   escapeHtml,
@@ -355,6 +356,7 @@ async function processTelegramUpdateInner(update: TelegramUpdate): Promise<Simul
     // 1. Navigation / List Exams
     if (data === 'btn_home' || data === 'btn_menu') {
       pendingNameUsers.delete(user.id);
+      // Main menu always re-applies ReplyKeyboard (closes ForceReply / Gboard)
       response = renderMainMenu(student);
     } else if (data === 'btn_setname') {
       pendingNameUsers.add(user.id);
@@ -791,9 +793,7 @@ Open the full scrollable review below.`,
             `Please type your full name and send it as a message.
 ` +
             `This name appears on results and the leaderboard.`,
-          replyMarkup: {
-            inline_keyboard: [[{ text: '🏠 Main menu', callback_data: 'btn_home' }]],
-          },
+          replyKeyboard: forceReplyNameMarkup() as any,
           type: 'sendMessage',
         };
       }
@@ -1847,23 +1847,12 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    * then a SINGLE sendMessage with the question + inline A–D / nav.
    */
   if (hasReplyKb && hasInline) {
-    try {
-      const r0 = await sendSafeTelegramMessage(token, chatId, '⁠', {
-        replyKeyboard: resp.replyKeyboard,
-      });
-      const carrierId = r0.messageIds?.[0];
-      if (carrierId) {
-        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
-          signal: AbortSignal.timeout(4000),
-        }).catch(() => {});
-      }
-    } catch {
-      /* keyboard apply is best-effort */
-    }
-
+    /**
+     * Keep ReplyKeyboard on the chat (suppresses native Gboard) and attach
+     * InlineKeyboard to the same message via editMessageReplyMarkup.
+     * Never delete the keyboard-setter message — that lets the system keyboard pop up.
+     * Never send the question text twice.
+     */
     let mode = resp.parseMode || 'Markdown';
     const rawDual = resp.text || '';
     if (
@@ -1872,20 +1861,38 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     ) {
       mode = 'HTML';
     }
+
     let r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
       parseMode: mode,
-      replyMarkup: resp.replyMarkup,
+      replyKeyboard: resp.replyKeyboard,
     });
     if (!r1.ok) {
-      r1 = await sendSafeTelegramMessage(token, chatId, resp.text || '', {
-        replyMarkup: resp.replyMarkup,
+      r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
+        replyKeyboard: resp.replyKeyboard,
       });
     }
     if (!r1.ok) {
-      console.warn('[Telegram] question+options send failed:', r1.error);
+      console.warn('[Telegram] question+keyboard send failed:', r1.error);
       return;
     }
     rememberId(r1.messageIds);
+    const mid = r1.messageIds?.[0];
+    if (mid && resp.replyMarkup) {
+      try {
+        await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: mid,
+            reply_markup: resp.replyMarkup,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch (e) {
+        console.warn('[Telegram] editMessageReplyMarkup failed', e);
+      }
+    }
     return;
   }
 

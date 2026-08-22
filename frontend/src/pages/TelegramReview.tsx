@@ -73,6 +73,9 @@ export default function TelegramReview() {
       tg?.ready();
       tg?.expand();
       tg?.MainButton?.hide();
+      // Never leave a focused field that could reopen the native keyboard
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && typeof ae.blur === 'function') ae.blur();
     } catch {
       /* ignore */
     }

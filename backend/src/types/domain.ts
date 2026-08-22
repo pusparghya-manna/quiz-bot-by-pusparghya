@@ -118,6 +118,13 @@ export interface ReplyKeyboardMarkup {
   one_time_keyboard?: boolean;
   is_persistent?: boolean;
   selective?: boolean;
+  input_field_placeholder?: string;
+}
+
+export interface ForceReplyMarkup {
+  force_reply: true;
+  selective?: boolean;
+  input_field_placeholder?: string;
 }
 
 export interface ReplyKeyboardRemove {
@@ -171,7 +178,7 @@ export interface SimulatorResponse {
    * Bottom input-area keyboard (ReplyKeyboard).
    * Only applied on sendMessage (Telegram cannot attach it via editMessageText).
    */
-  replyKeyboard?: ReplyKeyboardMarkup | ReplyKeyboardRemove;
+  replyKeyboard?: ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReplyMarkup;
   messageId?: number;
   /** Defaults to Markdown when omitted */
   parseMode?: 'Markdown' | 'HTML';
