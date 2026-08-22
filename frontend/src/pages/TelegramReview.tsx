@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 type QStatus = 'correct' | 'wrong' | 'unattempted';
 type Filter = 'all' | 'correct' | 'wrong' | 'unattempted';
@@ -55,12 +55,23 @@ function letter(i: number) {
   return String.fromCharCode(65 + i);
 }
 
+function statusLabel(s: QStatus): string {
+  if (s === 'correct') return 'Correct';
+  if (s === 'wrong') return 'Wrong';
+  return 'Skipped';
+}
+
 export default function TelegramReview() {
   const [data, setData] = useState<ReviewPayload | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
-  const [focusQ, setFocusQ] = useState<number | null>(null);
+  const [bookmarks, setBookmarks] = useState<Record<string, boolean>>({});
+  const [gridCollapsed, setGridCollapsed] = useState(false);
+  const [gridManualOpen, setGridManualOpen] = useState(false);
+
+  const lastScrollY = useRef(0);
+  const scrollTicking = useRef(false);
 
   const attemptId = useMemo(() => {
     const q = new URLSearchParams(window.location.search);
@@ -73,7 +84,6 @@ export default function TelegramReview() {
       tg?.ready();
       tg?.expand();
       tg?.MainButton?.hide();
-      // Never leave a focused field that could reopen the native keyboard
       const ae = document.activeElement as HTMLElement | null;
       if (ae && typeof ae.blur === 'function') ae.blur();
     } catch {
@@ -100,7 +110,7 @@ export default function TelegramReview() {
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
-          setError(json.error || 'Failed to load review');
+          setError((json as { error?: string }).error || 'Failed to load review');
           setLoading(false);
           return;
         }
@@ -120,240 +130,535 @@ export default function TelegramReview() {
     return data.questions.filter((q) => q.status === filter);
   }, [data, filter]);
 
+  const onScroll = useCallback(() => {
+    if (scrollTicking.current) return;
+    scrollTicking.current = true;
+    requestAnimationFrame(() => {
+      const y = window.scrollY || document.documentElement.scrollTop;
+      const prev = lastScrollY.current;
+      const delta = y - prev;
+
+      if (y < 48) {
+        setGridCollapsed(false);
+        setGridManualOpen(false);
+      } else if (delta > 8 && y > 80) {
+        // Scrolling down through questions — collapse grid for space
+        setGridCollapsed(true);
+        setGridManualOpen(false);
+      } else if (delta < -8) {
+        // Scrolling up — expand grid again
+        setGridCollapsed(false);
+      }
+
+      lastScrollY.current = y;
+      scrollTicking.current = false;
+    });
+  }, []);
+
   useEffect(() => {
-    if (focusQ == null) return;
-    const el = document.getElementById(`q-${focusQ}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [focusQ, filter]);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [onScroll]);
+
+  const jumpTo = (index: number) => {
+    const el = document.getElementById(`q-${index}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setGridCollapsed(true);
+      setGridManualOpen(false);
+    }
+  };
+
+  const toggleBookmark = (id: string) => {
+    setBookmarks((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   if (loading) {
     return (
-      <div style={styles.shell}>
-        <div style={styles.card}>⏳ Loading review…</div>
+      <div style={s.shell}>
+        <div style={s.centerCard}>⏳ Loading review…</div>
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div style={styles.shell}>
-        <div style={styles.card}>
-          <b>Could not open review</b>
-          <p style={{ marginTop: 8, opacity: 0.85 }}>{error || 'Unknown error'}</p>
+      <div style={s.shell}>
+        <div style={s.centerCard}>
+          <b style={{ fontSize: 16 }}>Could not open review</b>
+          <p style={{ marginTop: 8, color: '#64748b', fontSize: 14 }}>{error || 'Unknown error'}</p>
         </div>
       </div>
     );
   }
 
-  const { summary, exam } = data;
+  const { summary, exam, attempt } = data;
+  const scorePct = Math.round(attempt.percentage ?? summary.accuracy ?? 0);
+  const showGrid = !gridCollapsed || gridManualOpen;
 
   return (
-    <div style={styles.shell}>
-      <header style={styles.sticky}>
-        <div style={styles.title}>{exam.title}</div>
-        <div style={styles.stats}>
-          <span>Q {summary.total}</span>
-          <span>✅ {summary.correct}</span>
-          <span>❌ {summary.wrong}</span>
-          <span>○ {summary.unattempted}</span>
-          <span>
-            ⭐ {summary.score}/{summary.maxScore}
-          </span>
-          <span>{summary.accuracy}%</span>
+    <div style={s.shell}>
+      {/* Header */}
+      <header style={s.header}>
+        <div style={s.headerTop}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={s.headerTitleRow}>
+              <span style={s.headerIcon}>📋</span>
+              <h1 style={s.headerTitle}>Review Answers</h1>
+            </div>
+            <p style={s.examName}>{exam.title}</p>
+          </div>
+          <div style={s.scoreBadge}>
+            <span style={s.scoreStar}>⭐</span>
+            <div>
+              <div style={s.scoreNums}>
+                {summary.score} / {summary.maxScore}
+              </div>
+              <div style={s.scorePct}>Score ({scorePct}%)</div>
+            </div>
+          </div>
         </div>
-        <div style={styles.filters}>
+
+        {/* Filter row */}
+        <div style={s.filterRow}>
           {(
             [
-              ['all', 'ALL'],
-              ['correct', '✅ CORRECT'],
-              ['wrong', '❌ WRONG'],
-              ['unattempted', '○ SKIPPED'],
-            ] as [Filter, string][]
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-              style={{
-                ...styles.filterBtn,
-                ...(filter === key ? styles.filterActive : {}),
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div style={styles.grid}>
-          {data.questions.map((q) => {
-            const bg =
-              q.status === 'correct' ? '#dcfce7' : q.status === 'wrong' ? '#fee2e2' : '#f3f4f6';
-            const color =
-              q.status === 'correct' ? '#166534' : q.status === 'wrong' ? '#991b1b' : '#4b5563';
+              ['all', 'ALL QUESTIONS', summary.total, '#2563eb', '#eff6ff'],
+              ['correct', 'CORRECT', summary.correct, '#16a34a', '#f0fdf4'],
+              ['wrong', 'WRONG', summary.wrong, '#dc2626', '#fef2f2'],
+              ['unattempted', 'SKIPPED', summary.unattempted, '#d97706', '#fffbeb'],
+            ] as [Filter, string, number, string, string][]
+          ).map(([key, label, count, color, bg]) => {
+            const active = filter === key;
             return (
               <button
-                key={q.id}
+                key={key}
                 type="button"
-                id={`grid-${q.index}`}
-                onClick={() => {
-                  setFilter('all');
-                  setFocusQ(q.index);
-                  setTimeout(() => setFocusQ(q.index), 50);
-                }}
+                onClick={() => setFilter(key)}
                 style={{
-                  ...styles.gridBtn,
-                  background: bg,
-                  color,
-                  outline: focusQ === q.index ? '2px solid #2563eb' : 'none',
+                  ...s.filterCard,
+                  borderColor: active ? color : '#e2e8f0',
+                  background: active ? bg : '#fff',
+                  boxShadow: active ? `0 0 0 1px ${color}33` : 'none',
                 }}
-                title={`Q${q.index + 1}`}
               >
-                {q.index + 1}
+                <span style={{ ...s.filterCount, color: active ? color : '#0f172a' }}>{count}</span>
+                <span style={{ ...s.filterLabel, color: active ? color : '#64748b' }}>
+                  {key === 'all' && '▦ '}
+                  {key === 'correct' && '✅ '}
+                  {key === 'wrong' && '❌ '}
+                  {key === 'unattempted' && '○ '}
+                  {label}
+                </span>
               </button>
             );
           })}
         </div>
       </header>
 
-      <main style={styles.main}>
+      {/* Sticky collapsible question grid */}
+      <div style={s.gridSticky}>
+        <button
+          type="button"
+          style={s.gridToggle}
+          onClick={() => {
+            if (gridCollapsed) {
+              setGridManualOpen(true);
+              setGridCollapsed(false);
+            } else {
+              setGridCollapsed(true);
+              setGridManualOpen(false);
+            }
+          }}
+        >
+          <span style={s.hintText}>
+            {showGrid
+              ? 'Scroll down to view all questions. Tap any question number to jump to it.'
+              : `Question grid hidden · ${filtered.length} questions · tap to expand`}
+          </span>
+          <span style={s.chevron}>{showGrid ? '▾' : '▸'}</span>
+        </button>
+
+        <div
+          style={{
+            ...s.gridWrap,
+            maxHeight: showGrid ? 220 : 0,
+            opacity: showGrid ? 1 : 0,
+            marginBottom: showGrid ? 8 : 0,
+          }}
+        >
+          <div style={s.grid}>
+            {filtered.map((q) => {
+              const bg =
+                q.status === 'correct'
+                  ? '#dcfce7'
+                  : q.status === 'wrong'
+                    ? '#fee2e2'
+                    : '#f1f5f9';
+              const color =
+                q.status === 'correct'
+                  ? '#15803d'
+                  : q.status === 'wrong'
+                    ? '#b91c1c'
+                    : '#64748b';
+              const border =
+                q.status === 'correct'
+                  ? '#86efac'
+                  : q.status === 'wrong'
+                    ? '#fca5a5'
+                    : '#e2e8f0';
+              return (
+                <button
+                  key={q.id}
+                  type="button"
+                  onClick={() => jumpTo(q.index)}
+                  style={{
+                    ...s.gridBtn,
+                    background: bg,
+                    color,
+                    borderColor: border,
+                  }}
+                  aria-label={`Go to question ${q.index + 1}`}
+                >
+                  {q.index + 1}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Continuous question cards */}
+      <main style={s.main}>
         {filtered.map((q) => {
-          const statusLabel =
-            q.status === 'correct' ? '✅ Status: Right' : q.status === 'wrong' ? '❌ Status: Wrong' : '○ Status: Unattempted';
+          const bookmarked = !!bookmarks[q.id];
           return (
-            <article key={q.id} id={`q-${q.index}`} style={styles.qCard}>
-              <div style={styles.qBlock}>
-                <b>
-                  Q{q.index + 1}. {q.question}
-                </b>
-              </div>
-              <div style={styles.statusLine}>{statusLabel}</div>
-              {q.options.map((opt, oi) => {
-                const isCorrect = q.correctIndex === oi;
-                const isSelected = q.selectedIndex === oi;
-                let prefix = '○';
-                if (isCorrect) prefix = '✅';
-                else if (isSelected && q.status === 'wrong') prefix = '❌';
-                return (
-                  <div
-                    key={oi}
+            <article key={q.id} id={`q-${q.index}`} style={s.qCard}>
+              <div style={s.qHead}>
+                <div style={s.qHeadLeft}>
+                  <span style={s.qNum}>Q{q.index + 1}</span>
+                  <span
                     style={{
-                      ...styles.opt,
-                      fontWeight: isCorrect || isSelected ? 600 : 400,
-                      color: isCorrect ? '#166534' : isSelected && q.status === 'wrong' ? '#991b1b' : '#111827',
+                      ...s.statusPill,
+                      background:
+                        q.status === 'correct'
+                          ? '#dcfce7'
+                          : q.status === 'wrong'
+                            ? '#fee2e2'
+                            : '#fef3c7',
+                      color:
+                        q.status === 'correct'
+                          ? '#15803d'
+                          : q.status === 'wrong'
+                            ? '#b91c1c'
+                            : '#b45309',
                     }}
                   >
-                    {prefix} {letter(oi)}. {opt}
-                  </div>
-                );
-              })}
-              {(q.status === 'wrong' || q.status === 'unattempted') && q.correctIndex != null && (
-                <div style={styles.correctHint}>
-                  <b>✓ Correct Answer:</b> {letter(q.correctIndex)}. {q.options[q.correctIndex]}
+                    {q.status === 'correct' && '✅ '}
+                    {q.status === 'wrong' && '❌ '}
+                    {q.status === 'unattempted' && '○ '}
+                    {statusLabel(q.status)}
+                  </span>
                 </div>
-              )}
-              <div style={styles.divider} />
+                <button
+                  type="button"
+                  onClick={() => toggleBookmark(q.id)}
+                  style={{
+                    ...s.bookmarkBtn,
+                    color: bookmarked ? '#2563eb' : '#94a3b8',
+                  }}
+                  aria-label="Bookmark"
+                >
+                  {bookmarked ? '🔖' : '📑'} Bookmark
+                </button>
+              </div>
+
+              <p style={s.qText}>{q.question}</p>
+
+              <div style={s.opts}>
+                {(q.options || []).map((opt, oi) => {
+                  const isCorrect = q.correctIndex != null && q.correctIndex === oi;
+                  const isSelected = q.selectedIndex != null && q.selectedIndex === oi;
+                  const isWrongPick = isSelected && q.status === 'wrong';
+
+                  let optStyle: CSSProperties = { ...s.opt };
+                  if (isCorrect) {
+                    optStyle = {
+                      ...optStyle,
+                      background: '#dcfce7',
+                      borderColor: '#86efac',
+                      color: '#14532d',
+                    };
+                  } else if (isWrongPick) {
+                    optStyle = {
+                      ...optStyle,
+                      background: '#fee2e2',
+                      borderColor: '#fca5a5',
+                      color: '#7f1d1d',
+                    };
+                  }
+
+                  return (
+                    <div key={oi} style={optStyle}>
+                      <span style={s.optMark}>
+                        {isCorrect ? '✅' : isWrongPick ? '❌' : '○'}
+                      </span>
+                      <span style={s.optBody}>
+                        <b>{letter(oi)}.</b> {opt}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </article>
           );
         })}
+
         {filtered.length === 0 && (
-          <div style={styles.card}>No questions in this filter.</div>
+          <div style={s.centerCard}>No questions in this filter.</div>
         )}
       </main>
     </div>
   );
 }
 
-const styles: Record<string, CSSProperties> = {
+const s: Record<string, CSSProperties> = {
   shell: {
     minHeight: '100vh',
-    background: '#0f172a',
+    background: '#f8fafc',
     color: '#0f172a',
-    fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+    fontFamily:
+      'system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Bengali", "Hind Siliguri", sans-serif',
+    WebkitFontSmoothing: 'antialiased',
   },
-  sticky: {
-    position: 'sticky',
-    top: 0,
-    zIndex: 20,
-    background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)',
-    color: '#f8fafc',
-    padding: '12px 12px 10px',
-    borderBottom: '1px solid #334155',
+  centerCard: {
+    margin: 24,
+    padding: 20,
+    background: '#fff',
+    borderRadius: 16,
+    border: '1px solid #e2e8f0',
+    boxShadow: '0 1px 3px rgba(15,23,42,0.06)',
+    textAlign: 'center',
+    color: '#0f172a',
   },
-  title: { fontWeight: 700, fontSize: 16, marginBottom: 8 },
-  stats: {
+  header: {
+    background: '#fff',
+    padding: '14px 14px 12px',
+    borderBottom: '1px solid #e2e8f0',
+  },
+  headerTop: {
     display: 'flex',
-    flexWrap: 'wrap',
-    gap: 8,
-    fontSize: 12,
-    opacity: 0.95,
-    marginBottom: 10,
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
   },
-  filters: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
-  filterBtn: {
-    border: '1px solid #475569',
-    background: '#1e293b',
-    color: '#e2e8f0',
-    borderRadius: 999,
-    padding: '6px 10px',
+  headerTitleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerIcon: { fontSize: 18 },
+  headerTitle: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 700,
+    letterSpacing: '-0.02em',
+    color: '#0f172a',
+  },
+  examName: {
+    margin: '4px 0 0',
+    fontSize: 13,
+    color: '#64748b',
+    lineHeight: 1.35,
+    wordBreak: 'break-word',
+  },
+  scoreBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    background: '#fffbeb',
+    border: '1px solid #fde68a',
+    borderRadius: 14,
+    padding: '8px 12px',
+    flexShrink: 0,
+  },
+  scoreStar: { fontSize: 18 },
+  scoreNums: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: '#92400e',
+    lineHeight: 1.2,
+    whiteSpace: 'nowrap',
+  },
+  scorePct: {
     fontSize: 11,
+    color: '#b45309',
     fontWeight: 600,
   },
-  filterActive: { background: '#2563eb', borderColor: '#2563eb', color: '#fff' },
+  filterRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: 8,
+  },
+  filterCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 2,
+    padding: '10px 4px',
+    borderRadius: 12,
+    border: '1.5px solid #e2e8f0',
+    background: '#fff',
+    cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+  },
+  filterCount: {
+    fontSize: 18,
+    fontWeight: 800,
+    lineHeight: 1.2,
+  },
+  filterLabel: {
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: '0.02em',
+    textAlign: 'center',
+    lineHeight: 1.25,
+  },
+  gridSticky: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 30,
+    background: '#f8fafc',
+    borderBottom: '1px solid #e2e8f0',
+    padding: '0 12px',
+  },
+  gridToggle: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    padding: '10px 4px',
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+  },
+  hintText: {
+    fontSize: 12,
+    color: '#64748b',
+    textAlign: 'left',
+    lineHeight: 1.35,
+  },
+  chevron: {
+    fontSize: 14,
+    color: '#94a3b8',
+    flexShrink: 0,
+  },
+  gridWrap: {
+    overflow: 'hidden',
+    transition: 'max-height 0.28s ease, opacity 0.22s ease, margin 0.22s ease',
+  },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(36px, 1fr))',
-    gap: 4,
-    maxHeight: 120,
-    overflowY: 'auto',
+    gridTemplateColumns: 'repeat(10, 1fr)',
+    gap: 6,
+    paddingBottom: 4,
   },
   gridBtn: {
-    border: 'none',
-    borderRadius: 8,
-    height: 32,
+    aspectRatio: '1',
+    borderRadius: 10,
+    border: '1px solid',
     fontSize: 12,
     fontWeight: 700,
+    cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    minHeight: 32,
   },
   main: {
-    padding: '12px 12px 40px',
-    background: '#f1f5f9',
+    padding: '12px 12px 48px',
   },
-  qCard: { marginBottom: 4 },
-  qBlock: {
+  qCard: {
     background: '#fff',
-    borderRadius: 12,
-    padding: '12px 14px',
+    borderRadius: 16,
     border: '1px solid #e2e8f0',
-    marginBottom: 8,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-    lineHeight: 1.45,
-    fontSize: 14,
+    boxShadow: '0 1px 3px rgba(15,23,42,0.05)',
+    padding: '14px 14px 12px',
+    marginBottom: 12,
   },
-  statusLine: { fontSize: 13, fontWeight: 700, marginBottom: 6 },
-  opt: {
-    fontSize: 13,
-    lineHeight: 1.4,
-    padding: '2px 0',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
+  qHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 10,
   },
-  correctHint: {
-    marginTop: 8,
-    fontSize: 13,
-    color: '#166534',
-    background: '#ecfdf5',
-    borderRadius: 8,
-    padding: '8px 10px',
+  qHeadLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
   },
-  divider: {
-    height: 1,
-    background: '#cbd5e1',
-    margin: '14px 0',
-  },
-  card: {
-    background: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    margin: 16,
+  qNum: {
+    fontSize: 15,
+    fontWeight: 800,
     color: '#0f172a',
+  },
+  statusPill: {
+    fontSize: 12,
+    fontWeight: 700,
+    borderRadius: 999,
+    padding: '3px 10px',
+    whiteSpace: 'nowrap',
+  },
+  bookmarkBtn: {
+    border: 'none',
+    background: 'transparent',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: '4px 0',
+    whiteSpace: 'nowrap',
+    WebkitTapHighlightColor: 'transparent',
+  },
+  qText: {
+    margin: '0 0 12px',
+    fontSize: 14,
+    lineHeight: 1.55,
+    color: '#0f172a',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
+  },
+  opts: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  opt: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: '1px solid #e2e8f0',
+    background: '#f8fafc',
+    fontSize: 13,
+    lineHeight: 1.45,
+  },
+  optMark: {
+    flexShrink: 0,
+    fontSize: 14,
+    lineHeight: 1.4,
+  },
+  optBody: {
+    minWidth: 0,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
   },
 };
