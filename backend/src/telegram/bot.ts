@@ -1854,28 +1854,11 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Prefer ONE visible message with inline buttons.
-     * Apply ReplyKeyboard first via a deleted zero-width carrier (no visible spam),
-     * then a single sendMessage with question + inline only.
-     * Never send the question text twice.
+     * One visible question message:
+     * 1) sendMessage(text + ReplyKeyboard) → Main menu sticks, Gboard stays closed
+     * 2) editMessageText(same id, text + InlineKeyboard) → A/B/C/D under the same bubble
+     * Do NOT delete any message. Do NOT send the question text a second time.
      */
-    try {
-      const r0 = await sendSafeTelegramMessage(token, chatId, '\u2060', {
-        replyKeyboard: resp.replyKeyboard,
-      });
-      const carrierId = r0.messageIds?.[0];
-      if (carrierId) {
-        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
-          signal: AbortSignal.timeout(4000),
-        }).catch(() => {});
-      }
-    } catch {
-      /* best-effort keyboard apply */
-    }
-
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const rawDual = resp.text || '';
     if (
@@ -1887,18 +1870,65 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
 
     let r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
       parseMode: mode,
-      replyMarkup: resp.replyMarkup,
+      replyKeyboard: resp.replyKeyboard,
     });
     if (!r1.ok) {
       r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
-        replyMarkup: resp.replyMarkup,
+        replyKeyboard: resp.replyKeyboard,
       });
+      mode = undefined;
     }
     if (!r1.ok) {
-      console.warn('[Telegram] question+options send failed:', r1.error);
+      // Last resort: at least show question + buttons (keyboard may lag)
+      const rOnly = await sendSafeTelegramMessage(token, chatId, rawDual, {
+        parseMode: mode,
+        replyMarkup: resp.replyMarkup,
+      });
+      if (rOnly.ok) rememberId(rOnly.messageIds);
+      else console.warn('[Telegram] exam question send failed:', r1.error);
       return;
     }
+
     rememberId(r1.messageIds);
+    const mid = r1.messageIds?.[0];
+    if (!mid || !resp.replyMarkup) return;
+
+    let edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
+      parseMode: mode,
+      replyMarkup: resp.replyMarkup,
+      messageId: mid,
+      preferEdit: true,
+      editOnly: true,
+    });
+    if (!edited.ok && mode) {
+      edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
+        replyMarkup: resp.replyMarkup,
+        messageId: mid,
+        preferEdit: true,
+        editOnly: true,
+      });
+    }
+    if (!edited.ok) {
+      // Attach buttons without rewriting text
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: mid,
+            reply_markup: resp.replyMarkup,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+        const data: any = await res.json().catch(() => ({}));
+        if (!data?.ok) {
+          console.warn('[Telegram] could not attach inline buttons:', data?.description || edited.error);
+        }
+      } catch (e) {
+        console.warn('[Telegram] editMessageReplyMarkup error', e);
+      }
+    }
     return;
   }
 

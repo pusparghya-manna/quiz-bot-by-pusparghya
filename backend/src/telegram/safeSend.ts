@@ -83,6 +83,8 @@ export async function sendSafeTelegramMessage(
     replyKeyboard?: unknown;
     messageId?: number;
     preferEdit?: boolean;
+    /** If true with preferEdit, never fall back to a new sendMessage (avoids duplicate questions). */
+    editOnly?: boolean;
   } = {}
 ): Promise<TelegramSendResult> {
   if (!token) return { ok: false, error: 'missing token', permanent: true };
@@ -123,12 +125,18 @@ export async function sendSafeTelegramMessage(
       data = await callWithRetry(token, method, body);
     }
 
-    // Edit failed (too long / not modified / etc.) → fall back to sendMessage
+    // Edit failed → fall back to sendMessage unless editOnly (exam dual-path)
     if (!data?.ok && (useEdit || method === 'editMessageText')) {
+      if (options.editOnly) {
+        return {
+          ok: false,
+          messageIds,
+          error: String(data?.description || 'edit failed'),
+          permanent: Boolean(data?.permanent),
+        };
+      }
       const desc = String(data?.description || '').toLowerCase();
       delete body.message_id;
-      // If still too long for a single message, re-chunk at 3500 and send first only here;
-      // outer loop already splits at 4000 — retry without parse_mode if needed.
       if (desc.includes('too long') && String(body.text || '').length > 3500) {
         body.text = String(body.text).slice(0, 3490) + '\n…';
       }
