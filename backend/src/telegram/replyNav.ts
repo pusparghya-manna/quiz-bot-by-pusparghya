@@ -59,7 +59,8 @@ export function kbMarkup(rows: string[][], opts?: { oneTime?: boolean }): ReplyK
     resize_keyboard: true,
     is_persistent: true,
     one_time_keyboard: opts?.oneTime || false,
-    // Keeps the chat input from inviting free-text focus on many clients
+    selective: false,
+    // Hint only — keeps many clients from auto-focusing the native text field
     input_field_placeholder: 'Tap a button below',
   } as ReplyKeyboardMarkup;
 }
