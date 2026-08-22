@@ -1888,15 +1888,14 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Exam entry / any screen needing BOTH Main-menu ReplyKeyboard and InlineKeyboard.
+     * Reliable exam-entry path (no edit/delete races that re-open the system keyboard):
      *
-     * Strategy (avoids system keyboard, duplicates, and buttonless questions):
-     *  1) sendMessage(short placeholder + ReplyKeyboard Main menu)
-     *     → bottom bar = Main menu only; native keyboard stays closed
-     *  2) editMessageText(same id → real content + InlineKeyboard)
-     *     → text changes so Telegram accepts the edit; ONE bubble with buttons
-     *  3) if edit fails: delete placeholder, send content+inline once
-     *     → ReplyKeyboard from (1) persists at chat level after delete
+     *  1) sendMessage(short status + ReplyKeyboard Main menu only)
+     *     → replaces Continue/View Result bar; keeps native keyboard closed
+     *  2) sendMessage(question + InlineKeyboard only)
+     *     → exactly one question bubble with A/B/C/D
+     *
+     * Status line is NOT a second question. Answer/nav later edit only message (2).
      */
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const raw = resp.text || '';
@@ -1907,69 +1906,30 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       mode = 'HTML';
     }
 
-    const placeholder = '⏳ Starting…';
-    let r1 = await sendSafeTelegramMessage(token, chatId, placeholder, {
+    // 1) Pin Main menu on the bottom bar (chat-level ReplyKeyboard)
+    const statusText = '✅ Exam ready — answer with the buttons under the question.';
+    const rKb = await sendSafeTelegramMessage(token, chatId, statusText, {
       replyKeyboard: resp.replyKeyboard,
     });
-    if (!r1.ok) {
-      // Keyboard apply failed — still show content with buttons
-      const rOnly = await sendSafeTelegramMessage(token, chatId, raw, {
-        parseMode: mode,
-        replyMarkup: resp.replyMarkup,
-      });
-      if (rOnly.ok) rememberId(rOnly.messageIds);
-      else console.warn('[Telegram] dual-path send failed:', r1.error);
-      return;
+    if (!rKb.ok) {
+      console.warn('[Telegram] Main menu keyboard apply failed:', rKb.error);
     }
 
-    const mid = r1.messageIds?.[0];
-    if (!mid) {
-      rememberId(r1.messageIds);
-      return;
-    }
-
-    await new Promise((r) => setTimeout(r, 80));
-
-    let edited = await sendSafeTelegramMessage(token, chatId, raw, {
-      parseMode: mode,
-      replyMarkup: resp.replyMarkup,
-      messageId: mid,
-      preferEdit: true,
-      editOnly: true,
-    });
-    if (!edited.ok && mode) {
-      edited = await sendSafeTelegramMessage(token, chatId, raw, {
-        replyMarkup: resp.replyMarkup,
-        messageId: mid,
-        preferEdit: true,
-        editOnly: true,
-      });
-    }
-
-    if (edited.ok) {
-      rememberId([mid]);
-      return;
-    }
-
-    // Edit failed — remove placeholder (not a full question), then one content+buttons msg.
-    // Main-menu ReplyKeyboard from step 1 remains chat-level.
-    try {
-      await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, message_id: mid }),
-        signal: AbortSignal.timeout(4000),
-      });
-    } catch {
-      /* ignore */
-    }
-
-    const r2 = await sendSafeTelegramMessage(token, chatId, raw, {
+    // 2) One question message with answer buttons (authoritative)
+    let rQ = await sendSafeTelegramMessage(token, chatId, raw, {
       parseMode: mode,
       replyMarkup: resp.replyMarkup,
     });
-    if (r2.ok) rememberId(r2.messageIds);
-    else console.warn('[Telegram] question+buttons failed:', r2.error);
+    if (!rQ.ok && mode) {
+      rQ = await sendSafeTelegramMessage(token, chatId, raw, {
+        replyMarkup: resp.replyMarkup,
+      });
+    }
+    if (rQ.ok) {
+      rememberId(rQ.messageIds);
+    } else {
+      console.warn('[Telegram] question+buttons send failed:', rQ.error);
+    }
     return;
   }
 
