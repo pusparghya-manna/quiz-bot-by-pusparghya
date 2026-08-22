@@ -951,26 +951,20 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
   }
   body += `\n${subtitle('Choose an option from the buttons below.')}`;
 
-  // Exam actions are InlineKeyboard (not ReplyKeyboard).
-  // Bottom ReplyKeyboard stays Main-menu-only so starting the exam never needs to
-  // replace the chat-level keyboard — that was the root cause of the dual-path loop.
-  const inline: InlineKeyboardButton[][] = [];
+  // Exam actions live on the BOTTOM ReplyKeyboard (not under the message).
+  // Taps are handled by resolveReplyAction + session examId.
+  const rows: string[][] = [];
   if (!locked) {
-    if (active) {
-      inline.push([{ text: LABELS.continueExam, callback_data: `resume_exam_${exam.id}` }]);
-    } else if (!anyDone) {
-      inline.push([{ text: LABELS.startExam, callback_data: `start_exam_${exam.id}` }]);
-    }
+    if (active) rows.push([LABELS.continueExam]);
+    else if (!anyDone) rows.push([LABELS.startExam]);
   }
-  if (anyDone && latest) {
-    inline.push([{ text: LABELS.viewResult, callback_data: `viewres_${latest.id}` }]);
-    inline.push([{ text: LABELS.reattempt, callback_data: `reattempt_${exam.id}` }]);
-  } else if (anyDone) {
-    inline.push([{ text: LABELS.reattempt, callback_data: `reattempt_${exam.id}` }]);
+  if (anyDone) {
+    rows.push([LABELS.viewResult]);
+    rows.push([LABELS.reattempt]);
   }
-  inline.push([{ text: LABELS.examLb, callback_data: `lb_exam_${exam.id}` }]);
-  inline.push([{ text: LABELS.backExams, callback_data: 'btn_exams' }]);
-  inline.push([{ text: LABELS.home, callback_data: 'btn_home' }]);
+  rows.push([LABELS.examLb]);
+  rows.push([LABELS.backExams]);
+  rows.push([LABELS.home]);
 
   if (student.telegramUserId) {
     setKbSession(student.telegramUserId, {
@@ -980,13 +974,10 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
     });
   }
 
-  // Inline actions are authoritative (always sent). ReplyKeyboard Main menu is applied
-  // only when it does not require dropping the inline buttons (see sendTelegramResponse).
   return {
     chatId: student.telegramUserId!,
     text: quote(body),
-    replyMarkup: { inline_keyboard: inline },
-    replyKeyboard: kbMarkup([[LABELS.home]]),
+    replyKeyboard: kbMarkup(rows),
     parseMode: 'HTML',
     type: 'sendMessage',
   };
