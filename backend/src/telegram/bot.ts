@@ -2135,6 +2135,12 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
         if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
       }
     }
+    // Exam entry only: replace Continue/View Result bar with Main menu (must be a real message)
+    if (resp.replyKeyboard) {
+      void sendSafeTelegramMessage(token, chatId, LABELS.home, {
+        replyKeyboard: resp.replyKeyboard as any,
+      });
+    }
     return;
   }
 
@@ -2186,6 +2192,12 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
       rememberId(rQ.messageIds);
       const sess = getKbSession(chatId);
       if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
+      // Exam entry only: replace Continue/View Result bar with Main menu
+      if (resp.replyKeyboard) {
+        void sendSafeTelegramMessage(token, chatId, LABELS.home, {
+          replyKeyboard: resp.replyKeyboard as any,
+        });
+      }
     } else {
       console.warn('[Telegram] content+inline send failed:', rQ.error);
     }
