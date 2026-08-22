@@ -120,6 +120,13 @@ The question text and options are separate JSON fields and must NOT be part of i
 
 Do NOT convert the diagram into text and do NOT invent a replacement image. Preserve the original visual via bbox only.`;
 
+  const modelCandidates = [
+    process.env.GEMINI_MODEL,
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+  ].filter((m, i, arr) => Boolean(m) && arr.indexOf(m) === i) as string[];
+
   const imagePart = {
     inlineData: {
       mimeType: mimeType || 'image/jpeg',
@@ -127,76 +134,107 @@ Do NOT convert the diagram into text and do NOT invent a replacement image. Pres
     },
   };
 
-  const response = await ai.models.generateContent({
-    model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
-    contents: {
-      parts: [imagePart, { text: promptText }],
-    },
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          questions: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                question_number: { type: Type.NUMBER },
-                question: { type: Type.STRING, description: 'Preserved question text' },
-                options: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: 'List of option choices in order A,B,C,D...',
-                },
-                answer: {
-                  type: Type.INTEGER,
-                  nullable: true,
-                  description: '0-based index of the correct option; return null only when unreadable or genuinely ambiguous',
-                },
-                marks: { type: Type.NUMBER },
-                negativeMarks: { type: Type.NUMBER },
-                explanation: { type: Type.STRING, nullable: true },
-                subject: { type: Type.STRING, nullable: true },
-                has_image: {
-                  type: Type.BOOLEAN,
-                  description:
-                    'True only if this question has a real visual (diagram/photo/graph/chart/map/figure). False for text-only questions.',
-                },
-                image_bbox: {
+  let response: any = null;
+  let lastErr: any = null;
+  for (const model of modelCandidates) {
+    try {
+      response = await ai.models.generateContent({
+        model,
+        contents: {
+          parts: [imagePart, { text: promptText }],
+        },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              questions: {
+                type: Type.ARRAY,
+                items: {
                   type: Type.OBJECT,
-                  nullable: true,
-                  description:
-                    'Pixel bbox of ONLY the diagram/photo on the original image (not question text, not options, not question number). null when has_image is false.',
                   properties: {
-                    x: {
-                      type: Type.NUMBER,
-                      description: 'Left edge on 0–1000 scale (0=left of original page)',
+                    question_number: { type: Type.NUMBER },
+                    question: { type: Type.STRING, description: 'Preserved question text' },
+                    options: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description: 'List of option choices in order A,B,C,D...',
                     },
-                    y: {
-                      type: Type.NUMBER,
-                      description: 'Top edge on 0–1000 scale (0=top of original page)',
+                    answer: {
+                      type: Type.INTEGER,
+                      nullable: true,
+                      description:
+                        '0-based index of the correct option; return null only when unreadable or genuinely ambiguous',
                     },
-                    width: {
-                      type: Type.NUMBER,
-                      description: 'Width on 0–1000 scale (diagram only, not full question)',
+                    marks: { type: Type.NUMBER },
+                    negativeMarks: { type: Type.NUMBER },
+                    explanation: { type: Type.STRING, nullable: true },
+                    subject: { type: Type.STRING, nullable: true },
+                    has_image: {
+                      type: Type.BOOLEAN,
+                      description:
+                        'True only if this question has a real visual (diagram/photo/graph/chart/map/figure). False for text-only questions.',
                     },
-                    height: {
-                      type: Type.NUMBER,
-                      description: 'Height on 0–1000 scale (diagram only, not full question)',
+                    image_bbox: {
+                      type: Type.OBJECT,
+                      nullable: true,
+                      description:
+                        'Pixel bbox of ONLY the diagram/photo on the original image (not question text, not options, not question number). null when has_image is false.',
+                      properties: {
+                        x: {
+                          type: Type.NUMBER,
+                          description: 'Left edge on 0–1000 scale (0=left of original page)',
+                        },
+                        y: {
+                          type: Type.NUMBER,
+                          description: 'Top edge on 0–1000 scale (0=top of original page)',
+                        },
+                        width: {
+                          type: Type.NUMBER,
+                          description: 'Width on 0–1000 scale (diagram only, not full question)',
+                        },
+                        height: {
+                          type: Type.NUMBER,
+                          description: 'Height on 0–1000 scale (diagram only, not full question)',
+                        },
+                      },
+                      required: ['x', 'y', 'width', 'height'],
                     },
                   },
-                  required: ['x', 'y', 'width', 'height'],
+                  required: ['question', 'options', 'has_image'],
                 },
               },
-              required: ['question', 'options', 'has_image'],
             },
+            required: ['questions'],
           },
         },
-        required: ['questions'],
-      },
-    },
-  });
+      });
+      console.log('[ocr] Gemini model used:', model);
+      lastErr = null;
+      break;
+    } catch (e: any) {
+      lastErr = e;
+      const msg = String(e?.message || e || '');
+      const busy =
+        /high demand|UNAVAILABLE|503|429|resource exhausted|quota|timed out|timeout|unavailable/i.test(
+          msg
+        );
+      console.warn('[ocr] model failed:', model, msg.slice(0, 180));
+      if (!busy) {
+        // Non-retryable (bad key, invalid arg) — stop early
+        break;
+      }
+    }
+  }
+  if (!response) {
+    const detail = String(lastErr?.message || lastErr || 'unknown error');
+    if (/high demand|UNAVAILABLE|503/i.test(detail)) {
+      throw new Error(
+        'Gemini is busy (high demand). Please try Photo OCR again in a minute. If this keeps happening, the model may be overloaded.'
+      );
+    }
+    throw new Error(detail || 'Gemini OCR failed');
+  }
 
   const text = response.text;
   if (!text) {
