@@ -57,8 +57,13 @@ The question text and options are separate JSON fields and must NOT be part of i
 - Before returning image_bbox, verify the selected region actually contains a visual/diagram. If the region would contain only printed question text, it is INVALID — use has_image=false and image_bbox=null instead.
 - Do NOT use the bounding box of the entire question block as image_bbox.
 - Prioritize accurate visual boundaries over the question's text boundaries.
-- Coordinates must be relative to the ORIGINAL uploaded image dimensions (top-left origin). Do not use coordinates from a resized or internally scaled representation.
-- image_bbox format: { "x": number, "y": number, "width": number, "height": number }
+- COORDINATE SYSTEM (mandatory): image_bbox uses a NORMALIZED 0–1000 scale on the ORIGINAL image.
+  - x=0, y=0 is the top-left corner of the full page image.
+  - x=1000 is the right edge; y=1000 is the bottom edge.
+  - Example: a diagram in the center might be {"x": 200, "y": 350, "width": 600, "height": 280}.
+  - Do NOT return pixel coordinates of any intermediate resolution. Always normalize to 0–1000.
+- image_bbox format: { "x": number, "y": number, "width": number, "height": number } with all values between 0 and 1000.
+- Make the box as tight as possible around the visual only (small padding of ~5–15 units is OK).
 
 Do NOT convert the diagram into text and do NOT invent a replacement image. Preserve the original visual via bbox only.`;
 
@@ -111,10 +116,22 @@ Do NOT convert the diagram into text and do NOT invent a replacement image. Pres
                   description:
                     'Pixel bbox of ONLY the diagram/photo on the original image (not question text, not options, not question number). null when has_image is false.',
                   properties: {
-                    x: { type: Type.NUMBER, description: 'Left edge in original image pixels' },
-                    y: { type: Type.NUMBER, description: 'Top edge in original image pixels' },
-                    width: { type: Type.NUMBER, description: 'Width of visual only in pixels' },
-                    height: { type: Type.NUMBER, description: 'Height of visual only in pixels' },
+                    x: {
+                      type: Type.NUMBER,
+                      description: 'Left edge on 0–1000 scale (0=left of original page)',
+                    },
+                    y: {
+                      type: Type.NUMBER,
+                      description: 'Top edge on 0–1000 scale (0=top of original page)',
+                    },
+                    width: {
+                      type: Type.NUMBER,
+                      description: 'Width on 0–1000 scale (diagram only, not full question)',
+                    },
+                    height: {
+                      type: Type.NUMBER,
+                      description: 'Height on 0–1000 scale (diagram only, not full question)',
+                    },
                   },
                   required: ['x', 'y', 'width', 'height'],
                 },
