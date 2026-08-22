@@ -28,6 +28,8 @@ export type KbSession = {
   lastMessageId?: number;
   /** Kind of last exam question message (text vs photo) for navigation */
   lastMessageKind?: 'text' | 'photo';
+  /** Telegram file_id of last photo question (for caption-only edits) */
+  lastPhotoFileId?: string;
 };
 
 const sessions = new Map<number, KbSession>();
