@@ -2137,7 +2137,7 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
     }
     // Exam entry only: replace Continue/View Result bar with Main menu (must be a real message)
     if (resp.replyKeyboard) {
-      void sendSafeTelegramMessage(token, chatId, LABELS.home, {
+      void sendSafeTelegramMessage(token, chatId, '✅ Exam started', {
         replyKeyboard: resp.replyKeyboard as any,
       });
     }
@@ -2194,7 +2194,7 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
       if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
       // Exam entry only: replace Continue/View Result bar with Main menu
       if (resp.replyKeyboard) {
-        void sendSafeTelegramMessage(token, chatId, LABELS.home, {
+        void sendSafeTelegramMessage(token, chatId, '✅ Exam started', {
           replyKeyboard: resp.replyKeyboard as any,
         });
       }
