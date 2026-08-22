@@ -558,14 +558,27 @@ This name will appear on results and the leaderboard.`,
       response = await handleFinalSubmit(examId, student, user);
     }
 
-    // Keep single-chat edits for pure inline (MCQ). ReplyKeyboard / remove needs sendMessage.
+    // Keep single-chat edits for pure inline (MCQ). Never force editMessageText over photo ops.
     const needsSendKb = Boolean(response?.replyKeyboard);
     if (response && cbMessageId && !needsSendKb) {
       response.messageId = cbMessageId;
-      response.type = 'editMessageText';
+      if (response.photoFileId) {
+        if (response.type !== 'editMessageMedia' && response.type !== 'sendPhoto') {
+          response.type = 'editMessageMedia';
+        }
+      } else {
+        response.type = 'editMessageText';
+      }
     } else if (response && needsSendKb) {
-      response.type = 'sendMessage';
-      delete (response as any).messageId;
+      if (response.photoFileId) {
+        if (cbMessageId && !response.messageId) response.messageId = cbMessageId;
+        if (response.type !== 'sendPhoto' && response.type !== 'editMessageMedia') {
+          response.type = 'sendPhoto';
+        }
+      } else {
+        response.type = 'sendMessage';
+        delete (response as any).messageId;
+      }
     }
     return response;
   }
@@ -1267,6 +1280,7 @@ async function renderQuestionView(
     qIdx,
     lastMessageId: messageId,
     lastMessageKind: mediaKind,
+    lastPhotoFileId: photoFileId,
   });
 
   // Caption limit for Telegram photos is 1024 chars
@@ -1319,6 +1333,8 @@ async function renderQuestionView(
     };
   }
 
+  const entryKb = refreshKb ? kbMarkup([[LABELS.home]]) : undefined;
+
   if (photoFileId) {
     return {
       chatId: user.id,
@@ -1326,6 +1342,7 @@ async function renderQuestionView(
       caption,
       photoFileId,
       replyMarkup: { inline_keyboard: keyboard },
+      replyKeyboard: entryKb,
       parseMode: 'HTML',
       type: 'sendPhoto',
     };
@@ -1335,6 +1352,7 @@ async function renderQuestionView(
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
+    replyKeyboard: entryKb,
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -1999,7 +2017,13 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
         if (data?.ok && data.result?.message_id != null) {
           rememberId([data.result.message_id]);
           const sess = getKbSession(chatId);
-          if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'photo' });
+          if (sess) {
+            setKbSession(chatId, {
+              ...sess,
+              lastMessageKind: 'photo',
+              lastPhotoFileId: resp.photoFileId,
+            });
+          }
           return true;
         }
         console.warn('[Telegram] sendPhoto failed:', data?.description);
@@ -2010,7 +2034,46 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
       }
     };
 
-    if (resp.type === 'editMessageMedia' && prevId) {
+    if ((resp.type === 'editMessageMedia' || resp.type === 'editMessageText') && prevId) {
+      const sessPrev = getKbSession(chatId);
+      const samePhoto =
+        Boolean(sessPrev?.lastPhotoFileId) &&
+        Boolean(resp.photoFileId) &&
+        sessPrev?.lastPhotoFileId === resp.photoFileId;
+
+      // Same diagram (answer tap): caption + buttons only — no delete/resend
+      if (samePhoto) {
+        try {
+          const resCap = await fetch(`https://api.telegram.org/bot${token}/editMessageCaption`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: chatId,
+              message_id: prevId,
+              caption,
+              parse_mode: mode,
+              reply_markup: resp.replyMarkup || undefined,
+            }),
+            signal: AbortSignal.timeout(12000),
+          });
+          const dataCap: any = await resCap.json().catch(() => ({}));
+          if (dataCap?.ok || String(dataCap?.description || '').includes('not modified')) {
+            rememberId([prevId]);
+            const sess = getKbSession(chatId);
+            if (sess) {
+              setKbSession(chatId, {
+                ...sess,
+                lastMessageKind: 'photo',
+                lastPhotoFileId: resp.photoFileId,
+              });
+            }
+            return;
+          }
+        } catch {
+          /* try media edit */
+        }
+      }
+
       try {
         const res = await fetch(`https://api.telegram.org/bot${token}/editMessageMedia`, {
           method: 'POST',
@@ -2032,7 +2095,13 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
         if (data?.ok) {
           rememberId([prevId]);
           const sess = getKbSession(chatId);
-          if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'photo' });
+          if (sess) {
+            setKbSession(chatId, {
+              ...sess,
+              lastMessageKind: 'photo',
+              lastPhotoFileId: resp.photoFileId,
+            });
+          }
           return;
         }
       } catch {
@@ -2063,8 +2132,13 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
       if (r.ok) {
         rememberId(r.messageIds);
         const sess = getKbSession(chatId);
-        if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text' });
+        if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
       }
+    }
+    if (resp.replyKeyboard) {
+      void sendSafeTelegramMessage(token, chatId, '\u2060', {
+        replyKeyboard: resp.replyKeyboard as any,
+      });
     }
     return;
   }
@@ -2116,7 +2190,12 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
     if (rQ.ok) {
       rememberId(rQ.messageIds);
       const sess = getKbSession(chatId);
-      if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text' });
+      if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
+      if (resp.replyKeyboard) {
+        void sendSafeTelegramMessage(token, chatId, '\u2060', {
+          replyKeyboard: resp.replyKeyboard as any,
+        });
+      }
     } else {
       console.warn('[Telegram] content+inline send failed:', rQ.error);
     }
@@ -2163,6 +2242,11 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
   rememberId(result.messageIds);
   {
     const sess = getKbSession(chatId);
-    if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text' });
+    if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
+  }
+  if (resp.replyKeyboard) {
+    void sendSafeTelegramMessage(token, chatId, '\u2060', {
+      replyKeyboard: resp.replyKeyboard as any,
+    });
   }
 }
