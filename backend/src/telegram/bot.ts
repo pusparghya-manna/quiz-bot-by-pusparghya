@@ -1279,8 +1279,7 @@ async function renderQuestionView(
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    // Entry only: replace sticky "1. Exam title" list keyboard with Main menu
-    replyKeyboard: kbMarkup([[LABELS.home]]),
+    // Inline only — no status carrier, no second message for Main menu
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -1921,14 +1920,11 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Reliable exam-entry path (no edit/delete races that re-open the system keyboard):
-     *
-     *  1) sendMessage(short status + ReplyKeyboard Main menu only)
-     *     → replaces Continue/View Result bar; keeps native keyboard closed
-     *  2) sendMessage(question + InlineKeyboard only)
-     *     → exactly one question bubble with A/B/C/D
-     *
-     * Status line is NOT a second question. Answer/nav later edit only message (2).
+     * One content message with InlineKeyboard only.
+     * Do NOT send "Exam ready" / "Exam Submitted" status carriers (product request).
+     * ReplyKeyboard from prior screens remains chat-level; applying a new bottom
+     * keyboard would require a second visible message — skipped to avoid spam
+     * and duplicate-question regressions.
      */
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const raw = resp.text || '';
@@ -1938,15 +1934,6 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     ) {
       mode = 'HTML';
     }
-
-    // FAST PATH: send content+inline FIRST so the student sees the exam immediately.
-    // Then apply ReplyKeyboard (Main menu / results nav) without blocking first paint.
-    const isQuestionEntry =
-      /left · Q\d+/i.test(raw) ||
-      (/⏱|⏱️/.test(raw) && /Q\d+\s*\/\s*\d+/i.test(raw));
-    const statusText = isQuestionEntry
-      ? '✅ Exam ready — answer with the buttons under the question.'
-      : '✅ Exam Submitted';
 
     let rQ = await sendSafeTelegramMessage(token, chatId, raw, {
       parseMode: mode,
@@ -1960,15 +1947,8 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     if (rQ.ok) {
       rememberId(rQ.messageIds);
     } else {
-      console.warn('[Telegram] question+buttons send failed:', rQ.error);
+      console.warn('[Telegram] content+inline send failed:', rQ.error);
     }
-
-    // Chat-level keyboard after content — fire-and-forget so deep-link start stays fast
-    void sendSafeTelegramMessage(token, chatId, statusText, {
-      replyKeyboard: resp.replyKeyboard,
-    }).then((rKb) => {
-      if (!rKb.ok) console.warn('[Telegram] Main menu keyboard apply failed:', rKb.error);
-    });
     return;
   }
 
