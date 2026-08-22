@@ -1219,13 +1219,13 @@ async function renderQuestionView(
     };
   }
 
-  // Exam start / resume entry: replace Continue/View Result/… with Main menu only,
-  // then one question bubble with A–D (dual path in sendTelegramResponse).
+  // Exam start / resume: one question bubble with inline A–D / Grid / Submit / Main menu.
+  // Do not send ReplyKeyboard here — a second message was showing as a blank bubble,
+  // and remove_keyboard / delete would open the system keyboard.
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    replyKeyboard: kbMarkup([[LABELS.home]]),
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -1855,18 +1855,11 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Exam entry: need Main-menu ReplyKeyboard (no Gboard) AND inline A/B/C/D.
-     * Telegram allows only one reply_markup per sendMessage.
-     *
-     * Guaranteed-buttons strategy:
-     *  1) sendMessage(question + InlineKeyboard) — answer buttons always visible
-     *  2) Apply ReplyKeyboard (Main menu) by sending it on a follow-up that is
-     *     immediately edited away is unreliable; instead set keyboard via a
-     *     direct sendMessage that only carries ReplyKeyboard, using a single
-     *     word-joiner character, with disable_notification.
-     *  3) Never delete that keyboard message (delete focuses system keyboard).
-     *
-     * Inline Main menu is also on the question (renderQuestionView) as backup.
+     * Prefer inline answer buttons on the question. Do NOT send a second blank
+     * carrier message for ReplyKeyboard (users saw an empty bubble).
+     * Do NOT delete messages and do NOT remove_keyboard (that opens system Gboard).
+     * Main menu is available as an inline button on the question.
+     * ReplyKeyboard from the previous screen is left as-is (chat-level, no Gboard).
      */
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const rawDual = resp.text || '';
@@ -1877,7 +1870,6 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       mode = 'HTML';
     }
 
-    // 1) ALWAYS send question with inline buttons first
     let r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
       parseMode: mode,
       replyMarkup: resp.replyMarkup,
@@ -1886,38 +1878,12 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
         replyMarkup: resp.replyMarkup,
       });
-      mode = undefined;
     }
     if (!r1.ok) {
       console.warn('[Telegram] exam question+buttons send failed:', r1.error);
       return;
     }
     rememberId(r1.messageIds);
-
-    // 2) Stick Main-menu custom keyboard (chat-level). No delete → no Gboard popup.
-    // Word joiner is effectively invisible; disable_notification avoids a sound/badge jump.
-    try {
-      const body: Record<string, unknown> = {
-        chat_id: chatId,
-        text: '\u2060',
-        reply_markup: resp.replyKeyboard,
-        disable_notification: true,
-      };
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
-      try {
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: ctrl.signal,
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-    } catch (e) {
-      console.warn('[Telegram] ReplyKeyboard apply failed', e);
-    }
     return;
   }
 
