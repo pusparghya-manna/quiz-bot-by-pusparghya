@@ -57,6 +57,96 @@ async function startServer(app?: import('express').Express) {
     res.json({ teacher: (req as any).teacher });
   });
 
+  // Telegram Mini App: Review Answers (public, validated via initData)
+  app.post('/api/telegram/webapp-review', async (req, res) => {
+    try {
+      const { initData, attemptId } = req.body || {};
+      if (!initData || !attemptId) {
+        return res.status(400).json({ error: 'initData and attemptId required' });
+      }
+      const botToken =
+        process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken || '';
+      const { validateWebAppInitData } = await import('../telegram/webappAuth.js');
+      const auth = validateWebAppInitData(String(initData), String(botToken));
+      if (!auth.ok) return res.status(401).json({ error: auth.error });
+
+      const attempt = store.getAttempts().find((a: any) => a.id === String(attemptId));
+      if (!attempt) return res.status(404).json({ error: 'Attempt not found' });
+      if (Number(attempt.telegramUserId) !== Number(auth.userId)) {
+        return res.status(403).json({ error: 'Not authorized for this result' });
+      }
+      if (attempt.status !== 'SUBMITTED' && attempt.status !== 'AUTO_SUBMITTED') {
+        return res.status(400).json({ error: 'Exam not submitted yet' });
+      }
+
+      const exam = store.getExamById(attempt.examId);
+      if (!exam) return res.status(404).json({ error: 'Exam not found' });
+      if (exam.resultVisibility !== 'PUBLISHED') {
+        return res.status(403).json({ error: 'Results not published' });
+      }
+
+      const questions = (exam.questions || []).map((q: any, index: number) => {
+        const sel = attempt.answers?.[q.id];
+        const has = sel !== undefined && sel !== null;
+        let status: 'correct' | 'wrong' | 'unattempted' = 'unattempted';
+        if (has) {
+          status =
+            q.answer !== null && Number(sel) === Number(q.answer) ? 'correct' : 'wrong';
+        }
+        return {
+          index,
+          id: q.id,
+          question: q.question || '',
+          options: q.options || [],
+          correctIndex: q.answer,
+          selectedIndex: has ? Number(sel) : null,
+          status,
+        };
+      });
+
+      const correct = questions.filter((q) => q.status === 'correct').length;
+      const wrong = questions.filter((q) => q.status === 'wrong').length;
+      const unattempted = questions.filter((q) => q.status === 'unattempted').length;
+
+      res.json({
+        exam: {
+          id: exam.id,
+          title: exam.title,
+          subject: exam.subject || '',
+        },
+        attempt: {
+          id: attempt.id,
+          score: attempt.score,
+          maxScore: attempt.maxScore,
+          percentage: attempt.percentage,
+          correctCount: attempt.correctCount ?? correct,
+          wrongCount: attempt.wrongCount ?? wrong,
+          skippedCount: attempt.skippedCount ?? unattempted,
+          timeTakenSeconds: attempt.timeTakenSeconds,
+          studentName: attempt.studentName,
+          isOfficial: attempt.isOfficial !== false,
+          attemptNumber: attempt.attemptNumber || 1,
+        },
+        summary: {
+          total: questions.length,
+          correct,
+          wrong,
+          unattempted,
+          score: attempt.score,
+          maxScore: attempt.maxScore,
+          accuracy: questions.length
+            ? Math.round((correct / questions.length) * 1000) / 10
+            : 0,
+        },
+        questions,
+      });
+    } catch (e: any) {
+      console.error('[webapp-review]', e);
+      res.status(500).json({ error: 'Failed to load review' });
+    }
+  });
+
+
   // --- API ROUTES (protected) ---
   app.use('/api', (req, res, next) => {
     if (req.path.startsWith('/auth') || req.path.startsWith('/telegram')) return next();

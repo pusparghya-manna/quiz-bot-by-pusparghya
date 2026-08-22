@@ -5,6 +5,7 @@ import { DashboardLayout } from './components/layout/DashboardLayout';
 import { Login } from './components/Login';
 import { getToken } from './api';
 import { NotFound } from './pages/NotFound';
+import TelegramReview from './pages/TelegramReview';
 import { HomeSkeleton } from './components/ui/HomeSkeleton';
 
 const HomePage = lazy(() => import('./pages/routePages').then((m) => ({ default: m.HomePage })));
@@ -46,6 +47,7 @@ export default function App() {
     <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/login" element={<LoginRoute />} />
+        <Route path="/review" element={<TelegramReview />} />
 
         <Route
           element={

@@ -660,13 +660,21 @@ This name will appear on results and the leaderboard.`,
         }
         if (action === 'review' && sess?.attemptId) {
           const att = store.getAttempts().find((a) => a.id === sess.attemptId);
-          const exam = att ? store.getExamById(att.examId) : undefined;
-          if (att && exam) {
-            if (!att.answers || Object.keys(att.answers).length === 0) {
-              try { await store.loadAttemptAnswers(att.id); } catch {}
-            }
-            const loaded = store.getAttempts().find((a) => a.id === att.id) || att;
-            return { ...renderAttemptSummary(exam, loaded, 0), type: 'sendMessage', parseMode: 'HTML' };
+          if (att) {
+            return {
+              chatId: user.id,
+              text: `📖 <b>Review answers</b>
+
+Open the full scrollable review below.`,
+              parseMode: 'HTML',
+              replyMarkup: {
+                inline_keyboard: [
+                  [{ text: '📖 Open review', web_app: { url: reviewWebAppUrl(att.id) } }],
+                  [{ text: '🏠 Main menu', callback_data: 'btn_home' }],
+                ],
+              },
+              type: 'sendMessage',
+            };
           }
         }
         if (action === 'score_sum' && sess?.attemptId) {
@@ -1430,6 +1438,15 @@ async function autoSubmitExam(exam: Exam, attempt: Attempt): Promise<SimulatorRe
   return renderAttemptSummary(exam, attempt);
 }
 
+function reviewWebAppUrl(attemptId: string): string {
+  const base = (
+    process.env.FRONTEND_URL ||
+    process.env.WEBAPP_URL ||
+    'https://quiz-bot-by-pusparghya.vercel.app'
+  ).replace(/\/$/, '');
+  return `${base}/review?a=${encodeURIComponent(attemptId)}`;
+}
+
 function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number | null = null): SimulatorResponse {
   const chatId = attempt.telegramUserId!;
   const keyboard: InlineKeyboardButton[][] = [];
@@ -1463,16 +1480,17 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
       } else if (attempt.isOfficial !== false && !isExamTimeEnded(exam)) {
         body += `🏆 Rank after exam ends\n`;
       }
-      body += `\n${subtitle('Tap Review answers to see each question.')}`;
+      body += `\n${subtitle('Tap Review answers to open the full scrollable review.')}`;
       text = quote(body);
       if (totalQ > 0) {
         keyboard.push([
           {
-            text: `📖 Review answers (1/${totalPages})`,
-            callback_data: `revatt_${attempt.id}_0`,
+            text: '📖 Review answers',
+            web_app: { url: reviewWebAppUrl(attempt.id) },
           },
         ]);
       }
+      keyboard.push([{ text: '🏠 Main menu', callback_data: 'btn_home' }]);
     } else {
       const page = Math.max(0, Math.min(reviewPage, totalPages - 1));
       const startQ = page * PER_PAGE;
