@@ -2,6 +2,13 @@ export type ExamStatus = 'DRAFT' | 'SCHEDULED' | 'LIVE' | 'ENDED' | 'RESULTS_PUB
 export type VisibilityStatus = 'PUBLISHED' | 'HIDDEN';
 export type AttemptStatus = 'IN_PROGRESS' | 'SUBMITTED' | 'AUTO_SUBMITTED' | 'DISQUALIFIED';
 
+export interface QuestionImage {
+  fileId: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+}
+
 export interface Question {
   id: string;
   examId?: string;
@@ -15,6 +22,8 @@ export interface Question {
   negativeMarks: number;
   explanation?: string;
   subject?: string;
+  /** Telegram file_id for diagram/photo (stored in private media channel) */
+  image?: QuestionImage | null;
 }
 
 export interface Exam {
@@ -182,5 +191,9 @@ export interface SimulatorResponse {
   messageId?: number;
   /** Defaults to Markdown when omitted */
   parseMode?: 'Markdown' | 'HTML';
-  type: 'sendMessage' | 'editMessageText';
+  /** When set, send/edit as a photo message using Telegram file_id */
+  photoFileId?: string;
+  /** Caption for photo messages (falls back to text) */
+  caption?: string;
+  type: 'sendMessage' | 'editMessageText' | 'sendPhoto' | 'editMessageMedia';
 }
