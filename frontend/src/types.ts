@@ -2,6 +2,13 @@ export type ExamStatus = 'DRAFT' | 'SCHEDULED' | 'LIVE' | 'ENDED' | 'RESULTS_PUB
 export type VisibilityStatus = 'PUBLISHED' | 'HIDDEN';
 export type AttemptStatus = 'IN_PROGRESS' | 'SUBMITTED' | 'AUTO_SUBMITTED' | 'DISQUALIFIED';
 
+export interface QuestionImage {
+  fileId: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+}
+
 export interface Question {
   id: string;
   examId?: string;
@@ -13,6 +20,8 @@ export interface Question {
   negativeMarks: number;
   explanation?: string;
   subject?: string;
+  /** Telegram file_id for diagram (set after OCR crop/upload) */
+  image?: QuestionImage | null;
 }
 
 export interface Exam {
