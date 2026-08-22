@@ -199,11 +199,10 @@ async function linkStudentToTeacher(student: Student, teacherId?: string | null)
   if (!ids.includes(teacherId)) {
     ids.push(teacherId);
     student.teacherIds = ids;
-    try {
-      await store.saveStudent(student);
-    } catch (e: any) {
+    // Fire-and-forget — must not delay exam start / deep-link response
+    void store.saveStudent(student).catch((e: any) => {
       console.error('[telegram] linkStudentToTeacher save failed:', e?.message || e);
-    }
+    });
   }
   return student;
 }
@@ -394,6 +393,20 @@ This name will appear on results and the leaderboard.`,
       response = renderLeaderboardExamPicker(student);
     } else if (data.startsWith('start_exam_') || data.startsWith('resume_exam_')) {
       const examId = data.replace('start_exam_', '').replace('resume_exam_', '');
+      try {
+        const token =
+          process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken || '';
+        if (token) {
+          void fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: user.id, action: 'typing' }),
+            signal: AbortSignal.timeout(3000),
+          });
+        }
+      } catch {
+        /* ignore */
+      }
       response = await handleStartOrResumeExam(examId, student, user);
     } else if (data.startsWith('reattempt_')) {
       const examId = data.replace('reattempt_', '');
@@ -797,6 +810,21 @@ Open the full scrollable review below.`,
       // Deep link: /start exam_<examId>
       if (payload.startsWith('exam_')) {
         const examId = payload.slice(5);
+        // Typing indicator while attempt is prepared (non-blocking)
+        try {
+          const token =
+            process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken || '';
+          if (token) {
+            void fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: user.id, action: 'typing' }),
+              signal: AbortSignal.timeout(3000),
+            });
+          }
+        } catch {
+          /* ignore */
+        }
         return await handleStartOrResumeExam(examId, student, user);
       }
 
@@ -1023,8 +1051,8 @@ async function handleStartOrResumeExam(examId: string, student: Student, user: T
     };
   }
 
-  // Enroll only when student is allowed past the lock checks (authorized access)
-  await linkStudentToTeacher(student, exam.teacherId);
+  // Enroll when allowed past lock checks (non-blocking — deep links must stay fast)
+  void linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   const allMine = store.getStudentAttempts(examId, student.telegramUserId!);
@@ -1084,10 +1112,15 @@ async function handleStartOrResumeExam(examId: string, student: Student, user: T
     attemptNumber
   };
 
-  store.saveAttempt(attempt);
-  store.addAuditLog('EXAM_STARTED', `${student.name} started ${exam.title} (attempt #${attemptNumber}, official=${isOfficial})`);
+  // Memory is updated synchronously inside saveAttempt; SQL persists in background
+  void store.saveAttempt(attempt).catch((e: any) => {
+    console.error('[telegram] saveAttempt failed:', e?.message || e);
+  });
+  void store.addAuditLog(
+    'EXAM_STARTED',
+    `${student.name} started ${exam.title} (attempt #${attemptNumber}, official=${isOfficial})`
+  );
 
-  // Practice / new attempt: set bottom exam keyboard once
   return await renderQuestionView(exam.id, 0, student, user, { refreshKeyboard: true });
 }
 
@@ -1098,8 +1131,8 @@ async function handleOptionSelect(examId: string, qIdx: number, optIdx: number, 
     return { chatId: user.id, text: '❌ Examination not found. Please type /exams to see available tests.', type: 'sendMessage' };
   }
 
-  // Enroll only when student is allowed past the lock checks (authorized access)
-  await linkStudentToTeacher(student, exam.teacherId);
+  // Enroll when allowed past lock checks (non-blocking — deep links must stay fast)
+  void linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
@@ -1150,7 +1183,7 @@ async function renderQuestionView(
     };
   }
 
-  await linkStudentToTeacher(student, exam.teacherId);
+  void linkStudentToTeacher(student, exam.teacherId);
 
   let attempt = store.getAttempt(examId, student.telegramUserId!);
   if (!attempt) {
@@ -1906,22 +1939,15 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       mode = 'HTML';
     }
 
-    // 1) Pin bottom ReplyKeyboard (chat-level). Status text depends on context:
-    //    exam entry → "Exam ready"; after submit / results → "Exam Submitted".
+    // FAST PATH: send content+inline FIRST so the student sees the exam immediately.
+    // Then apply ReplyKeyboard (Main menu / results nav) without blocking first paint.
     const isQuestionEntry =
       /left · Q\d+/i.test(raw) ||
       (/⏱|⏱️/.test(raw) && /Q\d+\s*\/\s*\d+/i.test(raw));
     const statusText = isQuestionEntry
       ? '✅ Exam ready — answer with the buttons under the question.'
       : '✅ Exam Submitted';
-    const rKb = await sendSafeTelegramMessage(token, chatId, statusText, {
-      replyKeyboard: resp.replyKeyboard,
-    });
-    if (!rKb.ok) {
-      console.warn('[Telegram] Main menu keyboard apply failed:', rKb.error);
-    }
 
-    // 2) One question message with answer buttons (authoritative)
     let rQ = await sendSafeTelegramMessage(token, chatId, raw, {
       parseMode: mode,
       replyMarkup: resp.replyMarkup,
@@ -1936,6 +1962,13 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
     } else {
       console.warn('[Telegram] question+buttons send failed:', rQ.error);
     }
+
+    // Chat-level keyboard after content — fire-and-forget so deep-link start stays fast
+    void sendSafeTelegramMessage(token, chatId, statusText, {
+      replyKeyboard: resp.replyKeyboard,
+    }).then((rKb) => {
+      if (!rKb.ok) console.warn('[Telegram] Main menu keyboard apply failed:', rKb.error);
+    });
     return;
   }
 
