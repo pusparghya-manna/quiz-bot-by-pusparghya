@@ -85,40 +85,30 @@ CRITICAL RULES:
 7. question_number should be the printed number when visible.
 
 IMAGE / DIAGRAM DETECTION (per question — be careful):
-For every question, carefully determine whether it contains an actual visual element such as a diagram, photograph, graph, chart, map, figure, illustration, chemical structure, or biological image.
+For every question, decide if it has a REAL drawn visual (diagram, figure, graph, chart, map, biological drawing, chemical structure, pedigree, Venn circles, labeled organ drawing).
 
 has_image / image_bbox rules:
-- If the question has NO actual visual element: set "has_image": false and "image_bbox": null.
-- If the question HAS a visual: set "has_image": true and provide "image_bbox".
+- NO visual → "has_image": false, "image_bbox": null.
+- HAS visual → "has_image": true AND a precise "image_bbox" for THAT question only.
 
-CRITICAL image_bbox CROPPING RULE:
-"image_bbox" must contain ONLY the actual visual/diagram belonging to that question.
+CRITICAL image_bbox RULES (wrong crops break the exam):
+1. image_bbox = ONLY the diagram/drawing for THIS question number.
+2. NEVER put option lines (a)(b)(c)(d), question stem text, question numbers, or neighboring questions inside the box.
+3. DO include labels that are part of the drawing (A,B,C,D,E on a figure; X,Y,Z,Q on circles; arrows; axis text printed ON the figure).
+4. On typical exam pages the figure is often on the RIGHT of the options — box the figure on the right, not the option list on the left.
+5. Each question with a figure must get its OWN unique bbox. Do not reuse the same box for two questions.
+6. The full diagram must fit inside the box (not half a sperm cell, not half a Venn set). Prefer a slightly larger tight box over a clipped figure.
+7. If you cannot locate the diagram confidently, set has_image=false and image_bbox=null (text-only is better than a wrong crop).
 
-DO NOT include in image_bbox:
-- question number
-- question text
-- surrounding paragraphs
-- answer options A/B/C/D
-- unrelated text
-- content from neighboring questions
+COORDINATE SYSTEM (mandatory):
+- image_bbox uses NORMALIZED 0–1000 on the FULL page image you received.
+- x=0,y=0 top-left; x=1000 right edge; y=1000 bottom edge.
+- Example right-side figure: {"x": 620, "y": 120, "width": 340, "height": 280}
+- Always 0–1000 units. Never raw pixel coordinates of a different resolution.
 
-The question text and options are separate JSON fields and must NOT be part of image_bbox.
+image_bbox format: { "x", "y", "width", "height" } all numbers in 0..1000.
 
-- If a diagram appears below the question text, crop only the diagram.
-- If it appears above or between parts of the question, crop only the visual itself.
-- If the diagram contains labels, arrows, legends, axis labels, annotations, or text that is physically part of the diagram, INCLUDE those in the crop.
-- Before returning image_bbox, verify the selected region actually contains a visual/diagram. If the region would contain only printed question text, it is INVALID — use has_image=false and image_bbox=null instead.
-- Do NOT use the bounding box of the entire question block as image_bbox.
-- Prioritize accurate visual boundaries over the question's text boundaries.
-- COORDINATE SYSTEM (mandatory): image_bbox uses a NORMALIZED 0–1000 scale on the ORIGINAL image.
-  - x=0, y=0 is the top-left corner of the full page image.
-  - x=1000 is the right edge; y=1000 is the bottom edge.
-  - Example: a diagram in the center might be {"x": 200, "y": 350, "width": 600, "height": 280}.
-  - Do NOT return pixel coordinates of any intermediate resolution. Always normalize to 0–1000.
-- image_bbox format: { "x": number, "y": number, "width": number, "height": number } with all values between 0 and 1000.
-- Make the box as tight as possible around the visual only (small padding of ~5–15 units is OK).
-
-Do NOT convert the diagram into text and do NOT invent a replacement image. Preserve the original visual via bbox only.`;
+Do NOT invent a replacement image. Preserve the original visual via bbox only.`;
 
   const modelCandidates = [
     process.env.GEMINI_MODEL,

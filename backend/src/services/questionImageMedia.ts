@@ -79,6 +79,22 @@ export function normalizeBBox(
   // Reject near-full-page crops (almost certainly wrong — whole question block)
   if (w > imgWidth * 0.92 && h > imgHeight * 0.5) return null;
 
+  // Reject thin horizontal strips (usually option text, not a diagram)
+  if (w > imgWidth * 0.35 && h < imgHeight * 0.06) return null;
+  if (w > 0 && h / w < 0.12 && w > imgWidth * 0.25) return null;
+
+  // Reject tiny incomplete crops
+  if (w < imgWidth * 0.04 || h < imgHeight * 0.03) return null;
+
+  // Expand slightly so figure labels (A/B/X/Y) are not clipped
+  const padX = Math.max(4, Math.round(w * 0.06));
+  const padY = Math.max(4, Math.round(h * 0.06));
+  left = Math.max(0, left - padX);
+  top = Math.max(0, top - padY);
+  w = Math.min(imgWidth - left, w + padX * 2);
+  h = Math.min(imgHeight - top, h + padY * 2);
+
+  if (w < 16 || h < 16) return null;
   return { left, top, width: w, height: h };
 }
 
@@ -193,11 +209,36 @@ export async function attachCroppedImagesToOcrQuestions(
   }
 
   const out: any[] = [];
+  const usedBoxes: Array<{ x: number; y: number; w: number; h: number }> = [];
+
+  const isDuplicateBox = (bbox: any): boolean => {
+    const x = Number(bbox?.x);
+    const y = Number(bbox?.y);
+    const w = Number(bbox?.width);
+    const h = Number(bbox?.height);
+    if (![x, y, w, h].every(Number.isFinite)) return false;
+    return usedBoxes.some(
+      (b) =>
+        Math.abs(b.x - x) < 25 &&
+        Math.abs(b.y - y) < 25 &&
+        Math.abs(b.w - w) < 25 &&
+        Math.abs(b.h - h) < 25
+    );
+  };
+
   for (let i = 0; i < questions.length; i++) {
     const q = { ...questions[i] };
     const label = q.question_number != null ? `Q${q.question_number}` : `item ${i + 1}`;
 
     if (!q.has_image || !q.image_bbox) {
+      q.has_image = false;
+      q.image_bbox = null;
+      out.push(q);
+      continue;
+    }
+
+    if (isDuplicateBox(q.image_bbox)) {
+      imageErrors.push(`${label}: duplicate diagram bbox — imported as text-only`);
       q.has_image = false;
       q.image_bbox = null;
       out.push(q);
@@ -212,6 +253,13 @@ export async function attachCroppedImagesToOcrQuestions(
       out.push(q);
       continue;
     }
+
+    usedBoxes.push({
+      x: Number(q.image_bbox.x),
+      y: Number(q.image_bbox.y),
+      w: Number(q.image_bbox.width),
+      h: Number(q.image_bbox.height),
+    });
 
     const uploaded = await uploadToTelegramStorage(cropped.buffer, cropped.mimeType, `ocr_${i}.jpg`);
     if (!uploaded?.fileId) {
