@@ -1888,14 +1888,15 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Apply chat-level Main menu AND inline actions on one logical screen.
+     * Exam entry / any screen needing BOTH Main-menu ReplyKeyboard and InlineKeyboard.
      *
-     * 1) sendMessage(text + ReplyKeyboard) → replaces My Exams list keyboard; no Gboard
-     * 2) editMessageReplyMarkup / editMessageText → attach inline on SAME message
-     * 3) if edit fails: delete the buttonless message, send text+inline once
-     *    ReplyKeyboard from (1) persists after delete (chat-level)
-     *
-     * Never leave two content messages. Never strip inline to "fix" the keyboard.
+     * Strategy (avoids system keyboard, duplicates, and buttonless questions):
+     *  1) sendMessage(short placeholder + ReplyKeyboard Main menu)
+     *     → bottom bar = Main menu only; native keyboard stays closed
+     *  2) editMessageText(same id → real content + InlineKeyboard)
+     *     → text changes so Telegram accepts the edit; ONE bubble with buttons
+     *  3) if edit fails: delete placeholder, send content+inline once
+     *     → ReplyKeyboard from (1) persists at chat level after delete
      */
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const raw = resp.text || '';
@@ -1906,22 +1907,18 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       mode = 'HTML';
     }
 
-    let r1 = await sendSafeTelegramMessage(token, chatId, raw, {
-      parseMode: mode,
+    const placeholder = '⏳ Starting…';
+    let r1 = await sendSafeTelegramMessage(token, chatId, placeholder, {
       replyKeyboard: resp.replyKeyboard,
     });
-    if (!r1.ok && mode) {
-      r1 = await sendSafeTelegramMessage(token, chatId, raw, {
-        replyKeyboard: resp.replyKeyboard,
-      });
-      mode = undefined;
-    }
     if (!r1.ok) {
+      // Keyboard apply failed — still show content with buttons
       const rOnly = await sendSafeTelegramMessage(token, chatId, raw, {
         parseMode: mode,
         replyMarkup: resp.replyMarkup,
       });
       if (rOnly.ok) rememberId(rOnly.messageIds);
+      else console.warn('[Telegram] dual-path send failed:', r1.error);
       return;
     }
 
@@ -1931,52 +1928,31 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       return;
     }
 
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 80));
 
-    let attached = false;
-    try {
-      const res = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          message_id: mid,
-          reply_markup: resp.replyMarkup,
-        }),
-        signal: AbortSignal.timeout(5000),
-      });
-      const data: any = await res.json().catch(() => ({}));
-      attached = Boolean(data?.ok);
-    } catch {
-      attached = false;
-    }
-
-    if (!attached) {
-      let edited = await sendSafeTelegramMessage(token, chatId, raw, {
-        parseMode: mode,
+    let edited = await sendSafeTelegramMessage(token, chatId, raw, {
+      parseMode: mode,
+      replyMarkup: resp.replyMarkup,
+      messageId: mid,
+      preferEdit: true,
+      editOnly: true,
+    });
+    if (!edited.ok && mode) {
+      edited = await sendSafeTelegramMessage(token, chatId, raw, {
         replyMarkup: resp.replyMarkup,
         messageId: mid,
         preferEdit: true,
         editOnly: true,
       });
-      if (!edited.ok && mode) {
-        edited = await sendSafeTelegramMessage(token, chatId, raw, {
-          replyMarkup: resp.replyMarkup,
-          messageId: mid,
-          preferEdit: true,
-          editOnly: true,
-        });
-      }
-      attached = Boolean(edited.ok);
     }
 
-    if (attached) {
+    if (edited.ok) {
       rememberId([mid]);
       return;
     }
 
-    // Edit failed: remove buttonless bubble, send one message with buttons.
-    // Main-menu ReplyKeyboard from step 1 remains (chat-level).
+    // Edit failed — remove placeholder (not a full question), then one content+buttons msg.
+    // Main-menu ReplyKeyboard from step 1 remains chat-level.
     try {
       await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
         method: 'POST',
@@ -1993,7 +1969,7 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       replyMarkup: resp.replyMarkup,
     });
     if (r2.ok) rememberId(r2.messageIds);
-    else console.warn('[Telegram] inline send after keyboard apply failed:', r2.error);
+    else console.warn('[Telegram] question+buttons failed:', r2.error);
     return;
   }
 
