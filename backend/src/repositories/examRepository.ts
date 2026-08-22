@@ -63,12 +63,15 @@ export const examRepository = {
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         await tx.execute({
-          sql: `INSERT INTO questions (id, exam_id, teacher_id, question, options_json, answer, marks, negative_marks, explanation, subject, sort_order)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          sql: `INSERT INTO questions (id, exam_id, teacher_id, question, options_json, answer, marks, negative_marks, explanation, subject, sort_order,
+                image_file_id, image_mime_type, image_width, image_height)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           args: [
             q.id, exam.id, exam.teacherId || q.teacherId || 'default', q.question || '',
             JSON.stringify(q.options || []), q.answer ?? null, q.marks ?? 1, q.negativeMarks ?? 0,
             q.explanation || null, q.subject || null, i,
+            q.image?.fileId || null, q.image?.mimeType || null,
+            q.image?.width ?? null, q.image?.height ?? null,
           ],
         });
       }
