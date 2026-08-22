@@ -1906,8 +1906,14 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
       mode = 'HTML';
     }
 
-    // 1) Pin Main menu on the bottom bar (chat-level ReplyKeyboard)
-    const statusText = '✅ Exam ready — answer with the buttons under the question.';
+    // 1) Pin bottom ReplyKeyboard (chat-level). Status text depends on context:
+    //    exam entry → "Exam ready"; after submit / results → "Exam Submitted".
+    const isQuestionEntry =
+      /left · Q\d+/i.test(raw) ||
+      (/⏱|⏱️/.test(raw) && /Q\d+\s*\/\s*\d+/i.test(raw));
+    const statusText = isQuestionEntry
+      ? '✅ Exam ready — answer with the buttons under the question.'
+      : '✅ Exam Submitted';
     const rKb = await sendSafeTelegramMessage(token, chatId, statusText, {
       replyKeyboard: resp.replyKeyboard,
     });
