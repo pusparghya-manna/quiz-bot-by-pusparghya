@@ -2135,11 +2135,6 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
         if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
       }
     }
-    if (resp.replyKeyboard) {
-      void sendSafeTelegramMessage(token, chatId, '\u2060', {
-        replyKeyboard: resp.replyKeyboard as any,
-      });
-    }
     return;
   }
 
@@ -2191,11 +2186,6 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
       rememberId(rQ.messageIds);
       const sess = getKbSession(chatId);
       if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
-      if (resp.replyKeyboard) {
-        void sendSafeTelegramMessage(token, chatId, '\u2060', {
-          replyKeyboard: resp.replyKeyboard as any,
-        });
-      }
     } else {
       console.warn('[Telegram] content+inline send failed:', rQ.error);
     }
@@ -2243,10 +2233,5 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
   {
     const sess = getKbSession(chatId);
     if (sess) setKbSession(chatId, { ...sess, lastMessageKind: 'text', lastPhotoFileId: undefined });
-  }
-  if (resp.replyKeyboard) {
-    void sendSafeTelegramMessage(token, chatId, '\u2060', {
-      replyKeyboard: resp.replyKeyboard as any,
-    });
   }
 }
