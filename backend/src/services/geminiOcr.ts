@@ -10,9 +10,9 @@ export async function parseQuestionsFromMedia(fileBase64: string, mimeType: stri
     apiKey,
     httpOptions: {
       headers: {
-        'User-Agent': 'QuizBotByPusparghya'
-      }
-    }
+        'User-Agent': 'QuizBotByPusparghya',
+      },
+    },
   });
 
   const promptText = `Extract all multiple choice examination questions from this question paper document/image into structured JSON.
@@ -28,19 +28,26 @@ CRITICAL RULES:
    - Use null if the correct answer key is not explicitly provided in the question paper. NEVER guess or invent an answer if it is not explicitly marked or provided!
 4. Default "marks" to 1 unless explicitly specified otherwise.
 5. Default "negativeMarks" to 0 unless explicitly specified otherwise.
-6. Extract EVERY single question accurately without skipping.`;
+6. Extract EVERY single question accurately without skipping.
+7. IMAGE / DIAGRAM DETECTION:
+   - If a question includes a photograph, diagram, graph, chart, map, biological figure, chemical structure, or any visual that belongs to that question, set has_image=true.
+   - Provide image_bbox as pixel coordinates on THIS source image: { x, y, width, height } with origin at the top-left of the full page image.
+   - The bbox must tightly crop only that question's visual (not the whole page, not option text).
+   - Do NOT describe the diagram in text as a replacement for the image. Keep has_image/image_bbox instead.
+   - For text-only questions set has_image=false and image_bbox=null.
+8. question_number should be the printed number when visible.`;
 
   const imagePart = {
     inlineData: {
       mimeType: mimeType || 'image/jpeg',
-      data: fileBase64
-    }
+      data: fileBase64,
+    },
   };
 
   const response = await ai.models.generateContent({
     model: 'gemini-3.6-flash',
     contents: {
-      parts: [imagePart, { text: promptText }]
+      parts: [imagePart, { text: promptText }],
     },
     config: {
       responseMimeType: 'application/json',
@@ -52,35 +59,50 @@ CRITICAL RULES:
             items: {
               type: Type.OBJECT,
               properties: {
+                question_number: { type: Type.NUMBER },
                 question: { type: Type.STRING, description: 'Preserved question text' },
                 options: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
-                  description: 'List of option choices'
+                  description: 'List of option choices in order A,B,C,D...',
                 },
                 answer: {
                   type: Type.INTEGER,
                   nullable: true,
-                  description: '0-based index of correct option, or null if unknown'
+                  description: '0-based index of correct option, or null',
                 },
-                marks: { type: Type.NUMBER, description: 'Marks for correct answer' },
-                negativeMarks: { type: Type.NUMBER, description: 'Negative marks for wrong answer' }
+                marks: { type: Type.NUMBER },
+                negativeMarks: { type: Type.NUMBER },
+                explanation: { type: Type.STRING, nullable: true },
+                subject: { type: Type.STRING, nullable: true },
+                has_image: {
+                  type: Type.BOOLEAN,
+                  description: 'True when a diagram/photo/graph belongs to this question',
+                },
+                image_bbox: {
+                  type: Type.OBJECT,
+                  nullable: true,
+                  properties: {
+                    x: { type: Type.NUMBER },
+                    y: { type: Type.NUMBER },
+                    width: { type: Type.NUMBER },
+                    height: { type: Type.NUMBER },
+                  },
+                  required: ['x', 'y', 'width', 'height'],
+                },
               },
-              required: ['question', 'options']
-            }
-          }
+              required: ['question', 'options', 'has_image'],
+            },
+          },
         },
-        required: ['questions']
-      }
-    }
+        required: ['questions'],
+      },
+    },
   });
 
-  const responseText = response.text || '{}';
-  try {
-    const parsed = JSON.parse(responseText);
-    return parsed;
-  } catch (err) {
-    console.error('Failed to parse Gemini OCR JSON output:', responseText);
-    throw new Error('Failed to parse structured questions from OCR response.');
+  const text = response.text;
+  if (!text) {
+    throw new Error('Empty response from Gemini OCR');
   }
+  return JSON.parse(text);
 }
