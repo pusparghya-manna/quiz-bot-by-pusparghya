@@ -28,6 +28,14 @@ const ADDITIVE_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: 'exams', column: 'updated_at', ddl: 'ALTER TABLE exams ADD COLUMN updated_at TEXT' },
   { table: 'questions', column: 'teacher_id', ddl: 'ALTER TABLE questions ADD COLUMN teacher_id TEXT' },
   { table: 'questions', column: 'sort_order', ddl: 'ALTER TABLE questions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0' },
+  { table: 'questions', column: 'image_file_id', ddl: 'ALTER TABLE questions ADD COLUMN image_file_id TEXT' },
+  { table: 'questions', column: 'image_mime_type', ddl: 'ALTER TABLE questions ADD COLUMN image_mime_type TEXT' },
+  { table: 'questions', column: 'image_width', ddl: 'ALTER TABLE questions ADD COLUMN image_width INTEGER' },
+  { table: 'questions', column: 'image_height', ddl: 'ALTER TABLE questions ADD COLUMN image_height INTEGER' },
+  { table: 'question_bank', column: 'image_file_id', ddl: 'ALTER TABLE question_bank ADD COLUMN image_file_id TEXT' },
+  { table: 'question_bank', column: 'image_mime_type', ddl: 'ALTER TABLE question_bank ADD COLUMN image_mime_type TEXT' },
+  { table: 'question_bank', column: 'image_width', ddl: 'ALTER TABLE question_bank ADD COLUMN image_width INTEGER' },
+  { table: 'question_bank', column: 'image_height', ddl: 'ALTER TABLE question_bank ADD COLUMN image_height INTEGER' },
 ];
 
 async function ensureAdditiveColumns(): Promise<void> {
