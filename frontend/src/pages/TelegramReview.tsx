@@ -68,9 +68,10 @@ export default function TelegramReview() {
   const [filter, setFilter] = useState<Filter>('all');
   const [bookmarks, setBookmarks] = useState<Record<string, boolean>>({});
   const [gridCollapsed, setGridCollapsed] = useState(false);
+  const gridCollapsedRef = useRef(false);
   const lastScrollY = useRef(0);
   const ticking = useRef(false);
-  /** Ignore scroll-driven expand/collapse after manual Show/Hide (layout shift). */
+  /** Ignore scroll-driven expand/collapse after any grid height change (layout shift). */
   const ignoreScrollUntil = useRef(0);
   const pinnedOpen = useRef(false);
   const pinnedClosed = useRef(false);
@@ -132,6 +133,20 @@ export default function TelegramReview() {
     return data.questions.filter((q) => q.status === filter);
   }, [data, filter]);
 
+  const settleScroll = (ms = 550) => {
+    ignoreScrollUntil.current = Date.now() + ms;
+  };
+
+  /** Change grid open/closed and block scroll handler until layout settles. */
+  const setCollapsed = (next: boolean, opts?: { pinClosed?: boolean; pinOpen?: boolean }) => {
+    if (gridCollapsedRef.current === next) return;
+    gridCollapsedRef.current = next;
+    pinnedOpen.current = !!opts?.pinOpen;
+    pinnedClosed.current = !!opts?.pinClosed;
+    settleScroll(550);
+    setGridCollapsed(next);
+  };
+
   const onScroll = useCallback(() => {
     if (ticking.current) return;
     ticking.current = true;
@@ -141,7 +156,7 @@ export default function TelegramReview() {
       const delta = y - prev;
       const now = Date.now();
 
-      // After Show/Hide/jump — ignore layout-shift scroll noise
+      // After any expand/collapse — ignore layout-shift scroll noise
       if (now < ignoreScrollUntil.current) {
         lastScrollY.current = y;
         ticking.current = false;
@@ -150,9 +165,8 @@ export default function TelegramReview() {
 
       // Near top: expand unless user just hid the grid
       if (y < 48) {
-        if (!pinnedClosed.current) {
-          pinnedOpen.current = false;
-          setGridCollapsed(false);
+        if (!pinnedClosed.current && gridCollapsedRef.current) {
+          setCollapsed(false);
         }
         lastScrollY.current = y;
         ticking.current = false;
@@ -160,15 +174,14 @@ export default function TelegramReview() {
       }
 
       // Clear "just hid" once user scrolls down into content
-      if (pinnedClosed.current && delta > 16 && y > 80) {
+      if (pinnedClosed.current && delta > 20 && y > 100) {
         pinnedClosed.current = false;
       }
 
       // User explicitly opened grid: only collapse on clear downward scroll
       if (pinnedOpen.current) {
-        if (delta > 24) {
-          pinnedOpen.current = false;
-          setGridCollapsed(true);
+        if (delta > 28) {
+          setCollapsed(true, { pinClosed: true });
         }
         lastScrollY.current = y;
         ticking.current = false;
@@ -182,10 +195,13 @@ export default function TelegramReview() {
         return;
       }
 
-      if (delta > 12 && y > 90) {
-        setGridCollapsed(true);
-      } else if (delta < -16) {
-        setGridCollapsed(false);
+      // Auto-hide while reading questions (scroll down)
+      if (delta > 18 && y > 110 && !gridCollapsedRef.current) {
+        setCollapsed(true, { pinClosed: true });
+      }
+      // Auto-show when scrolling up with clear intent
+      else if (delta < -22 && gridCollapsedRef.current) {
+        setCollapsed(false, { pinOpen: true });
       }
 
       lastScrollY.current = y;
@@ -199,26 +215,17 @@ export default function TelegramReview() {
   }, [onScroll]);
 
   const openGrid = () => {
-    pinnedClosed.current = false;
-    pinnedOpen.current = true;
-    ignoreScrollUntil.current = Date.now() + 800;
-    setGridCollapsed(false);
+    setCollapsed(false, { pinOpen: true });
   };
 
   const closeGrid = () => {
-    pinnedOpen.current = false;
-    pinnedClosed.current = true;
-    ignoreScrollUntil.current = Date.now() + 800;
-    setGridCollapsed(true);
+    setCollapsed(true, { pinClosed: true });
   };
 
   const jumpTo = (index: number) => {
     const el = document.getElementById(`q-${index}`);
     if (el) {
-      pinnedOpen.current = false;
-      pinnedClosed.current = true;
-      ignoreScrollUntil.current = Date.now() + 800;
-      setGridCollapsed(true);
+      setCollapsed(true, { pinClosed: true });
       requestAnimationFrame(() => {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
