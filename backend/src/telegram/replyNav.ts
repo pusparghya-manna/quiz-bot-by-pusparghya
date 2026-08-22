@@ -26,6 +26,8 @@ export type KbSession = {
   labels?: Record<string, string>;
   /** Last bot message id — edit this instead of sending new menus */
   lastMessageId?: number;
+  /** Kind of last exam question message (text vs photo) for navigation */
+  lastMessageKind?: 'text' | 'photo';
 };
 
 const sessions = new Map<number, KbSession>();
