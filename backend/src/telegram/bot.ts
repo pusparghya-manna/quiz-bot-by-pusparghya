@@ -1214,11 +1214,12 @@ async function renderQuestionView(
       type: 'editMessageText',
     };
   }
+  // Inline only — one message with A/B/C/D + nav. ReplyKeyboard stays from prior menu.
+  // Never combine replyKeyboard+inline here (that caused Q1 twice: once without buttons).
   return {
     chatId: user.id,
     text,
     replyMarkup: { inline_keyboard: keyboard },
-    replyKeyboard: kbMarkup([[LABELS.home]]),
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -1848,12 +1849,28 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
    */
   if (hasReplyKb && hasInline) {
     /**
-     * Reliable dual markup:
-     * 1) sendMessage with text + ReplyKeyboard (keeps Gboard closed)
-     * 2) editMessageText same message with text + InlineKeyboard (A–D / nav)
-     * ReplyKeyboard is chat-level and stays; inline appears under the question.
-     * Fallback: plain sendMessage with inline only if edit fails.
+     * Prefer ONE visible message with inline buttons.
+     * Apply ReplyKeyboard first via a deleted zero-width carrier (no visible spam),
+     * then a single sendMessage with question + inline only.
+     * Never send the question text twice.
      */
+    try {
+      const r0 = await sendSafeTelegramMessage(token, chatId, '\u2060', {
+        replyKeyboard: resp.replyKeyboard,
+      });
+      const carrierId = r0.messageIds?.[0];
+      if (carrierId) {
+        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
+          signal: AbortSignal.timeout(4000),
+        }).catch(() => {});
+      }
+    } catch {
+      /* best-effort keyboard apply */
+    }
+
     let mode: 'Markdown' | 'HTML' | undefined = resp.parseMode || 'Markdown';
     const rawDual = resp.text || '';
     if (
@@ -1865,47 +1882,18 @@ export async function sendTelegramResponse(resp: SimulatorResponse): Promise<voi
 
     let r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
       parseMode: mode,
-      replyKeyboard: resp.replyKeyboard,
+      replyMarkup: resp.replyMarkup,
     });
     if (!r1.ok) {
       r1 = await sendSafeTelegramMessage(token, chatId, rawDual, {
-        replyKeyboard: resp.replyKeyboard,
+        replyMarkup: resp.replyMarkup,
       });
-      mode = undefined;
     }
     if (!r1.ok) {
-      console.warn('[Telegram] question+keyboard send failed:', r1.error);
+      console.warn('[Telegram] question+options send failed:', r1.error);
       return;
     }
     rememberId(r1.messageIds);
-    const mid = r1.messageIds?.[0];
-    if (mid && resp.replyMarkup) {
-      // Prefer editMessageText with inline (more reliable than reply_markup-only edit)
-      let edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
-        parseMode: mode,
-        replyMarkup: resp.replyMarkup,
-        messageId: mid,
-        preferEdit: true,
-      });
-      if (!edited.ok) {
-        edited = await sendSafeTelegramMessage(token, chatId, rawDual, {
-          replyMarkup: resp.replyMarkup,
-          messageId: mid,
-          preferEdit: true,
-        });
-      }
-      if (!edited.ok) {
-        // Last resort: new message with buttons only (keyboard may already be set)
-        const r2 = await sendSafeTelegramMessage(token, chatId, rawDual, {
-          parseMode: mode,
-          replyMarkup: resp.replyMarkup,
-        });
-        if (r2.ok) rememberId(r2.messageIds);
-        else console.warn('[Telegram] inline attach failed:', edited.error);
-      } else {
-        rememberId([mid]);
-      }
-    }
     return;
   }
 
