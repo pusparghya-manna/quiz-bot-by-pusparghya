@@ -33,15 +33,17 @@ export function quote(inner: string): string {
   return `<blockquote>${inner}</blockquote>`;
 }
 
+/** Option card for MCQ / review */
+export function optionBox(letter: string, text: string, selected = false): string {
+  const mark = selected ? '●' : '○';
+  return `<blockquote>${mark} <b>${escapeHtml(letter)}.</b> ${escapeHtml(text)}</blockquote>`;
+}
+
+/** @deprecated no longer shown on menus */
 export function brandFooter(): string {
-  return `\n\n<i>Qᴜɪᴢ Bᴏᴛ · ʙʏ Pᴜsᴘᴀʀɢʜʏᴀ</i>`;
+  return '';
 }
 
 export function emptyState(emoji: string, title: string, hint: string): string {
-  return (
-    quote(
-      `${titleBlock(emoji, title)}\n\n` +
-        `${escapeHtml(hint)}`
-    ) + brandFooter()
-  );
+  return quote(`${titleBlock(emoji, title)}\n\n${escapeHtml(hint)}`);
 }

@@ -17,6 +17,7 @@ import {
   brandFooter,
   emptyState,
   DIV,
+  optionBox,
 } from './theme.js';
 import {
   TelegramUpdate,
@@ -625,7 +626,7 @@ This name will appear on results and the leaderboard.`,
             text: quote(
               `${titleBlock('✏️', 'Set my name')}\n\n` +
                 `Please type your full name and send it as a message.`
-            ) + brandFooter(),
+            ),
             replyKeyboard: mainNavReplyKeyboard(),
             parseMode: 'HTML',
             type: 'sendMessage',
@@ -714,8 +715,8 @@ This name will appear on results and the leaderboard.`,
                 body: JSON.stringify({
                   chat_id: user.id,
                   message_id: mid,
-                  text: '⏳ *Submitting exam…*\n\nPlease wait while we score your answers.',
-                  parse_mode: 'Markdown',
+                  text: '⏳ <b>Submitting exam…</b>',
+                  parse_mode: 'HTML',
                 }),
                 signal: AbortSignal.timeout(5000),
               });
@@ -870,7 +871,7 @@ function renderExamsList(student: Student): SimulatorResponse {
 
   return {
     chatId: student.telegramUserId!,
-    text: quote(body) + brandFooter(),
+    text: quote(body),
     replyKeyboard: kbMarkup(rows),
     parseMode: 'HTML',
     type: 'sendMessage',
@@ -944,7 +945,7 @@ function renderExamOptions(examId: string, student: Student): SimulatorResponse 
 
   return {
     chatId: student.telegramUserId!,
-    text: quote(body) + brandFooter(),
+    text: quote(body),
     replyKeyboard: kbMarkup(rows),
     parseMode: 'HTML',
     type: 'sendMessage',
@@ -1138,21 +1139,20 @@ async function renderQuestionView(
   const selectedOpt = attempt.answers?.[question.id];
   const remaining = formatRemaining(attempt.expiresAt);
 
-  // Full option text in the message; letter-only buttons below
+  // Bold question + each option in its own blockquote “box”
   let text =
     `📝 <b>${escapeHtml(exam.title)}</b>\n` +
     `⏱️ <b>${escapeHtml(remaining)}</b> left · Q${qIdx + 1}/${total}\n\n` +
-    `${escapeHtml(question.question || '')}\n\n`;
+    `<b>${escapeHtml(question.question || '')}</b>\n`;
 
   const optsList = question.options || [];
   optsList.forEach((optText, oIdx) => {
     const letter = String.fromCharCode(65 + oIdx);
     const isSelected = selectedOpt === oIdx;
-    const mark = isSelected ? '🔘' : '⚪';
-    text += `${mark} <b>${letter}.</b> ${escapeHtml(String(optText || ''))}\n`;
+    text += `\n${optionBox(letter, String(optText || ''), isSelected)}`;
   });
   if (selectedOpt !== undefined && selectedOpt !== null) {
-    text += `\n<i>Selected: ${String.fromCharCode(65 + Number(selectedOpt))}</i>`;
+    text += `\n\n<i>Selected: ${String.fromCharCode(65 + Number(selectedOpt))}</i>`;
   }
 
   // Buttons: A B C D only (full text is above)
@@ -1464,7 +1464,7 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
         body += `🏆 Rank after exam ends\n`;
       }
       body += `\n${subtitle('Tap Review answers to see each question.')}`;
-      text = quote(body) + brandFooter();
+      text = quote(body);
       if (totalQ > 0) {
         keyboard.push([
           {
@@ -1499,12 +1499,25 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
           const rShort = String(correct).slice(0, 40);
           extra = ok ? `Yours: ${cShort}` : `Yours: ${cShort} · Correct: ${rShort}`;
         }
-        const short = escapeHtml((q.question || '').slice(0, 55));
-        body += `\n${mark} <b>Q${i + 1}.</b> ${short}${(q.question || '').length > 55 ? '…' : ''}\n`;
-        body += `<i>${escapeHtml(extra)}</i>\n`;
+        const qText = escapeHtml(q.question || '');
+        body += `\n${mark} <b>Q${i + 1}.</b>\n`;
+        body += `<blockquote><b>${qText}</b></blockquote>\n`;
+        if (q.options && q.options.length) {
+          q.options.forEach((optText: string, oi: number) => {
+            const letter = String.fromCharCode(65 + oi);
+            const isSel = has && sel === oi;
+            const isCorrect = q.answer !== null && q.answer === oi;
+            let prefix = isSel ? '●' : '○';
+            if (isCorrect) prefix = '✅';
+            else if (isSel && !isCorrect) prefix = '❌';
+            body += `<blockquote>${prefix} <b>${letter}.</b> ${escapeHtml(String(optText || ''))}</blockquote>`;
+          });
+        } else {
+          body += `<i>${escapeHtml(extra)}</i>\n`;
+        }
+        body += `\n`;
       }
       text = body;
-
       const nav: InlineKeyboardButton[] = [];
       if (page > 0) {
         nav.push({ text: '◀ Previous', callback_data: `revatt_${attempt.id}_${page - 1}` });
@@ -1520,7 +1533,7 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
       `${titleBlock('🔒', 'Results hidden')}\n\n` +
         `${subtitle(exam.title)}\n` +
         `Your teacher has not published results yet.`
-    ) + brandFooter();
+    );
   }
 
   if (text.length > 3900) {
@@ -1552,6 +1565,7 @@ function renderAttemptSummary(exam: Exam, attempt: Attempt, reviewPage: number |
     rows.push([LABELS.review]);
   }
   rows.push([LABELS.practiceAgain]);
+  rows.push([LABELS.exams]);
   rows.push([LABELS.home]);
 
   return {
@@ -1635,7 +1649,7 @@ function renderStudentResults(student: Student): SimulatorResponse {
 
   return {
     chatId: student.telegramUserId!,
-    text: quote(body) + brandFooter(),
+    text: quote(body),
     replyKeyboard: kbMarkup(numbered.rows),
     parseMode: 'HTML',
     type: 'sendMessage',
@@ -1689,7 +1703,7 @@ function renderLeaderboardExamPicker(student: Student): SimulatorResponse {
 
   return {
     chatId: student.telegramUserId!,
-    text: quote(body) + brandFooter(),
+    text: quote(body),
     replyKeyboard: kbMarkup(rows),
     parseMode: 'HTML',
     type: 'sendMessage',
@@ -1718,7 +1732,7 @@ function renderExamLeaderboard(
       text: quote(
         `${titleBlock('🏆', exam.title)}\n\n` +
           `⏳ Rankings unlock after the exam time ends.`
-      ) + brandFooter(),
+      ),
       replyKeyboard: kbMarkup([[LABELS.otherLb], [LABELS.home]]),
       parseMode: 'HTML',
       type: 'sendMessage',
@@ -1776,7 +1790,7 @@ function renderExamLeaderboard(
     });
   }
 
-  let text = quote(body) + brandFooter();
+  let text = quote(body);
   if (text.length > 3900) text = text.slice(0, 3890) + '…';
 
   return {
