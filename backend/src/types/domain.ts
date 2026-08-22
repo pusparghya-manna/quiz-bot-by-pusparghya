@@ -189,6 +189,8 @@ export interface SimulatorResponse {
    */
   replyKeyboard?: ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReplyMarkup;
   messageId?: number;
+  /** Delete this message id before sending (photo↔text transition) */
+  deletePreviousMessageId?: number;
   /** Defaults to Markdown when omitted */
   parseMode?: 'Markdown' | 'HTML';
   /** When set, send/edit as a photo message using Telegram file_id */

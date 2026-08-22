@@ -1207,11 +1207,13 @@ async function handleOptionSelect(examId: string, qIdx: number, optIdx: number, 
 
   const question = exam.questions[qIdx];
   if (question) {
+    const qid = String(question.id || `q_${qIdx}`);
+    if (!question.id) (question as any).id = qid;
     if (!attempt.answers) attempt.answers = {};
-    attempt.answers[question.id] = optIdx;
+    attempt.answers[qid] = optIdx;
     attempt.currentQuestionIndex = qIdx;
     // Idempotent single-answer UPSERT (no full rewrite race)
-    void store.saveAnswer(attempt.id, question.id, optIdx, qIdx).catch((e) =>
+    void store.saveAnswer(attempt.id, qid, optIdx, qIdx).catch((e) =>
       console.error('[bot] saveAnswer failed', e?.message || e)
     );
   }
@@ -1251,25 +1253,51 @@ async function renderQuestionView(
 
   attempt.currentQuestionIndex = qIdx;
 
+  // Answers are loaded on demand from SQL — hydrate if empty so OCR selections show
+  if (!attempt.answers || Object.keys(attempt.answers).length === 0) {
+    try {
+      await store.loadAttemptAnswers(attempt.id);
+      attempt = store.getAttempt(examId, student.telegramUserId!) || attempt;
+    } catch (e: any) {
+      console.error('[bot] loadAttemptAnswers', e?.message || e);
+    }
+  }
+
   const total = exam.questions.length;
   const question = exam.questions[qIdx];
-  const selectedOpt = attempt.answers?.[question.id];
+  const qid = String(question.id || `q_${qIdx}`);
+  if (!question.id) (question as any).id = qid;
+
+  const rawSelected = attempt.answers?.[qid] ?? attempt.answers?.[String(question.id)];
+  const selectedOpt =
+    rawSelected === undefined || rawSelected === null || (rawSelected as any) === ''
+      ? null
+      : Number(rawSelected);
   const remaining = formatRemaining(attempt.expiresAt);
 
-  // Bold question + each option in its own blockquote “box”
+  // Bold question + each option in its own blockquote box
   let text =
-    `📝 <b>${escapeHtml(exam.title)}</b>\n` +
-    `⏱️ <b>${escapeHtml(remaining)}</b> left · Q${qIdx + 1}/${total}\n\n` +
-    `<b>${escapeHtml(question.question || '')}</b>\n`;
+    `📝 <b>${escapeHtml(exam.title)}</b>
+` +
+    `⏱️ <b>${escapeHtml(remaining)}</b> left · Q${qIdx + 1}/${total}
 
-  const optsList = question.options || [];
+` +
+    `<b>${escapeHtml(question.question || '')}</b>
+`;
+
+  const optsList = (question.options || []).map((o: any) =>
+    typeof o === 'string' ? o : o?.text != null ? String(o.text) : String(o ?? '')
+  );
   optsList.forEach((optText, oIdx) => {
     const letter = String.fromCharCode(65 + oIdx);
-    const isSelected = selectedOpt === oIdx;
-    text += `\n${optionBox(letter, String(optText || ''), isSelected)}`;
+    const isSelected = selectedOpt !== null && !Number.isNaN(selectedOpt) && selectedOpt === oIdx;
+    text += `
+${optionBox(letter, String(optText || ''), isSelected)}`;
   });
-  if (selectedOpt !== undefined && selectedOpt !== null) {
-    text += `\n\n<i>Selected: ${String.fromCharCode(65 + Number(selectedOpt))}</i>`;
+  if (selectedOpt !== null && !Number.isNaN(selectedOpt)) {
+    text += `
+
+<i>Selected: ${String.fromCharCode(65 + selectedOpt)}</i>`;
   }
 
   // Buttons: A B C D only (full text is above)
@@ -1277,7 +1305,7 @@ async function renderQuestionView(
   let letterRow: InlineKeyboardButton[] = [];
   optsList.forEach((_optText, oIdx) => {
     const letter = String.fromCharCode(65 + oIdx);
-    const isSelected = selectedOpt === oIdx;
+    const isSelected = selectedOpt !== null && !Number.isNaN(selectedOpt) && selectedOpt === oIdx;
     letterRow.push({
       text: isSelected ? `● ${letter}` : letter,
       callback_data: `ans_${exam.id}_${qIdx}_${oIdx}`,
@@ -1308,20 +1336,22 @@ async function renderQuestionView(
 
   const prevSess = getKbSession(user.id);
   const refreshKb = opts.refreshKeyboard === true;
-  const messageId = refreshKb ? undefined : prevSess?.lastMessageId;
+  const prevMessageId = refreshKb ? undefined : prevSess?.lastMessageId;
+  const prevKind = (prevSess?.lastMessageKind as 'photo' | 'text' | undefined) || 'text';
 
   const photoFileId = question.image?.fileId || undefined;
-  const mediaKind = photoFileId ? 'photo' : 'text';
-  const prevKind = prevSess?.lastMessageKind || 'text';
+  const mediaKind: 'photo' | 'text' = photoFileId ? 'photo' : 'text';
 
+  // Keep previous message id for cross-kind delete; do NOT flip lastMessageKind until send succeeds
   setKbSession(user.id, {
     screen: 'in_exam',
     examId: exam.id,
     qIdx,
-    lastMessageId: messageId,
-    lastMessageKind: mediaKind,
-    lastPhotoFileId: photoFileId,
+    lastMessageId: prevMessageId,
+    lastMessageKind: prevSess?.lastMessageKind,
+    lastPhotoFileId: prevSess?.lastPhotoFileId,
   });
+  const messageId = prevMessageId;
 
   // Caption limit for Telegram photos is 1024 chars
   const caption = text.length > 1000 ? text.slice(0, 997) + '…' : text;
@@ -1350,7 +1380,7 @@ async function renderQuestionView(
         type: 'editMessageText',
       };
     }
-    // text↔photo transition: new message; sendTelegramResponse deletes previous
+    // text↔photo transition: new message + delete previous bubble
     if (photoFileId) {
       return {
         chatId: user.id,
@@ -1358,7 +1388,7 @@ async function renderQuestionView(
         caption,
         photoFileId,
         replyMarkup: { inline_keyboard: keyboard },
-        messageId, // previous id to delete
+        deletePreviousMessageId: messageId,
         parseMode: 'HTML',
         type: 'sendPhoto',
       };
@@ -1367,7 +1397,7 @@ async function renderQuestionView(
       chatId: user.id,
       text,
       replyMarkup: { inline_keyboard: keyboard },
-      messageId,
+      deletePreviousMessageId: messageId,
       parseMode: 'HTML',
       type: 'sendMessage',
     };
@@ -2203,23 +2233,22 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
     return;
   }
 
-  // Text question after a photo: delete previous photo message, then send text once
-  if (resp.messageId && (resp.type === 'sendMessage' || resp.type === 'editMessageText')) {
-    const sess0 = getKbSession(chatId);
-    if (sess0?.lastMessageKind === 'photo' && resp.messageId) {
-      try {
-        await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, message_id: resp.messageId }),
-          signal: AbortSignal.timeout(4000),
-        });
-      } catch {
-        /* ignore */
-      }
-      resp = { ...resp, messageId: undefined, type: 'sendMessage' };
+  // Explicit cross-kind delete (diagram → text or text → diagram)
+  const delId = (resp as any).deletePreviousMessageId as number | undefined;
+  if (delId) {
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: delId }),
+        signal: AbortSignal.timeout(4000),
+      });
+    } catch {
+      /* ignore */
     }
+    resp = { ...resp, messageId: undefined, deletePreviousMessageId: undefined } as any;
   }
+
 
   if (hasReplyKb && hasInline) {
     /**
