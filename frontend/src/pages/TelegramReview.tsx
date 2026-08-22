@@ -70,9 +70,10 @@ export default function TelegramReview() {
   const [gridCollapsed, setGridCollapsed] = useState(false);
   const lastScrollY = useRef(0);
   const ticking = useRef(false);
-  /** While set, scroll handler must not auto-collapse (user just opened the grid). */
-  const ignoreCollapseUntil = useRef(0);
+  /** Ignore scroll-driven expand/collapse after manual Show/Hide (layout shift). */
+  const ignoreScrollUntil = useRef(0);
   const pinnedOpen = useRef(false);
+  const pinnedClosed = useRef(false);
 
   const attemptId = useMemo(() => {
     const q = new URLSearchParams(window.location.search);
@@ -140,20 +141,27 @@ export default function TelegramReview() {
       const delta = y - prev;
       const now = Date.now();
 
-      // Near top: always show full grid
-      if (y < 48) {
-        pinnedOpen.current = false;
-        setGridCollapsed(false);
+      // After Show/Hide/jump — ignore layout-shift scroll noise
+      if (now < ignoreScrollUntil.current) {
         lastScrollY.current = y;
         ticking.current = false;
         return;
       }
 
-      // Right after user taps "Show grid" — ignore layout-shift scroll noise
-      if (now < ignoreCollapseUntil.current) {
+      // Near top: expand unless user just hid the grid
+      if (y < 48) {
+        if (!pinnedClosed.current) {
+          pinnedOpen.current = false;
+          setGridCollapsed(false);
+        }
         lastScrollY.current = y;
         ticking.current = false;
         return;
+      }
+
+      // Clear "just hid" once user scrolls down into content
+      if (pinnedClosed.current && delta > 16 && y > 80) {
+        pinnedClosed.current = false;
       }
 
       // User explicitly opened grid: only collapse on clear downward scroll
@@ -162,6 +170,13 @@ export default function TelegramReview() {
           pinnedOpen.current = false;
           setGridCollapsed(true);
         }
+        lastScrollY.current = y;
+        ticking.current = false;
+        return;
+      }
+
+      // Don't auto-expand while pinned closed
+      if (pinnedClosed.current) {
         lastScrollY.current = y;
         ticking.current = false;
         return;
@@ -184,13 +199,16 @@ export default function TelegramReview() {
   }, [onScroll]);
 
   const openGrid = () => {
+    pinnedClosed.current = false;
     pinnedOpen.current = true;
-    ignoreCollapseUntil.current = Date.now() + 800;
+    ignoreScrollUntil.current = Date.now() + 800;
     setGridCollapsed(false);
   };
 
   const closeGrid = () => {
     pinnedOpen.current = false;
+    pinnedClosed.current = true;
+    ignoreScrollUntil.current = Date.now() + 800;
     setGridCollapsed(true);
   };
 
@@ -198,8 +216,9 @@ export default function TelegramReview() {
     const el = document.getElementById(`q-${index}`);
     if (el) {
       pinnedOpen.current = false;
+      pinnedClosed.current = true;
+      ignoreScrollUntil.current = Date.now() + 800;
       setGridCollapsed(true);
-      // Small delay so sticky bar height settles before scroll
       requestAnimationFrame(() => {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
