@@ -9,7 +9,19 @@ export type CroppedQuestionImage = {
   height: number;
 };
 
-/** Normalize Gemini bbox into pixel coords for the source image. */
+/**
+ * Convert OCR bbox → pixel extract box on the source page image.
+ *
+ * Preferred space (from Gemini prompt): normalized 0–1000 on each axis
+ *   pixel = (value / 1000) * imageDimension
+ *
+ * Also accepts:
+ *   - 0–1 fractions
+ *   - absolute pixels when values clearly exceed 1000 or match image size
+ *
+ * The old heuristic treated many real pixel boxes as 0–1000 and scaled them
+ * into random regions of the page — that is fixed here.
+ */
 export function normalizeBBox(
   bbox: ImageBBox,
   imgWidth: number,
@@ -17,41 +29,40 @@ export function normalizeBBox(
 ): { left: number; top: number; width: number; height: number } | null {
   if (!bbox || imgWidth < 1 || imgHeight < 1) return null;
   let { x, y, width, height } = bbox;
-  if (![x, y, width, height].every((n) => Number.isFinite(n))) return null;
+  if (![x, y, width, height].every((n) => Number.isFinite(Number(n)))) return null;
+  x = Number(x);
+  y = Number(y);
+  width = Number(width);
+  height = Number(height);
+  if (width <= 0 || height <= 0) return null;
 
-  // Normalized 0–1
-  if (x >= 0 && y >= 0 && width > 0 && height > 0 && x <= 1 && y <= 1 && width <= 1 && height <= 1) {
+  const maxV = Math.max(Math.abs(x), Math.abs(y), Math.abs(width), Math.abs(height), Math.abs(x + width), Math.abs(y + height));
+
+  // 1) Unit fractions 0–1
+  if (maxV <= 1.0001) {
     x *= imgWidth;
     y *= imgHeight;
     width *= imgWidth;
     height *= imgHeight;
   }
-  // Gemini often uses 0–1000 normalized boxes
-  else if (
-    x >= 0 &&
-    y >= 0 &&
-    width > 0 &&
-    height > 0 &&
-    x <= 1000 &&
-    y <= 1000 &&
-    width <= 1000 &&
-    height <= 1000
-  ) {
-    const maxExtent = Math.max(x + width, y + height);
-    if (maxExtent <= 1000 && (imgWidth > 1000 || imgHeight > 1000 || maxExtent < Math.max(imgWidth, imgHeight) * 0.9)) {
-      x = (x / 1000) * imgWidth;
-      y = (y / 1000) * imgHeight;
-      width = (width / 1000) * imgWidth;
-      height = (height / 1000) * imgHeight;
-    }
+  // 2) Values above 1000 → absolute pixels on the original bitmap
+  else if (maxV > 1000.5) {
+    // pixels — no scale
+  }
+  // 3) Default: normalized 0–1000 (required by OCR prompt)
+  else {
+    x = (x / 1000) * imgWidth;
+    y = (y / 1000) * imgHeight;
+    width = (width / 1000) * imgWidth;
+    height = (height / 1000) * imgHeight;
   }
 
-  let left = Math.floor(x);
-  let top = Math.floor(y);
-  let w = Math.floor(width);
-  let h = Math.floor(height);
+  let left = Math.round(x);
+  let top = Math.round(y);
+  let w = Math.round(width);
+  let h = Math.round(height);
 
-  if (w < 8 || h < 8) return null;
+  if (w < 12 || h < 12) return null;
   if (left < 0) {
     w += left;
     left = 0;
@@ -63,7 +74,11 @@ export function normalizeBBox(
   if (left >= imgWidth || top >= imgHeight) return null;
   if (left + w > imgWidth) w = imgWidth - left;
   if (top + h > imgHeight) h = imgHeight - top;
-  if (w < 8 || h < 8) return null;
+  if (w < 12 || h < 12) return null;
+
+  // Reject near-full-page crops (almost certainly wrong — whole question block)
+  if (w > imgWidth * 0.92 && h > imgHeight * 0.5) return null;
+
   return { left, top, width: w, height: h };
 }
 
@@ -76,7 +91,11 @@ export async function cropQuestionImage(
     const imgW = meta.width || 0;
     const imgH = meta.height || 0;
     const box = normalizeBBox(bbox, imgW, imgH);
-    if (!box) return null;
+    if (!box) {
+      console.warn('[ocr-image] bbox rejected', { bbox, imgW, imgH });
+      return null;
+    }
+    console.log('[ocr-image] crop', { bbox, imgW, imgH, box });
 
     const out = await sharp(pageBuffer)
       .extract({ left: box.left, top: box.top, width: box.width, height: box.height })
