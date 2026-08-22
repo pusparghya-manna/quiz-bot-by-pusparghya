@@ -156,7 +156,6 @@ function resolveReplyAction(userId: number, text: string): { action: string; arg
     [LABELS.submit]: 'submit',
     [LABELS.confirmSubmit]: 'do_submit',
     [LABELS.continueAns]: 'continue_ans',
-    [LABELS.myResults]: 'results',
   };
   if (fixed[raw]) return { action: fixed[raw] };
   return matchMainNav(raw) ? { action: matchMainNav(raw)! } : null;
@@ -212,7 +211,7 @@ export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
   let student = store.getStudentByTelegramId(user.id);
   const now = new Date().toISOString();
 
-  const telegramUsername = user.username ? `@${user.username}` : undefined;
+  const telegramUsername: string | null = user.username ? `@${user.username}` : null;
 
   let name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
   if (!name && telegramUsername) {
@@ -223,7 +222,7 @@ export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
   }
 
   if (!student) {
-    student = {
+    const createdStudent: Student = {
       id: `STU_${user.id}`,
       studentId: `S${String(user.id).slice(-6)}`,
       name: name,
@@ -234,8 +233,9 @@ export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
       telegramUsername: telegramUsername,
       joinedAt: now,
     };
+    student = createdStudent;
     try {
-      await store.saveStudent(student);
+      await store.saveStudent(createdStudent);
       await store.addAuditLog('STUDENT_AUTO_REGISTERED', `Auto-registered Telegram student ${name} (${telegramUsername || user.id})`);
     } catch (e: any) {
       console.error('[telegram] getOrCreateStudent save failed:', e?.message || e);
@@ -259,6 +259,7 @@ export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
     }
   }
 
+  if (!student) throw new Error('Unable to initialize student');
   return student;
 }
 
@@ -626,7 +627,8 @@ This name will appear on results and the leaderboard.`,
   // Handle incoming text commands
   if (update.message && update.message.text) {
     const msg = update.message;
-    const text = msg.text.trim();
+    const text = msg.text?.trim() || '';
+    if (!text) return null;
     const user = msg.from;
     const student = await getOrCreateStudent(user);
 

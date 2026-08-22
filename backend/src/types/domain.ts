@@ -58,6 +58,7 @@ export interface Student {
   linkCode: string;
   status: 'linked' | 'unlinked';
   linkedAt?: string;
+  joinedAt?: string;
   /** Teachers whose exams this student has opened */
   teacherIds?: string[];
 }

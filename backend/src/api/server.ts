@@ -425,7 +425,7 @@ async function startServer(app?: import('express').Express) {
       linkedStudentsCount,
       totalSubmissions: completedAttemptsCount,
       avgPercentage,
-      questionBankCount: store.getQuestionBank().length,
+      questionBankCount: store.getQuestions().length,
       classes: ['Class 10-A Biology', 'Class 12-B Physics']
     });
   });
@@ -562,7 +562,7 @@ async function startServer(app?: import('express').Express) {
   app.get('/api/questions', (req, res) => {
     const teacherId = requireTeacher(req, res);
     if (!teacherId) return;
-    const qs = store.getQuestionBank().filter((q: any) => q.teacherId === teacherId);
+    const qs = store.getQuestions().filter((q: any) => q.teacherId === teacherId);
     res.json(qs);
   });
 
@@ -590,7 +590,7 @@ async function startServer(app?: import('express').Express) {
   app.put('/api/questions/:id', async (req, res) => {
     const teacherId = requireTeacher(req, res);
     if (!teacherId) return;
-    const q = store.getQuestionBank().find(item => item.id === req.params.id);
+    const q = store.getQuestions().find(item => item.id === req.params.id);
     if (!q || !questionBelongsToTeacher(q, teacherId)) return res.status(404).json({ error: 'Question not found' });
     const updated = { ...q, ...req.body, teacherId, id: q.id };
     await store.saveQuestion(updated);
@@ -600,7 +600,7 @@ async function startServer(app?: import('express').Express) {
   app.delete('/api/questions/:id', async (req, res) => {
     const teacherId = requireTeacher(req, res);
     if (!teacherId) return;
-    const q = store.getQuestionBank().find(item => item.id === req.params.id);
+    const q = store.getQuestions().find(item => item.id === req.params.id);
     if (!q || !questionBelongsToTeacher(q, teacherId)) return res.status(404).json({ error: 'Question not found' });
     await store.deleteQuestion(req.params.id);
     res.json({ success: true });

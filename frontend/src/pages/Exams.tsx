@@ -7,7 +7,8 @@ import { Sheet } from '../components/ui/Sheet';
 import { Badge } from '../components/ui/Badge';
 import { toDatetimeLocalIST, fromDatetimeLocalIST, formatIST } from '../lib/time';
 import { effectiveExamStatus } from '../lib/examStatus';
-import { emptyQuestion } from '../lib/exam';
+import { emptyQuestion, normalizeAnswer } from '../lib/exam';
+import { prepareImageForOcr } from '../lib/image';
 import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconUpload, IconShare, IconInfo,
@@ -185,7 +186,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
         id: item.id || `Q_${Date.now()}_${i}`,
         question: item.question || item.text || '',
         options: (item.options || ['', '', '', '']).slice(0, 4),
-        answer: typeof item.answer === 'number' ? item.answer : 0,
+        answer: normalizeAnswer(item.answer, 4),
         marks: item.marks ?? 1,
         negativeMarks: item.negativeMarks ?? 0,
         subject: item.subject || form.subject,
@@ -205,15 +206,10 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     setOcrBusy(true);
     setToastMsg('');
     try {
-      const b64: string = await new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result).split(',')[1] || '');
-        r.onerror = reject;
-        r.readAsDataURL(file);
-      });
+      const prepared = await prepareImageForOcr(file);
       const res = await api('/api/ocr/parse', {
         method: 'POST',
-        body: JSON.stringify({ fileBase64: b64, mimeType: file.type || 'image/jpeg' }),
+        body: JSON.stringify({ fileBase64: prepared.base64, mimeType: prepared.mimeType }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'OCR failed');
@@ -222,7 +218,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
         id: `Q_OCR_${Date.now()}_${i}`,
         question: item.question || item.text || '',
         options: (item.options || ['', '', '', '']).slice(0, 4),
-        answer: typeof item.answer === 'number' ? item.answer : item.answer == null ? null : 0,
+        answer: normalizeAnswer(item.answer ?? item.correctAnswer ?? item.correct_option ?? item.correctOption, 4),
         marks: item.marks ?? 1,
         negativeMarks: item.negativeMarks ?? 0,
         subject: item.subject || form.subject,
@@ -240,9 +236,10 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       if (imgErrs.length) {
         toastError(`Some diagrams failed (${imgErrs.length}). Text imported; check questions.`);
       }
-      setQs((prev) => [...prev, ...mapped.filter((q) => q.question)]);
+      const validQuestions = mapped.filter((q) => q.question.trim());
+      setQs((prev) => [...prev, ...validQuestions]);
       setQMode('list');
-      setToastMsg(`OCR added ${mapped.length} questions — please review`);
+      setToastMsg(`OCR added ${validQuestions.length} questions — please review`);
       setTimeout(() => setToastMsg(''), 3000);
     } catch (e: any) {
       toastError(e.message || 'OCR failed');
@@ -612,7 +609,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                   <div className="space-y-1.5 max-h-[45vh] overflow-y-auto pr-0.5">
                     {qs.map((q, i) => (
                       <div key={q.id} className="border border-slate-200 rounded-lg p-2.5 hover:border-slate-300 transition">
-                        <div className="text-[10px] text-slate-400 font-semibold mb-0.5">Q{i + 1} · Ans {String.fromCharCode(65 + (q.answer ?? 0))} · {q.marks} mark</div>
+                        <div className="text-[10px] text-slate-400 font-semibold mb-0.5">Q{i + 1} · Ans {q.answer == null ? 'Not provided' : String.fromCharCode(65 + q.answer)} · {q.marks} mark</div>
                         <div className="text-[13px] font-medium text-slate-800 line-clamp-2">{q.question}</div>
                         <div className="flex gap-1.5 mt-1.5">
                           <button type="button" className={btnS + ' !py-1 text-[11px]'} onClick={() => { setEditQ({ ...q, options: [...q.options] }); setQMode('manual'); }}><IconEdit className="w-3 h-3" /> Edit</button>
@@ -644,7 +641,8 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                   <div className="grid grid-cols-2 gap-2.5">
                     <Field label="Correct answer">
                       <div className="relative">
-                        <select className={inp + ' appearance-none pr-9'} value={editQ.answer ?? 0} onChange={(e) => setEditQ({ ...editQ, answer: +e.target.value })}>
+                        <select className={inp + ' appearance-none pr-9'} value={editQ.answer == null ? '' : editQ.answer} onChange={(e) => setEditQ({ ...editQ, answer: e.target.value === '' ? null : Number(e.target.value) })}>
+                          <option value="">Not provided</option>
                           {[0, 1, 2, 3].map((i) => <option key={i} value={i}>{String.fromCharCode(65 + i)}</option>)}
                         </select>
                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconChevronDown className="w-3.5 h-3.5" /></span>

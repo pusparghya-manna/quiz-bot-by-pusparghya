@@ -1,5 +1,56 @@
 import { GoogleGenAI, Type } from '@google/genai';
 
+export function normalizeOcrAnswer(value: unknown, optionCount = 4): number | null {
+  if (value === null || value === undefined || value === '') return null;
+
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value >= 0 && value < optionCount ? value : null;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const numeric = Number(raw);
+    if (numeric === 0) return 0;
+    if (numeric >= 1 && numeric <= optionCount) return numeric - 1;
+    return null;
+  }
+
+  const numberMatch = raw.match(/(?:OPTION|CHOICE|ANSWER)?\s*[:#-]?\s*([1-9]\d*)\b/i);
+  if (numberMatch) {
+    const numeric = Number(numberMatch[1]);
+    return numeric >= 1 && numeric <= optionCount ? numeric - 1 : null;
+  }
+
+  const letterMatch = raw.match(/(?:OPTION|CHOICE|ANSWER)?\s*[:#-]?\s*([A-Z])\b/i);
+  if (!letterMatch) return null;
+  const index = letterMatch[1].toUpperCase().charCodeAt(0) - 65;
+  return index >= 0 && index < optionCount ? index : null;
+}
+
+export function normalizeOcrQuestion(raw: any): any {
+  const options = Array.isArray(raw?.options)
+    ? raw.options.map((option: unknown) =>
+        typeof option === 'string' ? option : option && typeof option === 'object' && 'text' in option
+          ? String((option as any).text ?? '')
+          : String(option ?? '')
+      ).slice(0, 4)
+    : [];
+  const answerValue = raw?.answer ?? raw?.correctAnswer ?? raw?.correct_option ?? raw?.correctOption;
+  const normalized: any = {
+    ...raw,
+    question: String(raw?.question ?? raw?.text ?? '').trim(),
+    options,
+    answer: normalizeOcrAnswer(answerValue, options.length || 4),
+    marks: Number.isFinite(Number(raw?.marks)) && Number(raw.marks) > 0 ? Number(raw.marks) : 1,
+    negativeMarks: Number.isFinite(Number(raw?.negativeMarks)) && Number(raw.negativeMarks) >= 0 ? Number(raw.negativeMarks) : 0,
+    explanation: raw?.explanation == null ? null : String(raw.explanation),
+    subject: raw?.subject == null ? null : String(raw.subject),
+  };
+  return normalized;
+}
+
 export async function parseQuestionsFromMedia(fileBase64: string, mimeType: string): Promise<any> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -25,7 +76,9 @@ CRITICAL RULES:
    - 1 = Option B / Second option
    - 2 = Option C / Third option
    - 3 = Option D / Fourth option
-   - Use null if the correct answer key is not explicitly provided in the question paper. NEVER guess or invent an answer if it is not explicitly marked or provided!
+   - If the paper includes an answer key or marked answer, convert it to the matching index.
+   - If no key is printed, solve the question from the visible text when the answer is clear and academically unambiguous.
+   - Use null only when the answer is unreadable, ambiguous, outside the options, or cannot be determined reliably. NEVER guess when uncertain.
 4. Default "marks" to 1 unless explicitly specified otherwise.
 5. Default "negativeMarks" to 0 unless explicitly specified otherwise.
 6. Extract EVERY single question accurately without skipping.
@@ -75,7 +128,7 @@ Do NOT convert the diagram into text and do NOT invent a replacement image. Pres
   };
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
+    model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
     contents: {
       parts: [imagePart, { text: promptText }],
     },
@@ -99,7 +152,7 @@ Do NOT convert the diagram into text and do NOT invent a replacement image. Pres
                 answer: {
                   type: Type.INTEGER,
                   nullable: true,
-                  description: '0-based index of correct option, or null',
+                  description: '0-based index of the correct option; return null only when unreadable or genuinely ambiguous',
                 },
                 marks: { type: Type.NUMBER },
                 negativeMarks: { type: Type.NUMBER },
@@ -149,5 +202,10 @@ Do NOT convert the diagram into text and do NOT invent a replacement image. Pres
   if (!text) {
     throw new Error('Empty response from Gemini OCR');
   }
-  return JSON.parse(text);
+  const parsed = JSON.parse(text);
+  if (Array.isArray(parsed)) return { questions: parsed.map(normalizeOcrQuestion) };
+  return {
+    ...parsed,
+    questions: Array.isArray(parsed?.questions) ? parsed.questions.map(normalizeOcrQuestion) : [],
+  };
 }
