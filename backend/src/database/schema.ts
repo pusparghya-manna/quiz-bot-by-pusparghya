@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS questions (
   explanation TEXT,
   subject TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
+  image_file_id TEXT,
+  image_mime_type TEXT,
+  image_width INTEGER,
+  image_height INTEGER,
   FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_questions_exam ON questions(exam_id);
@@ -72,7 +76,11 @@ CREATE TABLE IF NOT EXISTS question_bank (
   marks REAL NOT NULL DEFAULT 1,
   negative_marks REAL NOT NULL DEFAULT 0,
   explanation TEXT,
-  subject TEXT
+  subject TEXT,
+  image_file_id TEXT,
+  image_mime_type TEXT,
+  image_width INTEGER,
+  image_height INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_qbank_teacher ON question_bank(teacher_id);
 
