@@ -55,7 +55,7 @@ export const env = {
   tursoUrl: process.env.TURSO_DATABASE_URL || '',
   tursoToken: process.env.TURSO_AUTH_TOKEN || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
   allowedOrigins: (process.env.ALLOWED_ORIGINS ||
     'https://quiz-bot-by-pusparghya.vercel.app,http://localhost:5173,http://localhost:3000')
     .split(',')

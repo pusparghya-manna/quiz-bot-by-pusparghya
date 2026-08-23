@@ -33,3 +33,12 @@ assert.equal(ownsExam({ teacherId: 'alice' }, 'bob'), false);
 assert.equal(ownsExam(null, 'alice'), false);
 
 console.log('security.regression.test.ts: all assertions passed');
+
+
+// WebApp hash length mismatch must fail closed (timing-safe path)
+import crypto from 'node:crypto';
+{
+  const a = Buffer.from('abcd', 'hex');
+  const b = Buffer.from('ab', 'hex');
+  assert.equal(a.length === b.length && crypto.timingSafeEqual(a, b), false);
+}

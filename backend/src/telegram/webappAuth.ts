@@ -26,7 +26,15 @@ export function validateWebAppInitData(
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
   const calculated = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
-  if (calculated !== hash) return { ok: false, error: 'Invalid hash' };
+  try {
+    const a = Buffer.from(calculated, 'hex');
+    const b = Buffer.from(hash, 'hex');
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return { ok: false, error: 'Invalid hash' };
+    }
+  } catch {
+    return { ok: false, error: 'Invalid hash' };
+  }
 
   const authDate = Number(params.get('auth_date') || 0);
   if (!authDate || Math.abs(Date.now() / 1000 - authDate) > maxAgeSec) {

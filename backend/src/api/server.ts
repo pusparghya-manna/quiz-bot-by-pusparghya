@@ -1,8 +1,10 @@
 import express from 'express';
+import crypto from 'crypto';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { env, corsOriginDelegate, assertSecureConfig } from '../config/env.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { securityHeaders } from '../middleware/securityHeaders.js';
 import { clampStr, csvCell } from '../middleware/validate.js';
 import { requireTeacher, getOwnedExam, ownsExam, studentBelongsToTeacher, attemptBelongsToTeacher, questionBelongsToTeacher } from '../middleware/ownership.js';
 import { initDb } from '../database/client.js';
@@ -26,6 +28,9 @@ async function startServer(app?: import('express').Express) {
   const owned = !app;
   app = app || express();
 
+  // Railway / reverse-proxy: correct client IP for rate limits
+  app.set('trust proxy', 1);
+  app.use(securityHeaders);
   app.use(cors({ origin: corsOriginDelegate, credentials: true }));
   app.use(express.json({ limit: '12mb' }));
   app.use(express.urlencoded({ extended: true, limit: '12mb' }));
@@ -42,8 +47,8 @@ async function startServer(app?: import('express').Express) {
       if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
       const result = await loginTeacher(username, password);
       res.json(result);
-    } catch (e: any) {
-      res.status(401).json({ error: e.message || 'Login failed' });
+    } catch {
+      res.status(401).json({ error: 'Invalid credentials' });
     }
   });
 
@@ -82,6 +87,13 @@ async function startServer(app?: import('express').Express) {
       }
       if (attempt.status !== 'SUBMITTED' && attempt.status !== 'AUTO_SUBMITTED') {
         return res.status(400).json({ error: 'Exam not submitted yet' });
+      }
+      if (!attempt.answers || Object.keys(attempt.answers).length === 0) {
+        try {
+          await store.loadAttemptAnswers(attempt.id);
+        } catch {
+          /* ignore */
+        }
       }
 
       const exam = store.getExamById(attempt.examId);
@@ -153,9 +165,18 @@ async function startServer(app?: import('express').Express) {
 
 
   // --- API ROUTES (protected) ---
+  const apiLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 180,
+    keyFn: (req) => `api:${(req as any).teacher?.username || req.ip}`,
+  });
   app.use('/api', (req, res, next) => {
     if (req.path.startsWith('/auth') || req.path.startsWith('/telegram')) return next();
     return authMiddleware(req, res, next);
+  });
+  app.use('/api', (req, res, next) => {
+    if (req.path.startsWith('/auth') || req.path.startsWith('/telegram')) return next();
+    return apiLimiter(req, res, next);
   });
 
 
@@ -1058,11 +1079,24 @@ async function startServer(app?: import('express').Express) {
     }
   });
 
-  app.post('/api/telegram/webhook', async (req, res) => {
+  const webhookLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 120,
+    keyFn: (req) => `tg-webhook:${req.ip}`,
+  });
+
+  app.post('/api/telegram/webhook', webhookLimiter, async (req, res) => {
     try {
-      if (env.telegramWebhookSecret) {
+      const secret = env.telegramWebhookSecret;
+      if (env.isProd && !secret) {
+        console.error('[security] TELEGRAM_WEBHOOK_SECRET missing — rejecting webhook in production');
+        return res.status(503).json({ error: 'Webhook not configured' });
+      }
+      if (secret) {
         const hdr = String(req.headers['x-telegram-bot-api-secret-token'] || '');
-        if (hdr !== env.telegramWebhookSecret) {
+        const a = Buffer.from(hdr);
+        const b = Buffer.from(secret);
+        if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
           return res.status(401).json({ error: 'Invalid webhook secret' });
         }
       }
@@ -1073,7 +1107,8 @@ async function startServer(app?: import('express').Express) {
       }
       res.json({ ok: true });
     } catch (err: any) {
-      console.error('Telegram webhook error:', err);
+      console.error('Telegram webhook error:', err?.message || err);
+      // Always 200 to Telegram so it does not retry-storm; log server-side
       res.status(200).json({ ok: true });
     }
   });
