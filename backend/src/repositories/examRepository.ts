@@ -60,19 +60,37 @@ export const examRepository = {
         ],
       });
       await tx.execute({ sql: 'DELETE FROM questions WHERE exam_id = ?', args: [exam.id] });
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i];
+      // Batch inserts (fewer Turso round-trips) — chunks of 25
+      const CHUNK = 25;
+      for (let start = 0; start < questions.length; start += CHUNK) {
+        const slice = questions.slice(start, start + CHUNK);
+        const placeholders = slice.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',');
+        const args: any[] = [];
+        slice.forEach((q, j) => {
+          const i = start + j;
+          args.push(
+            q.id || `Q_${exam.id}_${i}`,
+            exam.id,
+            exam.teacherId || q.teacherId || 'default',
+            q.question || '',
+            JSON.stringify(q.options || []),
+            q.answer ?? null,
+            q.marks ?? 1,
+            q.negativeMarks ?? 0,
+            q.explanation || null,
+            q.subject || null,
+            i,
+            q.image?.fileId || null,
+            q.image?.mimeType || null,
+            q.image?.width ?? null,
+            q.image?.height ?? null
+          );
+        });
         await tx.execute({
           sql: `INSERT INTO questions (id, exam_id, teacher_id, question, options_json, answer, marks, negative_marks, explanation, subject, sort_order,
                 image_file_id, image_mime_type, image_width, image_height)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-          args: [
-            q.id, exam.id, exam.teacherId || q.teacherId || 'default', q.question || '',
-            JSON.stringify(q.options || []), q.answer ?? null, q.marks ?? 1, q.negativeMarks ?? 0,
-            q.explanation || null, q.subject || null, i,
-            q.image?.fileId || null, q.image?.mimeType || null,
-            q.image?.width ?? null, q.image?.height ?? null,
-          ],
+                VALUES ${placeholders}`,
+          args,
         });
       }
     });

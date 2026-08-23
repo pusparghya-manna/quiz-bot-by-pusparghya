@@ -388,9 +388,24 @@ class Store {
     else this.data.students.push(student);
     return student;
   }
-  async deleteStudent(id: string) {
+  async deleteStudent(
+    id: string,
+    opts?: { studentCode?: string; telegramUserId?: number | null; examIds?: string[] }
+  ) {
+    const student = this.data.students.find((s) => s.id === id);
+    const code = opts?.studentCode ?? student?.studentId;
+    const tg = opts?.telegramUserId ?? student?.telegramUserId ?? null;
+    const examIds = opts?.examIds;
+
+    // Drop related attempts from memory immediately
+    this.data.attempts = this.data.attempts.filter((a) => {
+      if (examIds && examIds.length && !examIds.includes(a.examId)) return true;
+      if (a.studentId && (a.studentId === id || a.studentId === code)) return false;
+      if (tg != null && a.telegramUserId && Number(a.telegramUserId) === Number(tg)) return false;
+      return true;
+    });
     this.data.students = this.data.students.filter((s) => s.id !== id);
-    await studentRepository.deleteStudent(id);
+    await studentRepository.deleteStudent(id, { studentCode: code, telegramUserId: tg, examIds });
   }
 
   /** Link student to teacher idempotently. */

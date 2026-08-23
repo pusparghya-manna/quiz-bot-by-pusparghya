@@ -517,7 +517,12 @@ async function startServer(app?: import('express').Express) {
     };
 
     await store.saveExam(newExam);
-        try { const tid = (req as any).teacher?.username; if (tid) invalidateTeacherCache(tid); } catch {}
+    try {
+      const tid = (req as any).teacher?.username;
+      if (tid) invalidateTeacherCache(tid);
+    } catch {
+      /* ignore */
+    }
     await store.addAuditLog('EXAM_CREATED', `Created exam "${newExam.title}" for ${newExam.className}`, teacherId);
     res.json(withEffectiveStatus(newExam));
   });
@@ -820,25 +825,49 @@ async function startServer(app?: import('express').Express) {
     if (!teacherId) return;
     const student = store.getStudentById(req.params.id);
     if (!student || !studentBelongsToTeacher(student, teacherId)) return res.status(404).json({ error: 'Student not found' });
-    const myExamIds = new Set(store.getExams().filter((e: any) => e.teacherId === teacherId).map((e: any) => e.id));
-    const examIds = [...new Set(store.getAttempts().filter(a =>
-      myExamIds.has(a.examId) && (a.studentId === student.studentId || a.telegramUserId === student.telegramUserId)
-    ).map(a => a.examId))];
-    await store.deleteStudent(student.id);
-    examIds.forEach(id => updateExamRanks(id));
-    await store.addAuditLog('STUDENT_DELETED', `Removed student ${student.name}`, teacherId);
+    const myExamIds = store.getExams().filter((e: any) => e.teacherId === teacherId).map((e: any) => e.id);
+    const examIds = [...new Set(
+      store.getAttempts()
+        .filter(
+          (a) =>
+            myExamIds.includes(a.examId) &&
+            (a.studentId === student.studentId ||
+              a.studentId === student.id ||
+              (student.telegramUserId && a.telegramUserId === student.telegramUserId))
+        )
+        .map((a) => a.examId)
+    )];
+    await store.deleteStudent(student.id, {
+      studentCode: student.studentId,
+      telegramUserId: student.telegramUserId ?? null,
+      examIds: myExamIds,
+    });
+    try {
+      invalidateTeacherCache(teacherId);
+    } catch {
+      /* ignore */
+    }
+    // Ranks in background — do not block the HTTP response
+    for (const id of examIds) {
+      void Promise.resolve(updateExamRanks(id)).catch(() => {});
+    }
+    void store.addAuditLog('STUDENT_DELETED', `Removed student ${student.name}`, teacherId);
     res.json({ success: true });
   });
 
   app.delete('/api/attempts/:id', async (req, res) => {
     const teacherId = requireTeacher(req, res);
     if (!teacherId) return;
-    const att = store.getAttempts().find(a => a.id === req.params.id);
+    const att = store.getAttempts().find((a) => a.id === req.params.id);
     if (!att || !attemptBelongsToTeacher(att, teacherId)) return res.status(404).json({ error: 'Attempt not found' });
     await store.deleteAttempt(att.id);
-    try { invalidateTeacherCache(teacherId); } catch {}
-    updateExamRanks(att.examId);
-    await store.addAuditLog('ATTEMPT_DELETED', `Removed attempt ${att.id} for ${att.studentName}`, teacherId);
+    try {
+      invalidateTeacherCache(teacherId);
+    } catch {
+      /* ignore */
+    }
+    void Promise.resolve(updateExamRanks(att.examId)).catch(() => {});
+    void store.addAuditLog('ATTEMPT_DELETED', `Removed attempt ${att.id} for ${att.studentName}`, teacherId);
     res.json({ success: true });
   });
 

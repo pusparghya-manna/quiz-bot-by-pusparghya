@@ -4,6 +4,7 @@ import { api } from '../api';
 import { inp, btn, btnP, btnS, btnD, card, inpIconWrap, inpBare, labelReq } from '../styles/ui';
 import { Field } from '../components/ui/Field';
 import { Sheet } from '../components/ui/Sheet';
+import { ActionOverlay } from '../components/ui/ActionOverlay';
 import { Badge } from '../components/ui/Badge';
 import { toDatetimeLocalIST, fromDatetimeLocalIST, formatIST } from '../lib/time';
 import { effectiveExamStatus } from '../lib/examStatus';
@@ -24,6 +25,8 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   const [editId, setEditId] = useState<string | null>(null);
   const [step, setStep] = useState<'info' | 'questions' | 'review'>('info');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionLabel, setActionLabel] = useState('Working…');
   const [form, setForm] = useState({
     title: '', subject: '', className: '', testNumber: '', startDate: '',
     durationMinutes: 60, negativeMarking: 0, status: 'DRAFT' as ExamStatus,
@@ -117,6 +120,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   const saveExam = async () => {
     if (!form.title.trim()) return toastError('Title required');
     if (qs.length === 0) return toastError('Add at least one question');
+    setActionLabel(editId ? 'Saving exam…' : 'Creating exam…');
     setSaving(true);
     try {
       const body = {
@@ -158,8 +162,21 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
 
   const delExam = async (id: string) => {
     if (!(await confirmAsync('Delete this exam?'))) return;
-    await api(`/api/exams/${id}`, { method: 'DELETE' });
-    onRefresh();
+    setActionLabel('Deleting exam…');
+    setDeleting(true);
+    try {
+      const res = await api(`/api/exams/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || 'Delete failed');
+      }
+      toastSuccess('Exam deleted');
+      onRefresh();
+    } catch (e: any) {
+      toastError(e?.message || 'Delete failed');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const addManual = () => {
@@ -254,6 +271,8 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   };
 
   return (
+    <>
+    <ActionOverlay show={saving || deleting} label={actionLabel} />
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div>
@@ -743,14 +762,14 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
               <p className="text-[11px] text-slate-500 flex items-center gap-1"><IconInfo className="w-3 h-3 shrink-0" />Status is automatic: Scheduled before start, Live during the window, Results published after it ends.</p>
               <div className="flex gap-2">
                 <button type="button" className={btnS + ' flex-1'} onClick={() => setStep('questions')}>← Edit questions</button>
-                <button type="button" className={btnP + ' flex-1'} disabled={saving} onClick={saveExam}>
-                  {saving ? 'Saving…' : editId ? 'Update exam' : 'Create exam'}
-                </button>
+                <button type="button" className={btnP + ' flex-1 inline-flex items-center justify-center gap-2'} disabled={saving || deleting} onClick={saveExam}>
+                  {saving ? (editId ? 'Saving…' : 'Creating…') : (editId ? 'Save exam' : 'Create exam')}</button>
               </div>
             </div>
           )}
         </Sheet>
       )}
     </div>
+    </>
   );
 }

@@ -8,6 +8,7 @@ import {
   IconCopy, IconDownload, IconArrowLeft, IconMessage, IconSend,
   IconUser, IconHash, IconClock, IconCheck, IconClose, IconTrophy, IconBook
 } from '../icons';
+import { ActionOverlay } from '../components/ui/ActionOverlay';
 
 export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[]; attempts: Attempt[]; students: Student[]; onRefresh: () => void }) {
   type View = 'exams' | 'pick' | 'official' | 'practice';
@@ -18,6 +19,8 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   const [showAll, setShowAll] = useState(false);
   const [dmText, setDmText] = useState('');
   const [dmBusy, setDmBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionLabel, setActionLabel] = useState('Working…');
 
   const selectedExam = exams.find((e) => e.id === examId);
 
@@ -62,16 +65,42 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
 
   const removeAttempt = async (id: string) => {
     if (!(await confirmAsync('Remove from results?'))) return;
-    await api(`/api/attempts/${id}`, { method: 'DELETE' });
-    setDetail(null);
-    onRefresh();
+    setActionLabel('Removing result…');
+    setActionBusy(true);
+    try {
+      const res = await api(`/api/attempts/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error((d as any).error || 'Delete failed');
+      }
+      setDetail(null);
+      toastSuccess('Result removed');
+      onRefresh();
+    } catch (e: any) {
+      toastError(e?.message || 'Delete failed');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const removeStudent = async (studentId: string) => {
     if (!(await confirmAsync('Delete student and all attempts?'))) return;
-    await api(`/api/students/${studentId}`, { method: 'DELETE' });
-    setDetail(null);
-    onRefresh();
+    setActionLabel('Deleting student…');
+    setActionBusy(true);
+    try {
+      const res = await api(`/api/students/${studentId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error((d as any).error || 'Delete failed');
+      }
+      setDetail(null);
+      toastSuccess('Student deleted');
+      onRefresh();
+    } catch (e: any) {
+      toastError(e?.message || 'Delete failed');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const copyText = async () => {
@@ -135,6 +164,8 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   // —— Main: exam list only ——
   if (view === 'exams') {
     return (
+    <>
+    <ActionOverlay show={actionBusy || detailLoading || dmBusy} label={detailLoading ? 'Loading result…' : dmBusy ? 'Sending…' : actionLabel} />
       <div className="space-y-3">
         <div>
           <h1 className="text-lg font-bold tracking-tight">Results</h1>
@@ -165,12 +196,15 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
           </div>
         )}
       </div>
+    </>
     );
   }
 
   // —— Pick official vs practice ——
   if (view === 'pick') {
     return (
+    <>
+    <ActionOverlay show={actionBusy || detailLoading || dmBusy} label={detailLoading ? 'Loading result…' : dmBusy ? 'Sending…' : actionLabel} />
       <div className="space-y-3">
         <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 py-2 pr-3" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setView('exams'); }}>
           <IconArrowLeft className="w-4 h-4" /> All exams
@@ -188,11 +222,14 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
           <div className="text-[11px] text-slate-500 mt-0.5">{practice.length} attempt{practice.length === 1 ? '' : 's'} · with attempt number</div>
         </button>
       </div>
+    </>
     );
   }
 
   // —— Official or practice list ——
   return (
+    <>
+    <ActionOverlay show={actionBusy || detailLoading || dmBusy} label={detailLoading ? 'Loading result…' : dmBusy ? 'Sending…' : actionLabel} />
     <div className="space-y-3">
       <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 py-2 pr-3" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setView('pick'); }}>
         <IconArrowLeft className="w-4 h-4" /> Back
@@ -423,5 +460,6 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
         </Sheet>
       )}
     </div>
+    </>
   );
 }

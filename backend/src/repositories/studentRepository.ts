@@ -47,8 +47,45 @@ export const studentRepository = {
     });
   },
 
-  async deleteStudent(id: string): Promise<void> {
+  /**
+   * Remove student + teacher links + attempts for this student (by internal id / code / telegram).
+   * Faster than deleting attempts one-by-one from the API layer.
+   */
+  async deleteStudent(
+    id: string,
+    opts?: { studentCode?: string; telegramUserId?: number | null; examIds?: string[] }
+  ): Promise<void> {
     await withWriteTx(async (tx) => {
+      const code = opts?.studentCode;
+      const tg = opts?.telegramUserId;
+      // Collect attempt ids belonging to this student (optionally limited to teacher exams)
+      let attemptSql =
+        `SELECT id FROM attempts WHERE student_id = ? OR student_id = ?` +
+        (tg != null ? ` OR telegram_user_id = ?` : '');
+      const attemptArgs: any[] = [id, code || id];
+      if (tg != null) attemptArgs.push(tg);
+
+      if (opts?.examIds && opts.examIds.length > 0) {
+        const ph = opts.examIds.map(() => '?').join(',');
+        attemptSql += ` AND exam_id IN (${ph})`;
+        attemptArgs.push(...opts.examIds);
+      }
+
+      const attRes = await tx.execute({ sql: attemptSql, args: attemptArgs });
+      const attemptIds = (attRes.rows as any[]).map((r) => String(r.id));
+
+      if (attemptIds.length > 0) {
+        const ph = attemptIds.map(() => '?').join(',');
+        await tx.execute({
+          sql: `DELETE FROM attempt_answers WHERE attempt_id IN (${ph})`,
+          args: attemptIds,
+        });
+        await tx.execute({
+          sql: `DELETE FROM attempts WHERE id IN (${ph})`,
+          args: attemptIds,
+        });
+      }
+
       await tx.execute({ sql: 'DELETE FROM student_teachers WHERE student_id = ?', args: [id] });
       await tx.execute({ sql: 'DELETE FROM students WHERE id = ?', args: [id] });
     });
