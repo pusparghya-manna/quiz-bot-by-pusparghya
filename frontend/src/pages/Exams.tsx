@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { Exam, Question, ExamStatus } from '../types';
-import { api } from '../api';
+import { api, getToken } from '../api';
 import { inp, btn, btnP, btnS, btnD, card, inpIconWrap, inpBare, labelReq } from '../styles/ui';
 import { Field } from '../components/ui/Field';
 import { Sheet } from '../components/ui/Sheet';
@@ -17,7 +17,7 @@ import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconUpload, IconShare, IconInfo,
   IconCalendar, IconCopy, IconFileText, IconSparkles, IconClose, IconSearch,
   IconChevronDown, IconClock, IconExam, IconUsers, IconBook, IconHash,
-  IconShuffle, IconMinus, IconBookmark, IconUser
+  IconShuffle, IconMinus, IconBookmark, IconUser, IconEye, IconUpload
 } from '../icons';
 
 export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }: { exams: Exam[]; botUsername: string; onRefresh: () => void; defaultOpenNew?: boolean }) {
@@ -117,7 +117,19 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       durationMinutes: exam.durationMinutes || 60, negativeMarking: exam.negativeMarking || 0,
       status: exam.status, randomizeQuestions: !!exam.randomizeQuestions, randomizeOptions: !!exam.randomizeOptions,
     });
-    setQs((exam.questions || []).map((q) => ({ ...q, options: [...(q.options || ['', '', '', ''])].slice(0, 4) })));
+    setQs(
+      (exam.questions || []).map((q) => {
+        const opts = [...(q.options || ['', '', '', ''])].slice(0, 4);
+        const fileId = q.image?.fileId;
+        return {
+          ...q,
+          options: opts,
+          // Restore diagram preview after exam was saved (via media proxy)
+          imagePreview: q.imagePreview || null,
+        };
+      })
+    );
+    setOcrPageDataUrl(null); // no original page after reload — expand/crop limited; Replace still works
     setStep('info');
     setQMode('list');
     setOpen(true);
@@ -356,6 +368,35 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     } finally {
       setImgBusy(false);
     }
+  };
+
+  const telegramMediaUrl = (fileId: string) => {
+    const t = getToken();
+    return `/api/media/telegram/${encodeURIComponent(fileId)}${t ? `?token=${encodeURIComponent(t)}` : ''}`;
+  };
+
+  const loadTelegramPreview = async (fileId: string): Promise<string | null> => {
+    try {
+      const res = await api(`/api/media/telegram/${encodeURIComponent(fileId)}`);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    } catch {
+      return null;
+    }
+  };
+
+  const openEditQuestion = (q: Question) => {
+    const fileId = q.image?.fileId;
+    const preview =
+      q.imagePreview ||
+      (fileId ? telegramMediaUrl(fileId) : null);
+    setEditQ({
+      ...q,
+      options: [...(q.options || [])],
+      imagePreview: preview,
+    });
+    setQMode('manual');
   };
 
   const commitPendingCrops = async (list: Question[]): Promise<Question[]> => {
@@ -768,13 +809,17 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                       <div key={q.id} className="border border-slate-200 rounded-lg p-2.5 hover:border-slate-300 transition">
                         <div className="text-[10px] text-slate-400 font-semibold mb-0.5">Q{i + 1} · Ans {q.answer == null ? 'Not provided' : String.fromCharCode(65 + q.answer)} · {q.marks} mark{(q.imagePreview || q.image?.fileId) ? ' · Diagram' : ''}</div>
                         <div className="flex gap-2 items-start">
-                          {q.imagePreview ? (
-                            <img src={q.imagePreview} alt={`Q${i + 1} diagram`} className="w-16 h-16 object-contain rounded-md border border-slate-200 bg-slate-50 shrink-0" />
+                          {(q.imagePreview || q.image?.fileId) ? (
+                            <img
+                              src={q.imagePreview || (q.image?.fileId ? telegramMediaUrl(q.image.fileId) : '')}
+                              alt={`Q${i + 1} diagram`}
+                              className="w-16 h-16 object-contain rounded-md border border-slate-200 bg-slate-50 shrink-0"
+                            />
                           ) : null}
                           <div className="text-[13px] font-medium text-slate-800 line-clamp-2 min-w-0 flex-1">{q.question}</div>
                         </div>
                         <div className="flex gap-1.5 mt-1.5">
-                          <button type="button" className={btnS + ' !py-1 text-[11px]'} onClick={() => { setEditQ({ ...q, options: [...(q.options || [])] }); setQMode('manual'); }}><IconEdit className="w-3 h-3" /> Edit</button>
+                          <button type="button" className={btnS + ' !py-1 text-[11px]'} onClick={() => void openEditQuestion(q)}><IconEdit className="w-3 h-3" /> Edit</button>
                           <button type="button" className={btnD + ' text-[11px]'} onClick={() => setQs((p) => p.filter((x) => x.id !== q.id))}><IconTrash className="w-3 h-3" /> Remove</button>
                         </div>
                       </div>
@@ -788,60 +833,142 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
               )}
 
               {qMode === 'manual' && editQ && (
-                <div className="space-y-2">
-                  {(editQ.imagePreview || editQ.image_bbox) ? (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 space-y-1.5">
-                      <div className="flex gap-2 items-center">
+                <div className="space-y-3">
+                  {/* Diagram card — only when this question has / will have an image */}
+                  {(editQ.imagePreview || editQ.image_bbox || editQ.image?.fileId) ? (
+                    <div className="flex gap-2.5 items-start">
+                      <div className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
                         {editQ.imagePreview ? (
-                          <img src={editQ.imagePreview} alt="" className="w-14 h-14 object-contain rounded border border-slate-200 bg-white shrink-0" />
-                        ) : null}
-                        <div className="flex flex-wrap gap-1 min-w-0 flex-1">
-                          {editQ.image_bbox && ocrPageDataUrl ? (
-                            <>
-                              <button type="button" className={btnS + ' !py-0.5 !px-2 text-[10px]'} disabled={imgBusy} onClick={() => expandDiagram(1.12)}>Expand</button>
-                              <button type="button" className={btnS + ' !py-0.5 !px-2 text-[10px]'} disabled={imgBusy} onClick={() => expandDiagram(0.9)}>Shrink</button>
-                              <button type="button" className={btnS + ' !py-0.5 !px-2 text-[10px]'} disabled={imgBusy} onClick={() => setCropEditorOpen(true)}>Edit crop</button>
-                            </>
-                          ) : null}
-                          <label className={btnS + ' !py-0.5 !px-2 text-[10px] cursor-pointer' + (imgBusy ? ' opacity-60 pointer-events-none' : '')}>
-                            {imgBusy ? '…' : 'Replace'}
-                            <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
-                          </label>
-                        </div>
+                          <img
+                            src={editQ.imagePreview}
+                            alt="Diagram"
+                            className="w-full max-h-[160px] object-contain bg-white"
+                          />
+                        ) : (
+                          <div className="h-28 flex items-center justify-center text-[11px] text-slate-400">No preview</div>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 shrink-0 w-[88px]">
+                        <button
+                          type="button"
+                          disabled={imgBusy || !editQ.image_bbox || !ocrPageDataUrl}
+                          title={ocrPageDataUrl ? 'Expand crop' : 'Available right after Photo OCR'}
+                          onClick={() => expandDiagram(1.12)}
+                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white py-2 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                          Expand
+                        </button>
+                        <button
+                          type="button"
+                          disabled={imgBusy || !editQ.image_bbox || !ocrPageDataUrl}
+                          title={ocrPageDataUrl ? 'Shrink crop' : 'Available right after Photo OCR'}
+                          onClick={() => expandDiagram(0.9)}
+                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white py-2 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" /></svg>
+                          Shrink
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!editQ.imagePreview}
+                          onClick={() => {
+                            if (editQ.imagePreview) window.open(editQ.imagePreview, '_blank', 'noopener,noreferrer');
+                          }}
+                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white py-2 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                        >
+                          <IconEye className="w-4 h-4" />
+                          Preview
+                        </button>
+                        <label className={"flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white py-2 text-[9px] font-semibold text-slate-600 cursor-pointer" + (imgBusy ? ' opacity-40 pointer-events-none' : '')}>
+                          <IconUpload className="w-4 h-4" />
+                          {imgBusy ? '…' : 'Replace'}
+                          <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
+                        </label>
                       </div>
                     </div>
-                  ) : (
-                    <label className={btnS + ' !py-1 text-[11px] cursor-pointer inline-flex' + (imgBusy ? ' opacity-60 pointer-events-none' : '')}>
-                      {imgBusy ? 'Uploading…' : '+ Diagram photo'}
-                      <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
-                    </label>
-                  )}
-                  <Field label="Question"><textarea className={inp + ' min-h-[56px] text-[13px]'} value={editQ.question} onChange={(e) => setEditQ({ ...editQ, question: e.target.value })} /></Field>
-                  <div className="grid grid-cols-1 gap-1.5">
-                    {['A', 'B', 'C', 'D'].map((L, i) => (
-                      <div key={L} className="relative">
-                        <span className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold rounded flex items-center justify-center ${editQ.answer === i ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`} style={{ width: 16, height: 16 }}>{L}</span>
-                        <input className={inp + ' pl-9 !py-1.5 text-[13px]'} placeholder={`Option ${L}`} value={editQ.options[i] || ''} onChange={(e) => {
-                          const opts = [...editQ.options]; opts[i] = e.target.value; setEditQ({ ...editQ, options: opts });
-                        }} />
-                      </div>
-                    ))}
+                  ) : null}
+
+                  {editQ.image_bbox && ocrPageDataUrl ? (
+                    <button type="button" className={btnS + ' !py-1 text-[11px] w-full'} disabled={imgBusy} onClick={() => setCropEditorOpen(true)}>
+                      Edit crop (draw / resize)
+                    </button>
+                  ) : null}
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-semibold text-slate-600">Question</span>
+                      <span className="text-[10px] text-slate-400">{(editQ.question || '').length}/500</span>
+                    </div>
+                    <textarea
+                      className={inp + ' min-h-[52px] text-[13px]'}
+                      maxLength={500}
+                      value={editQ.question}
+                      onChange={(e) => setEditQ({ ...editQ, question: e.target.value })}
+                    />
                   </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-slate-600">Options</span>
+                      <span className="text-[10px] text-slate-400">Select correct answer</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {['A', 'B', 'C', 'D'].map((L, i) => (
+                        <button
+                          key={L}
+                          type="button"
+                          onClick={() => setEditQ({ ...editQ, answer: i })}
+                          className={`w-full flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
+                            editQ.answer === i
+                              ? 'border-emerald-300 bg-emerald-50/80'
+                              : 'border-slate-200 bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <span className={`shrink-0 w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center ${
+                            editQ.answer === i ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500'
+                          }`}>{L}</span>
+                          <input
+                            className="flex-1 min-w-0 bg-transparent border-0 outline-none text-[13px] text-slate-800 placeholder:text-slate-400"
+                            value={editQ.options[i] || ''}
+                            placeholder={`Option ${L}`}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              const opts = [...editQ.options];
+                              opts[i] = e.target.value;
+                              setEditQ({ ...editQ, options: opts });
+                            }}
+                          />
+                          <span className={`shrink-0 w-4 h-4 rounded-full border-2 ${
+                            editQ.answer === i ? 'border-emerald-500 bg-emerald-500' : 'border-slate-300'
+                          }`} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2.5">
-                    <Field label="Correct answer">
-                      <div className="relative">
-                        <select className={inp + ' appearance-none pr-9'} value={editQ.answer == null ? '' : editQ.answer} onChange={(e) => setEditQ({ ...editQ, answer: e.target.value === '' ? null : Number(e.target.value) })}>
-                          <option value="">Not provided</option>
-                          {[0, 1, 2, 3].map((i) => <option key={i} value={i}>{String.fromCharCode(65 + i)}</option>)}
-                        </select>
-                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconChevronDown className="w-3.5 h-3.5" /></span>
-                      </div>
-                    </Field>
-                    <Field label="Marks"><input type="number" className={inp} value={editQ.marks} onChange={(e) => setEditQ({ ...editQ, marks: +e.target.value })} /></Field>
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-600 mb-1">Correct answer</div>
+                      <select
+                        className={inp + ' appearance-none text-[13px]'}
+                        value={editQ.answer == null ? '' : editQ.answer}
+                        onChange={(e) => setEditQ({ ...editQ, answer: e.target.value === '' ? null : Number(e.target.value) })}
+                      >
+                        <option value="">Not provided</option>
+                        {[0, 1, 2, 3].map((i) => (
+                          <option key={i} value={i}>{String.fromCharCode(65 + i)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-600 mb-1">Marks</div>
+                      <input type="number" className={inp + ' text-[13px]'} value={editQ.marks} onChange={(e) => setEditQ({ ...editQ, marks: +e.target.value })} />
+                    </div>
                   </div>
-                  <Field label="Explanation (optional)"><textarea className={inp + ' min-h-[40px] text-[12px]'} value={editQ.explanation || ''} onChange={(e) => setEditQ({ ...editQ, explanation: e.target.value })} /></Field>
-                  <div className="flex gap-2">
-                    <button type="button" className={btnS + ' flex-1'} onClick={() => { setEditQ(null); setQMode('list'); }}>Cancel</button>
+
+                  <div className="flex gap-2 pt-1">
+                    <button type="button" className={btnS + ' flex-1'} onClick={() => { setEditQ(null); setCropEditorOpen(false); setQMode('list'); }}>Cancel</button>
                     <button type="button" className={btnP + ' flex-1'} onClick={saveManualQ}><IconCheck className="w-3.5 h-3.5" /> Save question</button>
                   </div>
                 </div>
