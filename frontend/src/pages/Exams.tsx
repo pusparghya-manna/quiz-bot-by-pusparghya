@@ -10,6 +10,7 @@ import { toDatetimeLocalIST, fromDatetimeLocalIST, formatIST } from '../lib/time
 import { effectiveExamStatus } from '../lib/examStatus';
 import { emptyQuestion, normalizeAnswer } from '../lib/exam';
 import { prepareImageForOcr } from '../lib/image';
+import { cropBBoxFromDataUrl, expandBBoxNorm1000, type BBox } from '../lib/bboxCrop';
 import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconUpload, IconShare, IconInfo,
@@ -38,6 +39,9 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   const [jsonText, setJsonText] = useState('');
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrPhase, setOcrPhase] = useState<'idle' | 'extract' | 'diagrams' | 'done'>('idle');
+  const [ocrPageDataUrl, setOcrPageDataUrl] = useState<string | null>(null);
+  const [ocrPageMime, setOcrPageMime] = useState('image/jpeg');
+  const [imgBusy, setImgBusy] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const examLink = (id: string) => {
     const u = (botUsername || '').replace(/^@/, '').trim() || 'YourBot';
@@ -123,6 +127,10 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     setActionLabel(editId ? 'Saving exam…' : 'Creating exam…');
     setSaving(true);
     try {
+      const questionsReady = await commitPendingCrops(qs);
+      setQs(questionsReady);
+      // Do not send local previews / draft bboxes to API
+      const questionsForApi = questionsReady.map(({ imagePreview, image_bbox, ...rest }) => rest);
       const body = {
         title: form.title.trim(),
         subject: form.subject,
@@ -135,9 +143,9 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
         randomizeOptions: form.randomizeOptions,
         resultVisibility: 'PUBLISHED',
         leaderboardVisibility: 'PUBLISHED',
-        questions: qs,
-        totalQuestions: qs.length,
-        totalMarks: qs.reduce((s, q) => s + (Number(q.marks) || 1), 0),
+        questions: questionsForApi,
+        totalQuestions: questionsForApi.length,
+        totalMarks: questionsForApi.reduce((s, q) => s + (Number(q.marks) || 1), 0),
       };
       const res = editId
         ? await api(`/api/exams/${editId}`, { method: 'PUT', body: JSON.stringify(body), timeoutMs: 120_000 })
@@ -226,6 +234,9 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     setToastMsg('');
     try {
       const prepared = await prepareImageForOcr(file);
+      const pageDataUrl = `data:${prepared.mimeType};base64,${prepared.base64}`;
+      setOcrPageDataUrl(pageDataUrl);
+      setOcrPageMime(prepared.mimeType);
       setOcrPhase('diagrams');
       const res = await api('/api/ocr/parse', {
         method: 'POST',
@@ -235,39 +246,137 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'OCR failed');
       const list: any[] = Array.isArray(data) ? data : data.questions || data.parsed || [];
-      const mapped: Question[] = list.map((item: any, i: number) => ({
-        id: `Q_OCR_${Date.now()}_${i}`,
-        question: item.question || item.text || '',
-        options: (item.options || ['', '', '', '']).slice(0, 4),
-        answer: normalizeAnswer(item.answer ?? item.correctAnswer ?? item.correct_option ?? item.correctOption, 4),
-        marks: item.marks ?? 1,
-        negativeMarks: item.negativeMarks ?? 0,
-        subject: item.subject || form.subject,
-        explanation: item.explanation || '',
-        image: item.image?.fileId
-          ? {
-              fileId: String(item.image.fileId),
-              mimeType: item.image.mimeType,
-              width: item.image.width,
-              height: item.image.height,
-            }
-          : undefined,
-      }));
-      const imgErrs: string[] = Array.isArray(data.imageErrors) ? data.imageErrors : [];
-      if (imgErrs.length) {
-        toastError(`Some diagrams failed (${imgErrs.length}). Text imported; check questions.`);
+      const mapped: Question[] = [];
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        const bbox =
+          item.image_bbox && item.has_image !== false ? (item.image_bbox as BBox) : null;
+        let preview: string | null = null;
+        if (bbox) {
+          try {
+            preview = await cropBBoxFromDataUrl(pageDataUrl, bbox);
+          } catch {
+            preview = null;
+          }
+        }
+        mapped.push({
+          id: `Q_OCR_${Date.now()}_${i}`,
+          question: item.question || item.text || '',
+          options: (item.options || ['', '', '', '']).slice(0, 4),
+          answer: normalizeAnswer(
+            item.answer ?? item.correctAnswer ?? item.correct_option ?? item.correctOption,
+            4
+          ),
+          marks: item.marks ?? 1,
+          negativeMarks: item.negativeMarks ?? 0,
+          subject: item.subject || form.subject,
+          explanation: item.explanation || '',
+          image_bbox: bbox,
+          imagePreview: preview,
+          image: undefined,
+        });
       }
       const validQuestions = mapped.filter((q) => q.question.trim());
       setQs((prev) => [...prev, ...validQuestions]);
       setQMode('list');
-      setToastMsg(`OCR added ${validQuestions.length} questions — please review`);
-      setTimeout(() => setToastMsg(''), 3000);
+      setToastMsg(`OCR added ${validQuestions.length} questions — review diagrams, then save exam`);
+      setTimeout(() => setToastMsg(''), 4000);
     } catch (e: any) {
       toastError(e.message || 'OCR failed');
     } finally {
       setOcrBusy(false);
       setOcrPhase('idle');
     }
+  };
+
+  const expandDiagram = async (factor: number) => {
+    if (!editQ?.image_bbox || !ocrPageDataUrl) {
+      return toastError('No diagram on the original page to expand. Replace photo instead.');
+    }
+    setImgBusy(true);
+    try {
+      const next = expandBBoxNorm1000(editQ.image_bbox, factor);
+      const preview = await cropBBoxFromDataUrl(ocrPageDataUrl, next);
+      setEditQ({
+        ...editQ,
+        image_bbox: next,
+        imagePreview: preview,
+        image: undefined,
+      });
+    } catch (e: any) {
+      toastError(e.message || 'Could not expand diagram');
+    } finally {
+      setImgBusy(false);
+    }
+  };
+
+  const replaceQuestionPhoto = async (file: File) => {
+    if (!editQ) return;
+    setImgBusy(true);
+    try {
+      const b64: string = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1] || '');
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      const res = await api('/api/ocr/upload-image', {
+        method: 'POST',
+        body: JSON.stringify({ fileBase64: b64, mimeType: file.type || 'image/jpeg' }),
+        timeoutMs: 60_000,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      const localPreview = `data:${file.type || 'image/jpeg'};base64,${b64}`;
+      setEditQ({
+        ...editQ,
+        image: data.image,
+        imagePreview: localPreview,
+        image_bbox: null,
+      });
+      toastSuccess('New photo uploaded');
+    } catch (e: any) {
+      toastError(e.message || 'Photo upload failed');
+    } finally {
+      setImgBusy(false);
+    }
+  };
+
+  const commitPendingCrops = async (list: Question[]): Promise<Question[]> => {
+    if (!ocrPageDataUrl) return list;
+    const need = list.filter((q) => q.image_bbox && !q.image?.fileId);
+    if (need.length === 0) return list;
+    const base64 = ocrPageDataUrl.split(',')[1] || '';
+    const res = await api('/api/ocr/commit-crops', {
+      method: 'POST',
+      body: JSON.stringify({
+        fileBase64: base64,
+        mimeType: ocrPageMime,
+        items: need.map((q) => ({
+          tempId: q.id,
+          has_image: true,
+          image_bbox: q.image_bbox,
+        })),
+      }),
+      timeoutMs: 120_000,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save diagrams');
+    const byId = new Map<string, any>();
+    for (const it of data.items || []) byId.set(String(it.tempId), it);
+    return list.map((q) => {
+      const it = byId.get(q.id);
+      if (!it?.image?.fileId) return q;
+      return {
+        ...q,
+        image: {
+          fileId: String(it.image.fileId),
+          mimeType: it.image.mimeType,
+          width: it.image.width,
+          height: it.image.height,
+        },
+      };
+    });
   };
 
   return (
@@ -633,10 +742,15 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                   <div className="space-y-1.5 max-h-[45vh] overflow-y-auto pr-0.5">
                     {qs.map((q, i) => (
                       <div key={q.id} className="border border-slate-200 rounded-lg p-2.5 hover:border-slate-300 transition">
-                        <div className="text-[10px] text-slate-400 font-semibold mb-0.5">Q{i + 1} · Ans {q.answer == null ? 'Not provided' : String.fromCharCode(65 + q.answer)} · {q.marks} mark</div>
-                        <div className="text-[13px] font-medium text-slate-800 line-clamp-2">{q.question}</div>
+                        <div className="text-[10px] text-slate-400 font-semibold mb-0.5">Q{i + 1} · Ans {q.answer == null ? 'Not provided' : String.fromCharCode(65 + q.answer)} · {q.marks} mark{(q.imagePreview || q.image?.fileId) ? ' · Diagram' : ''}</div>
+                        <div className="flex gap-2 items-start">
+                          {q.imagePreview ? (
+                            <img src={q.imagePreview} alt={`Q${i + 1} diagram`} className="w-16 h-16 object-contain rounded-md border border-slate-200 bg-slate-50 shrink-0" />
+                          ) : null}
+                          <div className="text-[13px] font-medium text-slate-800 line-clamp-2 min-w-0 flex-1">{q.question}</div>
+                        </div>
                         <div className="flex gap-1.5 mt-1.5">
-                          <button type="button" className={btnS + ' !py-1 text-[11px]'} onClick={() => { setEditQ({ ...q, options: [...q.options] }); setQMode('manual'); }}><IconEdit className="w-3 h-3" /> Edit</button>
+                          <button type="button" className={btnS + ' !py-1 text-[11px]'} onClick={() => { setEditQ({ ...q, options: [...(q.options || [])] }); setQMode('manual'); }}><IconEdit className="w-3 h-3" /> Edit</button>
                           <button type="button" className={btnD + ' text-[11px]'} onClick={() => setQs((p) => p.filter((x) => x.id !== q.id))}><IconTrash className="w-3 h-3" /> Remove</button>
                         </div>
                       </div>
@@ -651,6 +765,35 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
 
               {qMode === 'manual' && editQ && (
                 <div className="space-y-2.5">
+                  {(editQ.imagePreview || editQ.image_bbox) ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-2">
+                      <div className="text-[11px] font-semibold text-slate-600">Diagram for this question</div>
+                      {editQ.imagePreview ? (
+                        <img src={editQ.imagePreview} alt="Question diagram" className="max-h-48 w-full object-contain rounded-lg border border-slate-200 bg-white" />
+                      ) : null}
+                      <div className="flex flex-wrap gap-1.5">
+                        {editQ.image_bbox && ocrPageDataUrl ? (
+                          <>
+                            <button type="button" className={btnS + ' !py-1 text-[11px]'} disabled={imgBusy} onClick={() => expandDiagram(1.12)}>Expand area</button>
+                            <button type="button" className={btnS + ' !py-1 text-[11px]'} disabled={imgBusy} onClick={() => expandDiagram(0.9)}>Shrink area</button>
+                          </>
+                        ) : null}
+                        <label className={btnS + ' !py-1 text-[11px] cursor-pointer' + (imgBusy ? ' opacity-60 pointer-events-none' : '')}>
+                          {imgBusy ? 'Uploading…' : 'Replace photo'}
+                          <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
+                        </label>
+                      </div>
+                      <p className="text-[10px] text-slate-500">Expand uses the page crop. Replace uploads to Telegram and stores the new file id.</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-slate-200 p-3 space-y-1.5">
+                      <div className="text-[11px] font-semibold text-slate-600">Add diagram (optional)</div>
+                      <label className={btnS + ' !py-1 text-[11px] cursor-pointer inline-flex' + (imgBusy ? ' opacity-60 pointer-events-none' : '')}>
+                        {imgBusy ? 'Uploading…' : 'Upload photo'}
+                        <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
+                      </label>
+                    </div>
+                  )}
                   <Field label="Question"><textarea className={inp + ' min-h-[80px]'} value={editQ.question} onChange={(e) => setEditQ({ ...editQ, question: e.target.value })} /></Field>
                   {['A', 'B', 'C', 'D'].map((L, i) => (
                     <Field key={L} label={`Option ${L}`}>
