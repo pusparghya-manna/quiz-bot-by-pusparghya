@@ -822,6 +822,37 @@ async function startServer(app?: import('express').Express) {
     }
   });
 
+
+  /** Proxy Telegram file_id → image bytes (auth required) for teacher previews after exam save. */
+  app.get('/api/media/telegram/:fileId', async (req, res) => {
+    try {
+      const fileId = String(req.params.fileId || '');
+      if (!fileId) return res.status(400).json({ error: 'fileId required' });
+      const token =
+        process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken || '';
+      if (!token) return res.status(500).json({ error: 'Bot token not configured' });
+      const metaRes = await fetch(
+        `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`,
+        { signal: AbortSignal.timeout(10000) }
+      );
+      const meta: any = await metaRes.json().catch(() => ({}));
+      const fp = meta?.result?.file_path;
+      if (!fp) return res.status(404).json({ error: 'File not found on Telegram' });
+      const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${fp}`, {
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!fileRes.ok) return res.status(502).json({ error: 'Failed to fetch media' });
+      const buf = Buffer.from(await fileRes.arrayBuffer());
+      const ct = fileRes.headers.get('content-type') || 'image/jpeg';
+      res.setHeader('Content-Type', ct);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.send(buf);
+    } catch (err: any) {
+      console.error('[media proxy]', err?.message || err);
+      res.status(500).json({ error: 'Media proxy failed' });
+    }
+  });
+
   /** Upload a replacement diagram photo → Telegram storage file_id (teacher review). */
   app.post('/api/ocr/upload-image', ocrLimiter, async (req, res) => {
     try {
