@@ -208,9 +208,7 @@ export async function attachCroppedImagesToOcrQuestions(
     };
   }
 
-  const out: any[] = [];
   const usedBoxes: Array<{ x: number; y: number; w: number; h: number }> = [];
-
   const isDuplicateBox = (bbox: any): boolean => {
     const x = Number(bbox?.x);
     const y = Number(bbox?.y);
@@ -226,58 +224,72 @@ export async function attachCroppedImagesToOcrQuestions(
     );
   };
 
-  for (let i = 0; i < questions.length; i++) {
-    const q = { ...questions[i] };
+  // Prepare slots; process image questions with limited concurrency
+  const out: any[] = questions.map((q) => ({ ...q }));
+  const jobs: Array<{ i: number; label: string }> = [];
+  for (let i = 0; i < out.length; i++) {
+    const q = out[i];
     const label = q.question_number != null ? `Q${q.question_number}` : `item ${i + 1}`;
-
     if (!q.has_image || !q.image_bbox) {
       q.has_image = false;
       q.image_bbox = null;
-      out.push(q);
       continue;
     }
-
     if (isDuplicateBox(q.image_bbox)) {
       imageErrors.push(`${label}: duplicate diagram bbox — imported as text-only`);
       q.has_image = false;
       q.image_bbox = null;
-      out.push(q);
       continue;
     }
-
-    const cropped = await cropQuestionImage(pageBuffer, q.image_bbox);
-    if (!cropped) {
-      imageErrors.push(`${label}: invalid/empty crop — imported as text-only`);
-      q.has_image = false;
-      q.image_bbox = null;
-      out.push(q);
-      continue;
-    }
-
     usedBoxes.push({
       x: Number(q.image_bbox.x),
       y: Number(q.image_bbox.y),
       w: Number(q.image_bbox.width),
       h: Number(q.image_bbox.height),
     });
-
-    const uploaded = await uploadToTelegramStorage(cropped.buffer, cropped.mimeType, `ocr_${i}.jpg`);
-    if (!uploaded?.fileId) {
-      imageErrors.push(`${label}: Telegram media upload failed — imported as text-only`);
-      q.has_image = false;
-      q.image_bbox = null;
-      out.push(q);
-      continue;
-    }
-
-    q.image = {
-      fileId: uploaded.fileId,
-      mimeType: cropped.mimeType,
-      width: uploaded.width || cropped.width,
-      height: uploaded.height || cropped.height,
-    };
-    out.push(q);
+    jobs.push({ i, label });
   }
+
+  const concurrency = 4;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < jobs.length) {
+      const job = jobs[cursor++];
+      if (!job) break;
+      const q = out[job.i];
+      try {
+        const cropped = await cropQuestionImage(pageBuffer, q.image_bbox);
+        if (!cropped) {
+          imageErrors.push(`${job.label}: invalid/empty crop — imported as text-only`);
+          q.has_image = false;
+          q.image_bbox = null;
+          continue;
+        }
+        const uploaded = await uploadToTelegramStorage(
+          cropped.buffer,
+          cropped.mimeType,
+          `ocr_${job.i}.jpg`
+        );
+        if (!uploaded?.fileId) {
+          imageErrors.push(`${job.label}: Telegram media upload failed — imported as text-only`);
+          q.has_image = false;
+          q.image_bbox = null;
+          continue;
+        }
+        q.image = {
+          fileId: uploaded.fileId,
+          mimeType: cropped.mimeType,
+          width: uploaded.width || cropped.width,
+          height: uploaded.height || cropped.height,
+        };
+      } catch (e: any) {
+        imageErrors.push(`${job.label}: ${e?.message || 'crop/upload failed'}`);
+        q.has_image = false;
+        q.image_bbox = null;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, jobs.length)) }, () => worker()));
 
   return { questions: out, imageErrors };
 }
