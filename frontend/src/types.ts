@@ -20,8 +20,12 @@ export interface Question {
   negativeMarks: number;
   explanation?: string;
   subject?: string;
-  /** Telegram file_id for diagram (set after OCR crop/upload) */
+  /** Telegram file_id for diagram (set after crop commit or manual photo replace) */
   image?: QuestionImage | null;
+  /** AI/teacher bbox on the OCR page (normalized 0–1000 or pixels) — draft until commit */
+  image_bbox?: { x: number; y: number; width: number; height: number } | null;
+  /** Local preview of the bbox crop (data URL) — not stored in DB */
+  imagePreview?: string | null;
 }
 
 export interface Exam {
