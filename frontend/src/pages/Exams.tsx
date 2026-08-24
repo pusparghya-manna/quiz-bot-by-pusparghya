@@ -833,116 +833,67 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
               )}
 
               {qMode === 'manual' && editQ && (
-                <div className="space-y-4">
-                  {/* Photo 2 layout: large diagram left + 2×2 icon actions right (image questions only) */}
+                <div className="space-y-2.5">
                   {(editQ.imagePreview || editQ.image_bbox || editQ.image?.fileId) ? (
-                    <div className="flex gap-3 items-stretch">
-                      <div className="flex-1 min-w-0 rounded-2xl border border-slate-200 bg-slate-100/80 overflow-hidden shadow-sm">
+                    <div className="flex gap-2 items-start">
+                      <div className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white overflow-hidden">
                         {editQ.imagePreview ? (
                           <img
                             src={editQ.imagePreview}
                             alt="Diagram"
-                            className="w-full h-[150px] sm:h-[170px] object-contain bg-white"
+                            className="w-full h-[96px] object-contain bg-slate-50"
                           />
                         ) : (
-                          <div className="h-[150px] flex items-center justify-center text-[12px] text-slate-400">Loading diagram…</div>
+                          <div className="h-[96px] flex items-center justify-center text-[11px] text-slate-400">Loading…</div>
                         )}
                       </div>
-                      <div className="grid grid-cols-2 gap-2 shrink-0 content-start" style={{ width: 104 }}>
-                        {[
-                          {
-                            key: 'expand',
-                            label: 'Expand',
-                            disabled: imgBusy || !editQ.image_bbox || !ocrPageDataUrl,
-                            onClick: () => expandDiagram(1.12),
-                            icon: (
-                              <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-                              </svg>
-                            ),
-                          },
-                          {
-                            key: 'shrink',
-                            label: 'Shrink',
-                            disabled: imgBusy || !editQ.image_bbox || !ocrPageDataUrl,
-                            onClick: () => expandDiagram(0.9),
-                            icon: (
-                              <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-                              </svg>
-                            ),
-                          },
-                          {
-                            key: 'preview',
-                            label: 'Preview',
-                            disabled: !editQ.imagePreview,
-                            onClick: () => {
-                              if (editQ.image_bbox && ocrPageDataUrl) setCropEditorOpen(true);
-                              else if (editQ.imagePreview) window.open(editQ.imagePreview, '_blank', 'noopener,noreferrer');
-                            },
-                            icon: <IconEye className="w-5 h-5 text-slate-600" />,
-                          },
-                          {
-                            key: 'replace',
-                            label: imgBusy ? '…' : 'Replace',
-                            disabled: imgBusy,
-                            isFile: true,
-                            icon: (
-                              <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
-                              </svg>
-                            ),
-                          },
-                        ].map((btn) =>
-                          btn.isFile ? (
-                            <label
-                              key={btn.key}
-                              className={
-                                'flex flex-col items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-white shadow-sm h-[52px] text-[10px] font-semibold text-slate-600 cursor-pointer active:scale-[0.98] transition ' +
-                                (btn.disabled ? 'opacity-40 pointer-events-none' : 'hover:border-slate-300 hover:bg-slate-50')
-                              }
-                            >
-                              {btn.icon}
-                              {btn.label}
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                disabled={!!btn.disabled}
-                                onChange={(e) => {
-                                  const f = e.target.files?.[0];
-                                  if (f) void replaceQuestionPhoto(f);
-                                  e.target.value = '';
-                                }}
-                              />
-                            </label>
-                          ) : (
-                            <button
-                              key={btn.key}
-                              type="button"
-                              disabled={!!btn.disabled}
-                              onClick={btn.onClick}
-                              className={
-                                'flex flex-col items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-white shadow-sm h-[52px] text-[10px] font-semibold text-slate-600 active:scale-[0.98] transition disabled:opacity-40 ' +
-                                (!btn.disabled ? 'hover:border-slate-300 hover:bg-slate-50' : '')
-                              }
-                            >
-                              {btn.icon}
-                              {btn.label}
-                            </button>
-                          )
-                        )}
+                      <div className="grid grid-cols-2 gap-1.5 shrink-0 w-[92px]">
+                        <button
+                          type="button"
+                          disabled={imgBusy || !editQ.image_bbox || !ocrPageDataUrl}
+                          onClick={() => expandDiagram(1.12)}
+                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-11 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>
+                          Expand
+                        </button>
+                        <button
+                          type="button"
+                          disabled={imgBusy || !editQ.image_bbox || !ocrPageDataUrl}
+                          onClick={() => expandDiagram(0.9)}
+                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-11 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" /></svg>
+                          Shrink
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!editQ.imagePreview}
+                          onClick={() => {
+                            if (editQ.image_bbox && ocrPageDataUrl) setCropEditorOpen(true);
+                            else if (editQ.imagePreview) window.open(editQ.imagePreview, '_blank', 'noopener,noreferrer');
+                          }}
+                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-11 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                        >
+                          <IconEye className="w-3.5 h-3.5" />
+                          Preview
+                        </button>
+                        <label className={"flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-11 text-[9px] font-semibold text-slate-600 cursor-pointer" + (imgBusy ? ' opacity-40 pointer-events-none' : '')}>
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>
+                          {imgBusy ? '…' : 'Replace'}
+                          <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
+                        </label>
                       </div>
                     </div>
                   ) : null}
 
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[12px] font-semibold text-slate-700">Question</span>
-                      <span className="text-[11px] text-slate-400 tabular-nums">{(editQ.question || '').length}/500</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-semibold text-slate-600">Question</span>
+                      <span className="text-[10px] text-slate-400 tabular-nums">{(editQ.question || '').length}/500</span>
                     </div>
                     <textarea
-                      className={inp + ' min-h-[64px] text-[14px] leading-snug rounded-xl'}
+                      className={inp + ' min-h-[48px] !py-2 text-[13px] leading-snug rounded-xl'}
                       maxLength={500}
                       value={editQ.question}
                       onChange={(e) => setEditQ({ ...editQ, question: e.target.value })}
@@ -950,11 +901,11 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                   </div>
 
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[12px] font-semibold text-slate-700">Options</span>
-                      <span className="text-[11px] text-slate-400">Select correct answer</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-semibold text-slate-600">Options</span>
+                      <span className="text-[10px] text-slate-400">Select correct answer</span>
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       {['A', 'B', 'C', 'D'].map((L, i) => {
                         const selected = editQ.answer === i;
                         return (
@@ -970,22 +921,22 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                               }
                             }}
                             className={
-                              'w-full flex items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition cursor-pointer ' +
+                              'w-full flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left cursor-pointer ' +
                               (selected
-                                ? 'border-emerald-400/80 bg-emerald-50/90 shadow-sm'
-                                : 'border-slate-200 bg-white hover:border-slate-300')
+                                ? 'border-emerald-400/80 bg-emerald-50/90'
+                                : 'border-slate-200 bg-white')
                             }
                           >
                             <span
                               className={
-                                'shrink-0 w-7 h-7 rounded-full text-[12px] font-bold flex items-center justify-center ' +
+                                'shrink-0 w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center ' +
                                 (selected ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500')
                               }
                             >
                               {L}
                             </span>
                             <input
-                              className="flex-1 min-w-0 bg-transparent border-0 outline-none text-[13px] text-slate-800 placeholder:text-slate-400"
+                              className="flex-1 min-w-0 bg-transparent border-0 outline-none text-[12px] text-slate-800 placeholder:text-slate-400"
                               value={editQ.options[i] || ''}
                               placeholder={`Option ${L}`}
                               onClick={(e) => e.stopPropagation()}
@@ -997,11 +948,11 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                             />
                             <span
                               className={
-                                'shrink-0 w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center ' +
+                                'shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center ' +
                                 (selected ? 'border-emerald-500' : 'border-slate-300')
                               }
                             >
-                              {selected ? <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> : null}
+                              {selected ? <span className="w-2 h-2 rounded-full bg-emerald-500" /> : null}
                             </span>
                           </div>
                         );
@@ -1009,11 +960,11 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <div className="text-[12px] font-semibold text-slate-700 mb-1.5">Correct answer</div>
+                      <div className="text-[11px] font-semibold text-slate-600 mb-1">Correct answer</div>
                       <select
-                        className={inp + ' appearance-none text-[14px] rounded-xl'}
+                        className={inp + ' appearance-none !py-2 text-[13px] rounded-xl'}
                         value={editQ.answer == null ? '' : editQ.answer}
                         onChange={(e) =>
                           setEditQ({
@@ -1024,27 +975,25 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                       >
                         <option value="">Not provided</option>
                         {[0, 1, 2, 3].map((i) => (
-                          <option key={i} value={i}>
-                            {String.fromCharCode(65 + i)}
-                          </option>
+                          <option key={i} value={i}>{String.fromCharCode(65 + i)}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <div className="text-[12px] font-semibold text-slate-700 mb-1.5">Marks</div>
+                      <div className="text-[11px] font-semibold text-slate-600 mb-1">Marks</div>
                       <input
                         type="number"
-                        className={inp + ' text-[14px] rounded-xl'}
+                        className={inp + ' !py-2 text-[13px] rounded-xl'}
                         value={editQ.marks}
                         onChange={(e) => setEditQ({ ...editQ, marks: +e.target.value })}
                       />
                     </div>
                   </div>
 
-                  <div className="flex gap-3 pt-1">
+                  <div className="flex gap-2 pt-0.5">
                     <button
                       type="button"
-                      className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
+                      className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-[13px] font-semibold text-slate-700"
                       onClick={() => {
                         setEditQ(null);
                         setCropEditorOpen(false);
@@ -1055,10 +1004,10 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                     </button>
                     <button
                       type="button"
-                      className="flex-1 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white py-3 text-[14px] font-semibold shadow-sm shadow-blue-600/20 inline-flex items-center justify-center gap-1.5"
+                      className="flex-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white py-2.5 text-[13px] font-semibold inline-flex items-center justify-center gap-1"
                       onClick={saveManualQ}
                     >
-                      <IconCheck className="w-4 h-4" />
+                      <IconCheck className="w-3.5 h-3.5" />
                       Save question
                     </button>
                   </div>
