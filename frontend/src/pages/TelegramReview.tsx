@@ -422,6 +422,21 @@ export default function TelegramReview() {
                 </button>
               </div>
 
+              {q.imageUrl ? (
+                <img
+                  src={q.imageUrl}
+                  alt={`Q${q.index + 1} diagram`}
+                  style={{
+                    width: '100%',
+                    maxHeight: 220,
+                    objectFit: 'contain',
+                    borderRadius: 10,
+                    border: '1px solid #e2e8f0',
+                    background: '#f8fafc',
+                    marginBottom: 10,
+                  }}
+                />
+              ) : null}
               <p style={s.qText}>{q.question}</p>
 
               <div style={s.opts}>
