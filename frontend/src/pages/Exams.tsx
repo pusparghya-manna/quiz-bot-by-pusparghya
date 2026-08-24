@@ -319,7 +319,9 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
 
   const expandDiagram = async (factor: number) => {
     if (!editQ?.image_bbox || !ocrPageDataUrl) {
-      return toastError('No diagram on the original page to expand. Replace photo instead.');
+      return toastError(
+        'Expand/Shrink only works right after Photo OCR (original page needed). Use Replace to change the diagram.'
+      );
     }
     setImgBusy(true);
     try {
@@ -841,50 +843,56 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                           <img
                             src={editQ.imagePreview}
                             alt="Diagram"
-                            className="w-full h-[96px] object-contain bg-slate-50"
+                            className="w-full h-[100px] object-contain bg-slate-50"
                           />
                         ) : (
-                          <div className="h-[96px] flex items-center justify-center text-[11px] text-slate-400">Loading…</div>
+                          <div className="h-[100px] flex items-center justify-center text-[11px] text-slate-400">Loading…</div>
                         )}
                       </div>
-                      <div className="grid grid-cols-2 gap-1.5 shrink-0 w-[92px]">
+                      <div className="flex flex-col gap-1.5 shrink-0 w-[72px]">
                         <button
                           type="button"
                           disabled={imgBusy || !editQ.image_bbox || !ocrPageDataUrl}
+                          title={!ocrPageDataUrl ? 'Expand is available right after Photo OCR on this page' : 'Expand crop area'}
                           onClick={() => expandDiagram(1.12)}
-                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-11 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-[30px] px-1 text-[9px] font-semibold text-slate-700 disabled:opacity-35 disabled:text-slate-400"
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>
-                          Expand
+                          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>
+                          <span className="leading-none">Expand</span>
                         </button>
                         <button
                           type="button"
                           disabled={imgBusy || !editQ.image_bbox || !ocrPageDataUrl}
+                          title={!ocrPageDataUrl ? 'Shrink is available right after Photo OCR on this page' : 'Shrink crop area'}
                           onClick={() => expandDiagram(0.9)}
-                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-11 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-[30px] px-1 text-[9px] font-semibold text-slate-700 disabled:opacity-35 disabled:text-slate-400"
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" /></svg>
-                          Shrink
+                          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" /></svg>
+                          <span className="leading-none">Shrink</span>
                         </button>
-                        <button
-                          type="button"
-                          disabled={!editQ.imagePreview}
-                          onClick={() => {
-                            if (editQ.image_bbox && ocrPageDataUrl) setCropEditorOpen(true);
-                            else if (editQ.imagePreview) window.open(editQ.imagePreview, '_blank', 'noopener,noreferrer');
-                          }}
-                          className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-11 text-[9px] font-semibold text-slate-600 disabled:opacity-40"
+                        <label
+                          className={
+                            'flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-[30px] px-1 text-[9px] font-semibold text-slate-700 cursor-pointer ' +
+                            (imgBusy ? 'opacity-35 pointer-events-none' : '')
+                          }
                         >
-                          <IconEye className="w-3.5 h-3.5" />
-                          Preview
-                        </button>
-                        <label className={"flex flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white h-11 text-[9px] font-semibold text-slate-600 cursor-pointer" + (imgBusy ? ' opacity-40 pointer-events-none' : '')}>
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>
-                          {imgBusy ? '…' : 'Replace'}
+                          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>
+                          <span className="leading-none">{imgBusy ? '…' : 'Replace'}</span>
                           <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
                         </label>
                       </div>
                     </div>
+                  ) : null}
+
+                  {editQ.image_bbox && ocrPageDataUrl ? (
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 py-1.5 text-[11px] font-semibold text-slate-600"
+                      disabled={imgBusy}
+                      onClick={() => setCropEditorOpen(true)}
+                    >
+                      Adjust crop area
+                    </button>
                   ) : null}
 
                   <div>
