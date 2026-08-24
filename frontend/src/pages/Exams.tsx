@@ -11,6 +11,7 @@ import { effectiveExamStatus } from '../lib/examStatus';
 import { emptyQuestion, normalizeAnswer } from '../lib/exam';
 import { prepareImageForOcr } from '../lib/image';
 import { cropBBoxFromDataUrl, expandBBoxNorm1000, type BBox } from '../lib/bboxCrop';
+import { DiagramCropEditor } from '../components/DiagramCropEditor';
 import { toast, toastSuccess, toastError, confirmAsync } from '../lib/notify';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconUpload, IconShare, IconInfo,
@@ -42,6 +43,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   const [ocrPageDataUrl, setOcrPageDataUrl] = useState<string | null>(null);
   const [ocrPageMime, setOcrPageMime] = useState('image/jpeg');
   const [imgBusy, setImgBusy] = useState(false);
+  const [cropEditorOpen, setCropEditorOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const examLink = (id: string) => {
     const u = (botUsername || '').replace(/^@/, '').trim() || 'YourBot';
@@ -289,6 +291,20 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     }
   };
 
+  const applyCropFromEditor = async (bbox: BBox) => {
+    if (!editQ || !ocrPageDataUrl) return;
+    setImgBusy(true);
+    try {
+      const preview = await cropBBoxFromDataUrl(ocrPageDataUrl, bbox);
+      setEditQ({ ...editQ, image_bbox: bbox, imagePreview: preview, image: undefined });
+      setCropEditorOpen(false);
+    } catch (e: any) {
+      toastError(e.message || 'Could not apply crop');
+    } finally {
+      setImgBusy(false);
+    }
+  };
+
   const expandDiagram = async (factor: number) => {
     if (!editQ?.image_bbox || !ocrPageDataUrl) {
       return toastError('No diagram on the original page to expand. Replace photo instead.');
@@ -382,6 +398,14 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   return (
     <>
     <ActionOverlay show={saving || deleting} label={actionLabel} />
+    {cropEditorOpen && editQ?.image_bbox && ocrPageDataUrl ? (
+      <DiagramCropEditor
+        pageDataUrl={ocrPageDataUrl}
+        initialBBox={editQ.image_bbox}
+        onApply={(b) => void applyCropFromEditor(b)}
+        onClose={() => setCropEditorOpen(false)}
+      />
+    ) : null}
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div>
@@ -764,47 +788,45 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
               )}
 
               {qMode === 'manual' && editQ && (
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   {(editQ.imagePreview || editQ.image_bbox) ? (
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-2">
-                      <div className="text-[11px] font-semibold text-slate-600">Diagram for this question</div>
-                      {editQ.imagePreview ? (
-                        <img src={editQ.imagePreview} alt="Question diagram" className="max-h-48 w-full object-contain rounded-lg border border-slate-200 bg-white" />
-                      ) : null}
-                      <div className="flex flex-wrap gap-1.5">
-                        {editQ.image_bbox && ocrPageDataUrl ? (
-                          <>
-                            <button type="button" className={btnS + ' !py-1 text-[11px]'} disabled={imgBusy} onClick={() => expandDiagram(1.12)}>Expand area</button>
-                            <button type="button" className={btnS + ' !py-1 text-[11px]'} disabled={imgBusy} onClick={() => expandDiagram(0.9)}>Shrink area</button>
-                          </>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 space-y-1.5">
+                      <div className="flex gap-2 items-center">
+                        {editQ.imagePreview ? (
+                          <img src={editQ.imagePreview} alt="" className="w-14 h-14 object-contain rounded border border-slate-200 bg-white shrink-0" />
                         ) : null}
-                        <label className={btnS + ' !py-1 text-[11px] cursor-pointer' + (imgBusy ? ' opacity-60 pointer-events-none' : '')}>
-                          {imgBusy ? 'Uploading…' : 'Replace photo'}
-                          <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
-                        </label>
+                        <div className="flex flex-wrap gap-1 min-w-0 flex-1">
+                          {editQ.image_bbox && ocrPageDataUrl ? (
+                            <>
+                              <button type="button" className={btnS + ' !py-0.5 !px-2 text-[10px]'} disabled={imgBusy} onClick={() => expandDiagram(1.12)}>Expand</button>
+                              <button type="button" className={btnS + ' !py-0.5 !px-2 text-[10px]'} disabled={imgBusy} onClick={() => expandDiagram(0.9)}>Shrink</button>
+                              <button type="button" className={btnS + ' !py-0.5 !px-2 text-[10px]'} disabled={imgBusy} onClick={() => setCropEditorOpen(true)}>Edit crop</button>
+                            </>
+                          ) : null}
+                          <label className={btnS + ' !py-0.5 !px-2 text-[10px] cursor-pointer' + (imgBusy ? ' opacity-60 pointer-events-none' : '')}>
+                            {imgBusy ? '…' : 'Replace'}
+                            <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
+                          </label>
+                        </div>
                       </div>
-                      <p className="text-[10px] text-slate-500">Expand uses the page crop. Replace uploads to Telegram and stores the new file id.</p>
                     </div>
                   ) : (
-                    <div className="rounded-xl border border-dashed border-slate-200 p-3 space-y-1.5">
-                      <div className="text-[11px] font-semibold text-slate-600">Add diagram (optional)</div>
-                      <label className={btnS + ' !py-1 text-[11px] cursor-pointer inline-flex' + (imgBusy ? ' opacity-60 pointer-events-none' : '')}>
-                        {imgBusy ? 'Uploading…' : 'Upload photo'}
-                        <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
-                      </label>
-                    </div>
+                    <label className={btnS + ' !py-1 text-[11px] cursor-pointer inline-flex' + (imgBusy ? ' opacity-60 pointer-events-none' : '')}>
+                      {imgBusy ? 'Uploading…' : '+ Diagram photo'}
+                      <input type="file" accept="image/*" className="hidden" disabled={imgBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void replaceQuestionPhoto(f); e.target.value = ''; }} />
+                    </label>
                   )}
-                  <Field label="Question"><textarea className={inp + ' min-h-[80px]'} value={editQ.question} onChange={(e) => setEditQ({ ...editQ, question: e.target.value })} /></Field>
-                  {['A', 'B', 'C', 'D'].map((L, i) => (
-                    <Field key={L} label={`Option ${L}`}>
-                      <div className="relative">
-                        <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold rounded-md flex items-center justify-center ${editQ.answer === i ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`} style={{ width: 18, height: 18 }}>{L}</span>
-                        <input className={inp + ' pl-10'} value={editQ.options[i] || ''} onChange={(e) => {
+                  <Field label="Question"><textarea className={inp + ' min-h-[56px] text-[13px]'} value={editQ.question} onChange={(e) => setEditQ({ ...editQ, question: e.target.value })} /></Field>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {['A', 'B', 'C', 'D'].map((L, i) => (
+                      <div key={L} className="relative">
+                        <span className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold rounded flex items-center justify-center ${editQ.answer === i ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`} style={{ width: 16, height: 16 }}>{L}</span>
+                        <input className={inp + ' pl-9 !py-1.5 text-[13px]'} placeholder={`Option ${L}`} value={editQ.options[i] || ''} onChange={(e) => {
                           const opts = [...editQ.options]; opts[i] = e.target.value; setEditQ({ ...editQ, options: opts });
                         }} />
                       </div>
-                    </Field>
-                  ))}
+                    ))}
+                  </div>
                   <div className="grid grid-cols-2 gap-2.5">
                     <Field label="Correct answer">
                       <div className="relative">
@@ -817,7 +839,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                     </Field>
                     <Field label="Marks"><input type="number" className={inp} value={editQ.marks} onChange={(e) => setEditQ({ ...editQ, marks: +e.target.value })} /></Field>
                   </div>
-                  <Field label="Explanation (optional)"><textarea className={inp + ' min-h-[64px]'} value={editQ.explanation || ''} onChange={(e) => setEditQ({ ...editQ, explanation: e.target.value })} /></Field>
+                  <Field label="Explanation (optional)"><textarea className={inp + ' min-h-[40px] text-[12px]'} value={editQ.explanation || ''} onChange={(e) => setEditQ({ ...editQ, explanation: e.target.value })} /></Field>
                   <div className="flex gap-2">
                     <button type="button" className={btnS + ' flex-1'} onClick={() => { setEditQ(null); setQMode('list'); }}>Cancel</button>
                     <button type="button" className={btnP + ' flex-1'} onClick={saveManualQ}><IconCheck className="w-3.5 h-3.5" /> Save question</button>
