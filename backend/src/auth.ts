@@ -94,11 +94,18 @@ export async function loginTeacher(username: string, password: string) {
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
+  let raw: string | undefined;
+  if (header && header.startsWith('Bearer ')) {
+    raw = header.slice(7);
+  } else if (typeof req.query?.token === 'string' && req.query.token) {
+    // Allow <img src="/api/media/...?token="> for teacher diagram previews
+    raw = req.query.token;
+  }
+  if (!raw) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   try {
-    const payload = jwt.verify(header.slice(7), getJwtSecret()) as TeacherPayload;
+    const payload = jwt.verify(raw, getJwtSecret()) as TeacherPayload;
     if (!payload?.username) return res.status(401).json({ error: 'Invalid token' });
     (req as any).teacher = payload;
     next();
