@@ -122,8 +122,40 @@ async function startServer(app?: import('express').Express) {
           correctIndex: q.answer,
           selectedIndex: has ? Number(sel) : null,
           status,
+          imageFileId: q.image?.fileId || null,
         };
       });
+
+      // Resolve Telegram file URLs for diagram questions (authenticated review only)
+      const token =
+        process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken || '';
+      const fileCache = new Map<string, string | null>();
+      async function resolveTgFileUrl(fileId: string): Promise<string | null> {
+        if (!token || !fileId) return null;
+        if (fileCache.has(fileId)) return fileCache.get(fileId) || null;
+        try {
+          const r = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`, {
+            signal: AbortSignal.timeout(8000),
+          });
+          const d: any = await r.json().catch(() => ({}));
+          const fp = d?.result?.file_path;
+          const url = fp ? `https://api.telegram.org/file/bot${token}/${fp}` : null;
+          fileCache.set(fileId, url);
+          return url;
+        } catch {
+          fileCache.set(fileId, null);
+          return null;
+        }
+      }
+      await Promise.all(
+        questions.map(async (q: any) => {
+          if (q.imageFileId) {
+            q.imageUrl = await resolveTgFileUrl(String(q.imageFileId));
+          } else {
+            q.imageUrl = null;
+          }
+        })
+      );
 
       const correct = questions.filter((q) => q.status === 'correct').length;
       const wrong = questions.filter((q) => q.status === 'wrong').length;
@@ -706,16 +738,23 @@ async function startServer(app?: import('express').Express) {
         return res.status(400).json({ error: 'fileBase64 string is required.' });
       }
 
-      // 1) Layout: question blocks + image/text classification (coordinates only)
+      // 1+2) Layout + text OCR in parallel (major latency win)
       let layout: Awaited<ReturnType<typeof analyzePageLayout>> = [];
-      try {
-        layout = await analyzePageLayout(fileBase64, mimeType || 'image/jpeg');
-      } catch (layoutErr: any) {
-        console.warn('[ocr] layout analysis failed, continuing with OCR only:', layoutErr?.message || layoutErr);
+      let result: any = { questions: [] };
+      const [layoutRes, ocrRes] = await Promise.allSettled([
+        analyzePageLayout(fileBase64, mimeType || 'image/jpeg'),
+        parseQuestionsFromMedia(fileBase64, mimeType || 'image/jpeg'),
+      ]);
+      if (layoutRes.status === 'fulfilled') {
+        layout = layoutRes.value;
+      } else {
+        console.warn('[ocr] layout analysis failed, continuing with OCR only:', layoutRes.reason?.message || layoutRes.reason);
       }
-
-      // 2) Text OCR for structured question data (existing extractor)
-      const result = await parseQuestionsFromMedia(fileBase64, mimeType || 'image/jpeg');
+      if (ocrRes.status === 'fulfilled') {
+        result = ocrRes.value;
+      } else {
+        throw ocrRes.reason;
+      }
       const rawQuestions = Array.isArray(result?.questions)
         ? result.questions
         : Array.isArray(result)
