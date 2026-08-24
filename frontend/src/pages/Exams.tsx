@@ -140,8 +140,8 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
         totalMarks: qs.reduce((s, q) => s + (Number(q.marks) || 1), 0),
       };
       const res = editId
-        ? await api(`/api/exams/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
-        : await api('/api/exams', { method: 'POST', body: JSON.stringify(body) });
+        ? await api(`/api/exams/${editId}`, { method: 'PUT', body: JSON.stringify(body), timeoutMs: 120_000 })
+        : await api('/api/exams', { method: 'POST', body: JSON.stringify(body), timeoutMs: 120_000 });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.error || 'Save failed');

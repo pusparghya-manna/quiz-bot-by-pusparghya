@@ -60,38 +60,79 @@ export const examRepository = {
         ],
       });
       await tx.execute({ sql: 'DELETE FROM questions WHERE exam_id = ?', args: [exam.id] });
-      // Batch inserts (fewer Turso round-trips) — chunks of 25
-      const CHUNK = 25;
-      for (let start = 0; start < questions.length; start += CHUNK) {
-        const slice = questions.slice(start, start + CHUNK);
-        const placeholders = slice.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',');
-        const args: any[] = [];
-        slice.forEach((q, j) => {
-          const i = start + j;
-          args.push(
-            q.id || `Q_${exam.id}_${i}`,
-            exam.id,
-            exam.teacherId || q.teacherId || 'default',
-            q.question || '',
-            JSON.stringify(q.options || []),
-            q.answer ?? null,
-            q.marks ?? 1,
-            q.negativeMarks ?? 0,
-            q.explanation || null,
-            q.subject || null,
-            i,
-            q.image?.fileId || null,
-            q.image?.mimeType || null,
-            q.image?.width ?? null,
-            q.image?.height ?? null
-          );
-        });
+
+      // Normalize rows (unique ids, safe JSON)
+      const seenIds = new Set<string>();
+      const rows = questions.map((q, i) => {
+        let id = String(q.id || `Q_${exam.id}_${i}`).slice(0, 120);
+        if (seenIds.has(id)) id = `${id}_${i}_${Date.now().toString(36)}`;
+        seenIds.add(id);
+        let optionsJson = '[]';
+        try {
+          optionsJson = JSON.stringify(Array.isArray(q.options) ? q.options.slice(0, 8) : []);
+        } catch {
+          optionsJson = '[]';
+        }
+        const answer =
+          q.answer === null || q.answer === undefined || Number.isNaN(Number(q.answer))
+            ? null
+            : Number(q.answer);
+        return {
+          id,
+          examId: exam.id,
+          teacherId: exam.teacherId || q.teacherId || 'default',
+          question: String(q.question || '').slice(0, 8000),
+          optionsJson,
+          answer,
+          marks: Number.isFinite(Number(q.marks)) ? Number(q.marks) : 1,
+          negativeMarks: Number.isFinite(Number(q.negativeMarks)) ? Number(q.negativeMarks) : 0,
+          explanation: q.explanation != null ? String(q.explanation).slice(0, 4000) : null,
+          subject: q.subject != null ? String(q.subject).slice(0, 200) : null,
+          sortOrder: i,
+          imageFileId: q.image?.fileId ? String(q.image.fileId).slice(0, 500) : null,
+          imageMime: q.image?.mimeType ? String(q.image.mimeType).slice(0, 80) : null,
+          imageW: q.image?.width != null && Number.isFinite(Number(q.image.width)) ? Number(q.image.width) : null,
+          imageH: q.image?.height != null && Number.isFinite(Number(q.image.height)) ? Number(q.image.height) : null,
+        };
+      });
+
+      const insertOne = async (r: (typeof rows)[0]) => {
         await tx.execute({
           sql: `INSERT INTO questions (id, exam_id, teacher_id, question, options_json, answer, marks, negative_marks, explanation, subject, sort_order,
                 image_file_id, image_mime_type, image_width, image_height)
-                VALUES ${placeholders}`,
-          args,
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          args: [
+            r.id, r.examId, r.teacherId, r.question, r.optionsJson, r.answer, r.marks, r.negativeMarks,
+            r.explanation, r.subject, r.sortOrder, r.imageFileId, r.imageMime, r.imageW, r.imageH,
+          ],
         });
+      };
+
+      // Prefer small batches; fall back to one-by-one if a batch fails (still inside tx)
+      const CHUNK = 10;
+      for (let start = 0; start < rows.length; start += CHUNK) {
+        const slice = rows.slice(start, start + CHUNK);
+        try {
+          const placeholders = slice.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',');
+          const args: any[] = [];
+          for (const r of slice) {
+            args.push(
+              r.id, r.examId, r.teacherId, r.question, r.optionsJson, r.answer, r.marks, r.negativeMarks,
+              r.explanation, r.subject, r.sortOrder, r.imageFileId, r.imageMime, r.imageW, r.imageH
+            );
+          }
+          await tx.execute({
+            sql: `INSERT INTO questions (id, exam_id, teacher_id, question, options_json, answer, marks, negative_marks, explanation, subject, sort_order,
+                  image_file_id, image_mime_type, image_width, image_height)
+                  VALUES ${placeholders}`,
+            args,
+          });
+        } catch (batchErr: any) {
+          console.warn('[exam] batch insert failed, falling back to single inserts:', batchErr?.message || batchErr);
+          for (const r of slice) {
+            await insertOne(r);
+          }
+        }
       }
     });
   },

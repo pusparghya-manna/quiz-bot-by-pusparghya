@@ -490,41 +490,52 @@ async function startServer(app?: import('express').Express) {
   app.post('/api/exams', async (req, res) => {
     const teacherId = requireTeacher(req, res);
     if (!teacherId) return;
-    const data = req.body;
-    const now = new Date().toISOString();
-
-    const teacher = (req as any).teacher;
-    const newExam: Exam = {
-      id: `EXAM_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      teacherId,
-      title: data.title || 'Untitled Examination',
-      subject: data.subject || 'General',
-      className: data.className || 'Class 10-A Biology',
-      testNumber: data.testNumber || 'Test 01',
-      totalQuestions: data.questions ? data.questions.length : 0,
-      startDate: data.startDate || now,
-      durationMinutes: Number(data.durationMinutes) || 60,
-      totalMarks: Number(data.totalMarks) || (data.questions ? data.questions.length : 0),
-      negativeMarking: Number(data.negativeMarking) || 0,
-      randomizeQuestions: !!data.randomizeQuestions,
-      randomizeOptions: !!data.randomizeOptions,
-      resultVisibility: data.resultVisibility || 'PUBLISHED',
-      leaderboardVisibility: data.leaderboardVisibility || 'PUBLISHED',
-      status: effectiveExamStatus({ startDate: data.startDate || now, durationMinutes: Number(data.durationMinutes) || 60 }),
-      questions: data.questions || [],
-      createdAt: now,
-      updatedAt: now
-    };
-
-    await store.saveExam(newExam);
     try {
-      const tid = (req as any).teacher?.username;
-      if (tid) invalidateTeacherCache(tid);
-    } catch {
-      /* ignore */
+      const data = req.body || {};
+      const now = new Date().toISOString();
+      const questions = Array.isArray(data.questions) ? data.questions : [];
+      if (!String(data.title || '').trim()) {
+        return res.status(400).json({ error: 'Title required' });
+      }
+      if (questions.length === 0) {
+        return res.status(400).json({ error: 'Add at least one question' });
+      }
+
+      const newExam: Exam = {
+        id: `EXAM_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        teacherId,
+        title: String(data.title || 'Untitled Examination').slice(0, 200),
+        subject: data.subject || 'General',
+        className: data.className || 'Class 10-A Biology',
+        testNumber: data.testNumber || 'Test 01',
+        totalQuestions: questions.length,
+        startDate: data.startDate || now,
+        durationMinutes: Number(data.durationMinutes) || 60,
+        totalMarks: Number(data.totalMarks) || questions.length,
+        negativeMarking: Number(data.negativeMarking) || 0,
+        randomizeQuestions: !!data.randomizeQuestions,
+        randomizeOptions: !!data.randomizeOptions,
+        resultVisibility: data.resultVisibility || 'PUBLISHED',
+        leaderboardVisibility: data.leaderboardVisibility || 'PUBLISHED',
+        status: effectiveExamStatus({ startDate: data.startDate || now, durationMinutes: Number(data.durationMinutes) || 60 }),
+        questions,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await store.saveExam(newExam);
+      try {
+        const tid = (req as any).teacher?.username;
+        if (tid) invalidateTeacherCache(tid);
+      } catch {
+        /* ignore */
+      }
+      void store.addAuditLog('EXAM_CREATED', `Created exam "${newExam.title}" for ${newExam.className}`, teacherId);
+      res.json(withEffectiveStatus(newExam));
+    } catch (err: any) {
+      console.error('[exams] create failed:', err?.message || err);
+      res.status(500).json({ error: err?.message || 'Failed to save exam' });
     }
-    await store.addAuditLog('EXAM_CREATED', `Created exam "${newExam.title}" for ${newExam.className}`, teacherId);
-    res.json(withEffectiveStatus(newExam));
   });
 
   app.put('/api/exams/:id', async (req, res) => {
@@ -548,10 +559,20 @@ async function startServer(app?: import('express').Express) {
     };
     updated.status = effectiveExamStatus(updated);
 
-    await store.saveExam(updated);
-        try { const tid = (req as any).teacher?.username; if (tid) invalidateTeacherCache(tid); } catch {}
-    await store.addAuditLog('EXAM_UPDATED', `Updated exam "${updated.title}" (${updated.status})`, teacherId);
-    res.json(withEffectiveStatus(updated));
+    try {
+      await store.saveExam(updated);
+      try {
+        const tid = (req as any).teacher?.username;
+        if (tid) invalidateTeacherCache(tid);
+      } catch {
+        /* ignore */
+      }
+      void store.addAuditLog('EXAM_UPDATED', `Updated exam "${updated.title}" (${updated.status})`, teacherId);
+      res.json(withEffectiveStatus(updated));
+    } catch (err: any) {
+      console.error('[exams] update failed:', err?.message || err);
+      res.status(500).json({ error: err?.message || 'Failed to save exam' });
+    }
   });
 
   app.delete('/api/exams/:id', async (req, res) => {
