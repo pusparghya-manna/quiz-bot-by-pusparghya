@@ -600,14 +600,24 @@ This name will appear on results and the leaderboard.`,
     }
 
     // Keep single-chat edits for pure inline (MCQ). Never force editMessageText over photo ops.
+    // Photo messages cannot become text via editMessageText — must delete photo then send text
+    // (submit confirm / submitting / results). Same as diagram→text question transitions.
     const needsSendKb = Boolean(response?.replyKeyboard);
+    const sessKind = getKbSession(user.id)?.lastMessageKind;
+    const cbIsPhoto = sessKind === 'photo';
     if (response && cbMessageId && !needsSendKb) {
-      response.messageId = cbMessageId;
       if (response.photoFileId) {
+        response.messageId = cbMessageId;
         if (response.type !== 'editMessageMedia' && response.type !== 'sendPhoto') {
           response.type = 'editMessageMedia';
         }
+      } else if (cbIsPhoto) {
+        // Leave the diagram bubble: delete it, send text (confirm / result)
+        (response as any).deletePreviousMessageId = cbMessageId;
+        delete (response as any).messageId;
+        response.type = 'sendMessage';
       } else {
+        response.messageId = cbMessageId;
         response.type = 'editMessageText';
       }
     } else if (response && needsSendKb) {
@@ -617,6 +627,9 @@ This name will appear on results and the leaderboard.`,
           response.type = 'sendPhoto';
         }
       } else {
+        if (cbIsPhoto && cbMessageId) {
+          (response as any).deletePreviousMessageId = cbMessageId;
+        }
         response.type = 'sendMessage';
         delete (response as any).messageId;
       }
@@ -808,17 +821,51 @@ Open the full scrollable review below.`,
             const token = process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken;
             const mid = sess.lastMessageId;
             if (token && mid) {
-              await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  chat_id: user.id,
-                  message_id: mid,
-                  text: '⏳ <b>Submitting exam…</b>',
-                  parse_mode: 'HTML',
-                }),
-                signal: AbortSignal.timeout(5000),
-              });
+              if (sess.lastMessageKind === 'photo') {
+                // Cannot editMessageText on a photo — delete diagram bubble first
+                await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chat_id: user.id, message_id: mid }),
+                  signal: AbortSignal.timeout(5000),
+                }).catch(() => {});
+                setKbSession(user.id, {
+                  ...sess,
+                  lastMessageId: undefined,
+                  lastMessageKind: undefined,
+                  lastPhotoFileId: undefined,
+                });
+                const sent = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    chat_id: user.id,
+                    text: '⏳ <b>Submitting exam…</b>',
+                    parse_mode: 'HTML',
+                  }),
+                  signal: AbortSignal.timeout(5000),
+                });
+                const sj: any = await sent.json().catch(() => ({}));
+                if (sj?.ok && sj.result?.message_id != null) {
+                  setKbSession(user.id, {
+                    ...getKbSession(user.id)!,
+                    lastMessageId: sj.result.message_id,
+                    lastMessageKind: 'text',
+                  });
+                }
+              } else {
+                await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    chat_id: user.id,
+                    message_id: mid,
+                    text: '⏳ <b>Submitting exam…</b>',
+                    parse_mode: 'HTML',
+                  }),
+                  signal: AbortSignal.timeout(5000),
+                });
+              }
             }
           } catch { /* ignore */ }
           return await handleFinalSubmit(sess.examId, student, user);
@@ -1580,6 +1627,22 @@ function renderSubmitConfirmation(examId: string, student: Student, user: Telegr
 
   const sess = getKbSession(user.id);
   const messageId = sess?.lastMessageId;
+  const wasPhoto = sess?.lastMessageKind === 'photo';
+  if (wasPhoto && messageId) {
+    return {
+      chatId: user.id,
+      text: quote(body),
+      replyMarkup: {
+        inline_keyboard: [
+          [{ text: '🚀 Yes, Submit Now', callback_data: `do_submit_${exam.id}` }],
+          [{ text: '🔙 Continue Answering', callback_data: `nav_${exam.id}_${attempt.currentQuestionIndex || 0}` }],
+        ],
+      },
+      deletePreviousMessageId: messageId,
+      parseMode: 'HTML',
+      type: 'sendMessage',
+    };
+  }
   return {
     chatId: user.id,
     text: quote(body),
