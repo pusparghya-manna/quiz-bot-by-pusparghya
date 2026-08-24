@@ -17,7 +17,11 @@ import {
     analyzePageLayout,
     bboxXYXYToXYWH,
   } from '../services/geminiOcr.js';
-import { attachCroppedImagesToOcrQuestions } from '../services/questionImageMedia.js';
+import {
+  attachCroppedImagesToOcrQuestions,
+  uploadToTelegramStorage,
+  cropQuestionImage,
+} from '../services/questionImageMedia.js';
 import { Exam, Question, Student } from '../types/index.js';
 import { effectiveExamStatus, withEffectiveStatus } from '../examStatus.js';
 import { enqueueBroadcast } from '../jobs/broadcastQueue.js';
@@ -760,21 +764,88 @@ async function startServer(app?: import('express').Express) {
         rawQuestions[i] = q;
       }
 
-      // 4) Sharp crop original page for image-type questions only
-      const { questions, imageErrors } = await attachCroppedImagesToOcrQuestions(
-        fileBase64,
-        mimeType || 'image/jpeg',
-        rawQuestions
-      );
+      // 4) Return text + bboxes only. Teacher reviews crops on site; Telegram upload on commit/replace.
+      const questions = rawQuestions.map((q: any) => ({
+        ...q,
+        has_image: Boolean(q.has_image && q.image_bbox),
+        image_bbox: q.has_image && q.image_bbox ? q.image_bbox : null,
+        // Do not attach image.fileId yet — commit/replace endpoints do that
+        image: undefined,
+      }));
       store.addAuditLog(
         'OCR_PARSED',
-        `Extracted ${questions.length} questions via Gemini OCR` +
-          (imageErrors.length ? ` (${imageErrors.length} image warnings)` : '')
+        `Extracted ${questions.length} questions via Gemini OCR (preview only; no media upload)`
       );
-      res.json({ questions, imageErrors });
+      res.json({ questions, imageErrors: [] as string[] });
     } catch (err: any) {
       console.error('OCR error:', err);
       res.status(500).json({ error: err.message || 'Failed to extract questions using AI OCR.' });
+    }
+  });
+
+  /** Upload a replacement diagram photo → Telegram storage file_id (teacher review). */
+  app.post('/api/ocr/upload-image', ocrLimiter, async (req, res) => {
+    try {
+      const { fileBase64, mimeType } = req.body || {};
+      if (!fileBase64 || typeof fileBase64 !== 'string') {
+        return res.status(400).json({ error: 'fileBase64 required' });
+      }
+      if (fileBase64.length > env.maxOcrBase64Chars) {
+        return res.status(413).json({ error: 'Image too large' });
+      }
+      const buf = Buffer.from(fileBase64, 'base64');
+      const uploaded = await uploadToTelegramStorage(buf, mimeType || 'image/jpeg', 'replace.jpg');
+      if (!uploaded?.fileId) {
+        return res.status(502).json({
+          error: 'Telegram media upload failed. Check TELEGRAM_MEDIA_STORAGE_CHAT_ID and bot admin rights.',
+        });
+      }
+      res.json({
+        image: {
+          fileId: uploaded.fileId,
+          mimeType: mimeType || 'image/jpeg',
+          width: uploaded.width,
+          height: uploaded.height,
+        },
+      });
+    } catch (err: any) {
+      console.error('upload-image error:', err);
+      res.status(500).json({ error: err.message || 'Upload failed' });
+    }
+  });
+
+  /** Commit bbox crops from the original page → Telegram file_ids. */
+  app.post('/api/ocr/commit-crops', ocrLimiter, async (req, res) => {
+    try {
+      const { fileBase64, mimeType, items } = req.body || {};
+      if (!fileBase64 || typeof fileBase64 !== 'string') {
+        return res.status(400).json({ error: 'fileBase64 required' });
+      }
+      if (!Array.isArray(items)) {
+        return res.status(400).json({ error: 'items array required' });
+      }
+      const pageQuestions = items.map((it: any, i: number) => ({
+        question_number: i + 1,
+        question: '',
+        options: [],
+        has_image: Boolean(it.has_image && it.image_bbox),
+        image_bbox: it.image_bbox || null,
+        _tempId: it.tempId || String(i),
+      }));
+      const { questions, imageErrors } = await attachCroppedImagesToOcrQuestions(
+        fileBase64,
+        mimeType || 'image/jpeg',
+        pageQuestions
+      );
+      const out = questions.map((q: any, i: number) => ({
+        tempId: items[i]?.tempId || String(i),
+        image: q.image || null,
+        error: !q.image && pageQuestions[i]?.has_image ? imageErrors.find((e) => e.includes(String(i + 1))) || 'crop failed' : null,
+      }));
+      res.json({ items: out, imageErrors });
+    } catch (err: any) {
+      console.error('commit-crops error:', err);
+      res.status(500).json({ error: err.message || 'Commit failed' });
     }
   });
 
