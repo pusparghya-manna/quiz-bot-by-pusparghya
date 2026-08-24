@@ -1,4 +1,4 @@
-const MAX_EDGE = 2400;
+const MAX_EDGE = 1600;
 const MAX_BYTES = 6_500_000;
 
 function readAsBase64(blob: Blob): Promise<string> {
@@ -53,7 +53,7 @@ export async function prepareImageForOcr(file: File): Promise<{ base64: string; 
   if (!context) throw new Error('Could not prepare the image for OCR.');
   context.drawImage(image, 0, 0, width, height);
 
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86));
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.78));
   if (!blob) throw new Error('Could not encode the image for OCR.');
   if (blob.size > MAX_BYTES) {
     throw new Error('Photo is still too large after compression. Please crop it or choose a smaller image.');
