@@ -1,13 +1,11 @@
-/** Telegram Mini App API client — Railway quiz-bot backend only */
+/** Telegram Mini App → Railway quiz-bot backend */
 
 const DEFAULT_API = 'https://quiz-bot-by-pusparghya-production.up.railway.app';
-
 export const API_BASE = (import.meta.env.VITE_API_URL || DEFAULT_API).replace(/\/$/, '');
 
 export function getTelegramInitData(): string {
   try {
-    const w = window as any;
-    return String(w?.Telegram?.WebApp?.initData || '');
+    return String((window as any)?.Telegram?.WebApp?.initData || '');
   } catch {
     return '';
   }
@@ -20,23 +18,20 @@ export function getTelegramUser(): {
   username?: string;
 } | null {
   try {
-    const w = window as any;
-    return w?.Telegram?.WebApp?.initDataUnsafe?.user || null;
+    return (window as any)?.Telegram?.WebApp?.initDataUnsafe?.user || null;
   } catch {
     return null;
   }
 }
 
-/** True only when Telegram injected a signed initData string (not a normal browser). */
+/** Requires signed Telegram initData (normal browsers are blocked). */
 export function isTelegramWebApp(): boolean {
   return getTelegramInitData().length > 0;
 }
 
 export function mediaUrl(pathOrFileId: string | null | undefined): string | null {
   if (!pathOrFileId) return null;
-  if (pathOrFileId.startsWith('http://') || pathOrFileId.startsWith('https://')) {
-    return pathOrFileId;
-  }
+  if (/^https?:\/\//i.test(pathOrFileId)) return pathOrFileId;
   if (pathOrFileId.startsWith('/')) return `${API_BASE}${pathOrFileId}`;
   return `${API_BASE}/api/media/telegram/${encodeURIComponent(pathOrFileId)}`;
 }
@@ -44,7 +39,7 @@ export function mediaUrl(pathOrFileId: string | null | undefined): string | null
 async function api<T>(path: string, body?: Record<string, unknown>): Promise<T> {
   const initData = getTelegramInitData();
   if (!initData) {
-    throw new Error('Telegram login required. Open this app from the Quiz Bot in Telegram.');
+    throw new Error('Telegram login required. Open Quiz Bot inside Telegram and tap Open App.');
   }
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -109,23 +104,20 @@ export type ApiAttempt = {
   studentId?: string;
 };
 
+export type ApiStudent = {
+  id: string;
+  name: string;
+  studentId: string;
+  className: string;
+  telegramUserId: number;
+  status: string;
+};
+
 export const webappApi = {
   session: () =>
     api<{
-      user: {
-        id: number;
-        firstName?: string;
-        lastName?: string;
-        username?: string;
-      };
-      student: {
-        id: string;
-        name: string;
-        studentId: string;
-        className: string;
-        telegramUserId: number;
-        status: string;
-      } | null;
+      user: { id: number; firstName?: string; lastName?: string; username?: string };
+      student: ApiStudent | null;
       ongoing: {
         attemptId: string;
         examId: string;
@@ -138,16 +130,7 @@ export const webappApi = {
     }>('/api/webapp/session'),
 
   updateProfile: (name: string) =>
-    api<{
-      student: {
-        id: string;
-        name: string;
-        studentId: string;
-        className: string;
-        telegramUserId: number;
-        status: string;
-      };
-    }>('/api/webapp/profile', { name }),
+    api<{ student: ApiStudent }>('/api/webapp/profile', { name }),
 
   exams: () => api<{ exams: ApiExamSummary[] }>('/api/webapp/exams'),
 
@@ -163,7 +146,11 @@ export const webappApi = {
     }>('/api/webapp/start', { examId, forceNew: !!forceNew }),
 
   saveAnswer: (attemptId: string, questionId: string, optionIndex: number | null) =>
-    api<{ ok: boolean }>('/api/webapp/answer', { attemptId, questionId, optionIndex }),
+    api<{ ok: boolean }>('/api/webapp/answer', {
+      attemptId,
+      questionId,
+      optionIndex,
+    }),
 
   setIndex: (attemptId: string, index: number) =>
     api<{ ok: boolean }>('/api/webapp/index', { attemptId, index }),
@@ -173,12 +160,7 @@ export const webappApi = {
 
   results: () =>
     api<{
-      results: Array<
-        ApiAttempt & {
-          examTitle: string;
-          resultVisibility?: string;
-        }
-      >;
+      results: Array<ApiAttempt & { examTitle: string; resultVisibility?: string }>;
     }>('/api/webapp/results'),
 
   review: (attemptId: string) =>

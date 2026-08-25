@@ -1,4 +1,4 @@
-/** UI types mapped from the Railway quiz-bot backend (no mock fields). */
+/** Student Mini App types — mapped 1:1 from backend domain + webapp API. */
 
 export type ExamStatus =
   | 'DRAFT'
@@ -18,6 +18,7 @@ export interface Question {
   imageFileId?: string | null;
   imageUrl?: string | null;
   explanation?: string;
+  /** Review-only */
   selectedIndex?: number | null;
   correctIndex?: number | null;
   status?: 'correct' | 'wrong' | 'unattempted';
@@ -44,8 +45,11 @@ export interface ExamAttempt {
   examId: string;
   examTitle: string;
   className?: string;
+  /** questionId → option index */
   answers: Record<string, number>;
+  /** questionId → marked for review */
   marked: Record<string, boolean>;
+  /** questionId → visited */
   visited: Record<string, boolean>;
   secondsLeft: number;
   totalDurationSeconds: number;
@@ -54,7 +58,6 @@ export interface ExamAttempt {
   submittedAt?: string | null;
   completedAt?: string;
   isSubmitted: boolean;
-  isPractice?: boolean;
   isOfficial?: boolean;
   attemptNumber?: number;
   currentQuestionIndex?: number;
@@ -77,6 +80,7 @@ export interface UserProfile {
   classLevel: string;
   track: string;
   telegramAccount: string;
+  telegramUserId?: number;
   avatarColor: string;
   theme: 'light' | 'dark' | 'system';
   soundEnabled: boolean;

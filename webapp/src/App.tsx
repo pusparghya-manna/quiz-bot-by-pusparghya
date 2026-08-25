@@ -20,8 +20,8 @@ import {
   ApiQuestion,
 } from './api';
 
-const GUEST_PROFILE: UserProfile = {
-  name: 'Student',
+const EMPTY_PROFILE: UserProfile = {
+  name: '',
   studentId: '',
   classLevel: '',
   track: '',
@@ -46,9 +46,26 @@ function mapExam(e: ApiExamSummary): Exam {
     status: e.status,
     resultVisibility: e.resultVisibility,
     leaderboardVisibility: e.leaderboardVisibility,
-    negativeMarking: e.negativeMarking,
+    negativeMarking: e.negativeMarking ?? 0,
     questions: [],
   };
+}
+
+function mapQuestions(qs: ApiQuestion[]): Question[] {
+  return (qs || []).map((q) => ({
+    id: q.id,
+    question: q.question || '',
+    options: Array.isArray(q.options) ? q.options : [],
+    marks: q.marks ?? 1,
+    negativeMarks: q.negativeMarks ?? 0,
+    subject: q.subject,
+    imageFileId: q.imageFileId,
+    imageUrl: q.imageUrl,
+    explanation: q.explanation,
+    selectedIndex: q.selectedIndex,
+    correctIndex: q.correctIndex,
+    status: q.status,
+  }));
 }
 
 function mapAttemptFromStart(
@@ -57,38 +74,36 @@ function mapAttemptFromStart(
   questions: ApiQuestion[],
   secondsLeft: number
 ): ExamAttempt {
-  const firstId = questions[0]?.id;
+  const qs = mapQuestions(questions);
+  const firstId = qs[0]?.id;
+  const answers = { ...(attempt.answers || {}) };
+  const visited: Record<string, boolean> = {};
+  if (firstId) visited[firstId] = true;
+  for (const id of Object.keys(answers)) visited[id] = true;
   return {
     id: attempt.id,
     examId: exam.id,
     examTitle: exam.title,
     className: exam.className,
-    answers: { ...(attempt.answers || {}) },
+    answers,
     marked: {},
-    visited: firstId ? { [firstId]: true } : {},
-    secondsLeft,
-    totalDurationSeconds: (exam.durationMinutes || 60) * 60,
+    visited,
+    secondsLeft: Math.max(0, secondsLeft),
+    totalDurationSeconds: Math.max(60, (exam.durationMinutes || 60) * 60),
     timeSpentSeconds: attempt.timeTakenSeconds || 0,
     startedAt: attempt.startedAt || new Date().toISOString(),
     isSubmitted: false,
     isOfficial: attempt.isOfficial,
     attemptNumber: attempt.attemptNumber,
     currentQuestionIndex: attempt.currentQuestionIndex || 0,
-    questions: questions.map((q) => ({
-      id: q.id,
-      question: q.question,
-      options: q.options || [],
-      marks: q.marks ?? 1,
-      negativeMarks: q.negativeMarks ?? 0,
-      subject: q.subject,
-      imageFileId: q.imageFileId,
-      imageUrl: q.imageUrl,
-    })),
+    questions: qs,
     status: attempt.status,
   };
 }
 
-function mapResult(r: ApiAttempt & { examTitle: string; resultVisibility?: string }): ExamAttempt {
+function mapResult(
+  r: ApiAttempt & { examTitle?: string; resultVisibility?: string }
+): ExamAttempt {
   const correct = r.correctCount ?? 0;
   const wrong = r.wrongCount ?? 0;
   const attempted = correct + wrong;
@@ -125,7 +140,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [inTelegram, setInTelegram] = useState(false);
-  const [profile, setProfile] = useState<UserProfile>(GUEST_PROFILE);
+  const [profile, setProfile] = useState<UserProfile>(EMPTY_PROFILE);
   const [availableExams, setAvailableExams] = useState<Exam[]>([]);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [ongoingAttempt, setOngoingAttempt] = useState<ExamAttempt | null>(null);
@@ -133,18 +148,13 @@ export default function App() {
   const [pastResults, setPastResults] = useState<ExamAttempt[]>([]);
   const [selectedResultAttempt, setSelectedResultAttempt] = useState<ExamAttempt | null>(null);
   const [reviewQuestions, setReviewQuestions] = useState<Question[]>([]);
-  const [currentTab, setCurrentTab] = useState<string>('home');
+  const [currentTab, setCurrentTab] = useState('home');
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refreshResults = useCallback(async () => {
-    try {
-      const { results } = await webappApi.results();
-      if (results?.length) setPastResults(results.map(mapResult));
-      else setPastResults([]);
-    } catch {
-      /* no results yet */
-    }
+    const { results } = await webappApi.results();
+    setPastResults((results || []).map(mapResult));
   }, []);
 
   const refreshExams = useCallback(async () => {
@@ -158,10 +168,7 @@ export default function App() {
       const tg = isTelegramWebApp();
       setInTelegram(tg);
       if (!tg) {
-        if (!cancelled) {
-          setIsLoading(false);
-          setLoadError(null);
-        }
+        if (!cancelled) setIsLoading(false);
         return;
       }
       try {
@@ -187,6 +194,7 @@ export default function App() {
             : tgUser?.username
               ? `@${tgUser.username}`
               : '',
+          telegramUserId: session.user?.id || tgUser?.id,
           avatarColor: '#2563eb',
           theme: 'light',
           soundEnabled: true,
@@ -195,54 +203,40 @@ export default function App() {
         });
         if (session.ongoing) setOngoingSummary(session.ongoing);
         await refreshExams();
-        await refreshResults();
+        try {
+          await refreshResults();
+        } catch {
+          /* none yet */
+        }
 
-        // Deep-link: /?a=attemptId from Telegram review button
         const params = new URLSearchParams(window.location.search);
         const reviewAttemptId = params.get('a');
         if (reviewAttemptId) {
           try {
             const data = await webappApi.review(reviewAttemptId);
             if (!cancelled) {
-              setReviewQuestions(
-                data.questions.map((q) => ({
-                  id: q.id,
-                  question: q.question,
-                  options: q.options || [],
-                  marks: q.marks ?? 1,
-                  negativeMarks: q.negativeMarks ?? 0,
-                  subject: q.subject,
-                  imageFileId: q.imageFileId,
-                  imageUrl: q.imageUrl,
-                  explanation: q.explanation,
-                  selectedIndex: q.selectedIndex,
-                  correctIndex: q.correctIndex,
-                  status: q.status,
-                }))
+              setReviewQuestions(mapQuestions(data.questions));
+              setSelectedResultAttempt(
+                mapResult({ ...data.attempt, examTitle: data.exam.title })
               );
-              setSelectedResultAttempt(mapResult({ ...data.attempt, examTitle: data.exam.title }));
               setSelectedExam({
                 id: data.exam.id,
                 title: data.exam.title,
-                subject: data.exam.subject,
+                subject: data.exam.subject || '',
                 className: '',
                 totalQuestions: data.questions.length,
                 durationMinutes: 0,
                 totalMarks: data.attempt.maxScore || 0,
                 status: 'RESULTS_PUBLISHED',
-                questions: data.questions as Question[],
               });
               setCurrentTab('answers');
             }
           } catch {
-            /* ignore deep link failures */
+            /* ignore deep link errors */
           }
         }
       } catch (err: any) {
-        console.warn('[webapp] session load', err);
-        if (!cancelled) {
-          setLoadError(err?.message || 'Could not connect to Quiz Bot server');
-        }
+        if (!cancelled) setLoadError(err?.message || 'Failed to load session');
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -256,8 +250,23 @@ export default function App() {
     setActionError(null);
     setBusy(true);
     try {
+      // Prefer fresh detail metadata
+      try {
+        const { exam: detail } = await webappApi.examDetail(exam.id);
+        exam = { ...exam, ...mapExam(detail) };
+      } catch {
+        /* use list summary */
+      }
       const data = await webappApi.startExam(exam.id, forceNew);
-      const mapped = mapAttemptFromStart(data.attempt, data.exam, data.questions, data.secondsLeft);
+      if (!data.questions?.length) {
+        throw new Error('This exam has no questions yet. Ask your teacher to publish questions.');
+      }
+      const mapped = mapAttemptFromStart(
+        data.attempt,
+        data.exam,
+        data.questions,
+        data.secondsLeft
+      );
       setSelectedExam({
         ...mapExam(data.exam),
         questions: mapped.questions,
@@ -322,37 +331,22 @@ export default function App() {
     setBusy(true);
     try {
       const data = await webappApi.review(attempt.id);
-      setReviewQuestions(
-        data.questions.map((q) => ({
-          id: q.id,
-          question: q.question,
-          options: q.options || [],
-          marks: q.marks ?? 1,
-          negativeMarks: q.negativeMarks ?? 0,
-          subject: q.subject,
-          imageFileId: q.imageFileId,
-          imageUrl: q.imageUrl,
-          explanation: q.explanation,
-          selectedIndex: q.selectedIndex,
-          correctIndex: q.correctIndex,
-          status: q.status,
-        }))
-      );
+      setReviewQuestions(mapQuestions(data.questions));
       setSelectedResultAttempt(mapResult({ ...data.attempt, examTitle: data.exam.title }));
       setSelectedExam({
         id: data.exam.id,
         title: data.exam.title,
-        subject: data.exam.subject,
+        subject: data.exam.subject || '',
         className: '',
         totalQuestions: data.questions.length,
         durationMinutes: 0,
         totalMarks: data.attempt.maxScore || 0,
         status: 'RESULTS_PUBLISHED',
-        questions: data.questions as Question[],
+        questions: mapQuestions(data.questions),
       });
       setCurrentTab('answers');
     } catch (err: any) {
-      setActionError(err?.message || 'Results not available');
+      setActionError(err?.message || 'Could not load solutions (results may be unpublished)');
     } finally {
       setBusy(false);
     }
@@ -360,28 +354,25 @@ export default function App() {
 
   const handleUpdateName = async (newName: string) => {
     setProfile((p) => ({ ...p, name: newName }));
-    if (!inTelegram) return;
     try {
       const { student } = await webappApi.updateProfile(newName);
       setProfile((p) => ({
         ...p,
-        name: student.name,
+        name: student.name || newName,
         studentId: student.studentId || p.studentId,
         classLevel: student.className || p.classLevel,
       }));
-    } catch {
-      /* local name still updated */
+    } catch (err: any) {
+      setActionError(err?.message || 'Could not save name');
     }
   };
-
-  const isLiveExamDesk = currentTab === 'live';
 
   if (isLoading) {
     return (
       <div className="min-h-screen liquid-canvas-bg flex items-center justify-center p-4 relative overflow-hidden">
         <div className="liquid-orb liquid-orb-1" />
         <div className="liquid-orb liquid-orb-2" />
-        <div className="text-center space-y-4 animate-in fade-in zoom-in-95 duration-200 relative z-10 glass-card p-8 rounded-3xl">
+        <div className="text-center space-y-4 relative z-10 glass-card p-8 rounded-3xl">
           <div className="w-16 h-16 rounded-2xl glass-btn-primary text-white flex items-center justify-center mx-auto shadow-xl shadow-blue-500/20">
             <GraduationCap className="w-8 h-8" />
           </div>
@@ -394,7 +385,6 @@ export default function App() {
     );
   }
 
-  // Hard lock: normal browsers cannot use the student Mini App
   if (!inTelegram) {
     return (
       <div className="min-h-screen liquid-canvas-bg flex items-center justify-center p-4 relative overflow-hidden">
@@ -407,8 +397,8 @@ export default function App() {
           <div>
             <h1 className="text-lg font-bold text-slate-900">Telegram login required</h1>
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-              This is a Telegram Mini App for students. Open <strong>Quiz Bot by Pusparghya</strong> inside
-              Telegram and tap <strong>Open App</strong>. Browser links will not load your exams or student ID.
+              Open <strong>Quiz Bot by Pusparghya</strong> inside Telegram and tap{' '}
+              <strong>Open App</strong>. Browser links cannot load your student account or exams.
             </p>
           </div>
           <div className="rounded-2xl glass-pill px-3 py-2 text-[11px] text-slate-600 font-semibold">
@@ -418,6 +408,8 @@ export default function App() {
       </div>
     );
   }
+
+  const isLiveExamDesk = currentTab === 'live';
 
   return (
     <div className="min-h-screen liquid-canvas-bg text-slate-900 flex flex-col relative overflow-x-hidden">
@@ -440,7 +432,11 @@ export default function App() {
                 <h1 className="text-sm md:text-base font-bold text-slate-900 leading-tight">
                   Quiz Bot by Pusparghya
                 </h1>
-                <p className="text-[11px] text-slate-500">Assigned Examinations & Leaderboards</p>
+                <p className="text-[11px] text-slate-500">
+                  {profile.studentId
+                    ? `${profile.studentId}${profile.name ? ` · ${profile.name}` : ''}`
+                    : 'Assigned Examinations'}
+                </p>
               </div>
             </div>
             <DesktopNavigation
@@ -449,7 +445,9 @@ export default function App() {
                 if (tab === 'results') setSelectedResultAttempt(null);
                 setCurrentTab(tab);
               }}
-              hasOngoing={!!(ongoingAttempt && !ongoingAttempt.isSubmitted) || !!ongoingSummary}
+              hasOngoing={
+                !!(ongoingAttempt && !ongoingAttempt.isSubmitted) || !!ongoingSummary
+              }
             />
           </div>
         </header>
@@ -465,13 +463,11 @@ export default function App() {
             </div>
           </div>
         )}
-
         {actionError && (
           <div className="mb-4 glass-card rounded-2xl p-3 border border-rose-200/60 text-xs text-rose-700 font-semibold">
             {actionError}
           </div>
         )}
-
         {busy && (
           <div className="mb-3 text-xs font-semibold text-blue-600 animate-pulse">Working…</div>
         )}
@@ -516,7 +512,13 @@ export default function App() {
 
         {currentTab === 'live' && ongoingAttempt && (
           <LiveExamScreen
-            exam={selectedExam || ({ id: ongoingAttempt.examId, title: ongoingAttempt.examTitle } as Exam)}
+            exam={
+              selectedExam ||
+              ({
+                id: ongoingAttempt.examId,
+                title: ongoingAttempt.examTitle,
+              } as Exam)
+            }
             attempt={ongoingAttempt}
             soundEnabled={profile.soundEnabled}
             onUpdateAttempt={setOngoingAttempt}
@@ -528,7 +530,13 @@ export default function App() {
 
         {currentTab === 'review' && ongoingAttempt && (
           <ExamReviewScreen
-            exam={selectedExam || ({ id: ongoingAttempt.examId, title: ongoingAttempt.examTitle } as Exam)}
+            exam={
+              selectedExam ||
+              ({
+                id: ongoingAttempt.examId,
+                title: ongoingAttempt.examTitle,
+              } as Exam)
+            }
             attempt={ongoingAttempt}
             onReturnToLive={() => setCurrentTab('live')}
             onJumpToQuestion={(idx) => {
@@ -565,7 +573,7 @@ export default function App() {
           <LeaderboardScreen
             pastResults={pastResults}
             exams={availableExams}
-            currentUserName={profile.name}
+            currentUserName={profile.name || 'You'}
             onSelectExamResult={(attempt) => {
               setSelectedResultAttempt(attempt);
               setCurrentTab('results');
@@ -585,7 +593,9 @@ export default function App() {
             if (tab === 'results') setSelectedResultAttempt(null);
             setCurrentTab(tab);
           }}
-          hasOngoing={!!(ongoingAttempt && !ongoingAttempt.isSubmitted) || !!ongoingSummary}
+          hasOngoing={
+            !!(ongoingAttempt && !ongoingAttempt.isSubmitted) || !!ongoingSummary
+          }
         />
       )}
     </div>

@@ -210,11 +210,26 @@ async function startServer(app?: import('express').Express) {
     keyFn: (req) => `api:${(req as any).teacher?.username || req.ip}`,
   });
   app.use('/api', (req, res, next) => {
-    if (req.path.startsWith('/auth') || req.path.startsWith('/telegram') || req.path.startsWith('/webapp')) return next();
+    // req.path is relative to /api mount (e.g. /webapp/session, /media/...)
+    if (
+      req.path.startsWith('/auth') ||
+      req.path.startsWith('/telegram') ||
+      req.path.startsWith('/webapp') ||
+      req.path.startsWith('/media')
+    ) {
+      return next();
+    }
     return authMiddleware(req, res, next);
   });
   app.use('/api', (req, res, next) => {
-    if (req.path.startsWith('/auth') || req.path.startsWith('/telegram') || req.path.startsWith('/webapp')) return next();
+    if (
+      req.path.startsWith('/auth') ||
+      req.path.startsWith('/telegram') ||
+      req.path.startsWith('/webapp') ||
+      req.path.startsWith('/media')
+    ) {
+      return next();
+    }
     return apiLimiter(req, res, next);
   });
 

@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  ArrowLeft, Grid2X2, Clock, AlertTriangle, RotateCcw,
-  ChevronLeft, ChevronRight, X, Bookmark,
+  ArrowLeft,
+  Grid2X2,
+  Clock,
+  AlertTriangle,
+  RotateCcw,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  Bookmark,
 } from 'lucide-react';
 import { Exam, ExamAttempt } from '../../types';
 import { QuestionImage } from '../QuestionImage';
@@ -40,6 +47,13 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const timeUpFired = useRef(false);
 
   const currentQ = questions[currentIdx];
+
+  useEffect(() => {
+    setCurrentIdx(
+      Math.min(attempt.currentQuestionIndex || 0, Math.max(0, questions.length - 1))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt.id]);
 
   useEffect(() => {
     if (!currentQ) return;
@@ -82,6 +96,43 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const isLowTime = secondsLeft <= 300;
   const isCriticalTime = secondsLeft <= 60;
 
+  const persistAnswer = (questionId: string, optionIndex: number | null) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      webappApi.saveAnswer(attempt.id, questionId, optionIndex).catch(() => {});
+    }, 200);
+  };
+
+  const handleSelectOption = (optIdx: number) => {
+    if (!currentQ) return;
+    soundManager.playSelect(soundEnabled);
+    const next = {
+      ...attempt,
+      answers: { ...attempt.answers, [currentQ.id]: optIdx },
+      visited: { ...attempt.visited, [currentQ.id]: true },
+    };
+    onUpdateAttempt(next);
+    persistAnswer(currentQ.id, optIdx);
+  };
+
+  const handleClearResponse = () => {
+    if (!currentQ) return;
+    soundManager.playClick(soundEnabled);
+    const answers = { ...attempt.answers };
+    delete answers[currentQ.id];
+    onUpdateAttempt({ ...attempt, answers });
+    persistAnswer(currentQ.id, null);
+  };
+
+  const handleToggleMark = () => {
+    if (!currentQ) return;
+    soundManager.playClick(soundEnabled);
+    const marked = { ...attempt.marked };
+    if (marked[currentQ.id]) delete marked[currentQ.id];
+    else marked[currentQ.id] = true;
+    onUpdateAttempt({ ...attempt, marked });
+  };
+
   const getQuestionState = (idx: number) => {
     const q = questions[idx];
     if (!q) return 'not-visited';
@@ -95,61 +146,21 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     return 'not-visited';
   };
 
-  const persistAnswer = (questionId: string, optionIndex: number | null) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      webappApi.saveAnswer(attempt.id, questionId, optionIndex).catch(() => {});
-    }, 200);
-  };
-
-  const handleSelectOption = (optIdx: number) => {
-    if (!currentQ) return;
-    soundManager.playSelect(soundEnabled);
-    const next = { ...attempt.answers, [currentQ.id]: optIdx };
-    onUpdateAttempt({ ...attempt, answers: next });
-    persistAnswer(currentQ.id, optIdx);
-  };
-
-  const handleClearResponse = () => {
-    if (!currentQ) return;
-    soundManager.playClick(soundEnabled);
-    const next = { ...attempt.answers };
-    delete next[currentQ.id];
-    onUpdateAttempt({ ...attempt, answers: next });
-    persistAnswer(currentQ.id, null);
-  };
-
-  const toggleMark = () => {
-    if (!currentQ) return;
-    soundManager.playClick(soundEnabled);
-    onUpdateAttempt({
-      ...attempt,
-      marked: { ...attempt.marked, [currentQ.id]: !attempt.marked[currentQ.id] },
-    });
-  };
-
-  const handlePrevious = () => {
-    soundManager.playClick(soundEnabled);
-    if (currentIdx > 0) setCurrentIdx(currentIdx - 1);
-  };
-
-  const handleNext = () => {
-    soundManager.playClick(soundEnabled);
-    if (currentIdx < questions.length - 1) setCurrentIdx(currentIdx + 1);
-    else onOpenReview();
-  };
-
-  const answeredCount = Object.keys(attempt.answers).length;
-  const markedCount = Object.values(attempt.marked).filter(Boolean).length;
+  const answeredCount = questions.filter((q) => attempt.answers[q.id] !== undefined).length;
+  const markedCount = questions.filter((q) => attempt.marked[q.id]).length;
   const unansweredCount = questions.length - answeredCount;
   const selected = currentQ ? attempt.answers[currentQ.id] : undefined;
+  const isMarked = currentQ ? !!attempt.marked[currentQ.id] : false;
 
   if (!currentQ) {
     return (
       <div className="p-8 text-center glass-card rounded-3xl">
-        <p className="text-sm font-semibold text-slate-500">No questions loaded for this exam.</p>
-        <button onClick={onLeaveExam} className="mt-4 px-4 py-2 rounded-xl glass-btn-secondary text-xs font-bold">
-          Back
+        <p className="text-sm font-semibold text-slate-600">No questions loaded for this exam.</p>
+        <button
+          onClick={onLeaveExam}
+          className="mt-4 px-4 py-2 rounded-xl glass-btn-secondary text-xs font-bold"
+        >
+          Back to exams
         </button>
       </div>
     );
@@ -160,18 +171,23 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       <header className="sticky top-0 z-30 glass-header -mx-4 px-4 py-2.5 shadow-2xs">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowExitConfirm(true)} className="p-2 rounded-2xl glass-btn-secondary text-slate-700">
+            <button
+              onClick={() => setShowExitConfirm(true)}
+              className="p-2 rounded-2xl glass-btn-secondary text-slate-700"
+              title="Pause / Leave"
+            >
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="hidden sm:block">
               <h2 className="text-xs font-bold text-slate-900 truncate max-w-[140px] md:max-w-[220px]">
-                {exam.title || attempt.examTitle}
+                {exam.title}
               </h2>
               <span className="text-[10px] text-slate-400">
                 Question {currentIdx + 1} of {questions.length}
               </span>
             </div>
           </div>
+
           <div
             className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-mono font-bold text-xs md:text-sm ${
               isCriticalTime
@@ -184,6 +200,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
             <Clock className="w-3.5 h-3.5" />
             <span>{formatTimer(secondsLeft)}</span>
           </div>
+
           <button
             onClick={() => setIsPaletteOpen(true)}
             className="p-2 rounded-2xl glass-btn-secondary text-blue-600 text-xs font-bold flex items-center gap-1"
@@ -199,15 +216,20 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                 {currentQ.subject}
               </span>
             )}
+            <span className="text-[11px] text-slate-400 font-medium">
+              +{currentQ.marks ?? 1}
+              {(currentQ.negativeMarks ?? 0) > 0 ? ` / -${currentQ.negativeMarks}` : ''}
+            </span>
           </div>
           <button
-            onClick={toggleMark}
+            type="button"
+            onClick={handleToggleMark}
             className={`flex items-center gap-1 text-[11px] font-bold ${
-              attempt.marked[currentQ.id] ? 'text-amber-600' : 'text-slate-400'
+              isMarked ? 'text-amber-600' : 'text-slate-500'
             }`}
           >
-            <Bookmark className="w-3.5 h-3.5" />
-            {attempt.marked[currentQ.id] ? 'Marked' : 'Mark'}
+            <Bookmark className={`w-3.5 h-3.5 ${isMarked ? 'fill-amber-500' : ''}`} />
+            {isMarked ? 'Marked' : 'Mark'}
           </button>
         </div>
       </header>
@@ -218,12 +240,13 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
             <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">
               Question {currentIdx + 1}
             </span>
-            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-xl glass-pill text-slate-600">
-              +{currentQ.marks || 1} / -{currentQ.negativeMarks || 0}
-            </span>
           </div>
 
-          <QuestionImage imageUrl={currentQ.imageUrl} imageFileId={currentQ.imageFileId} />
+          <QuestionImage
+            imageUrl={currentQ.imageUrl}
+            imageFileId={currentQ.imageFileId}
+            alt={`Diagram for question ${currentIdx + 1}`}
+          />
 
           <h1 className="font-semibold text-slate-900 leading-relaxed text-base md:text-lg">
             {currentQ.question}
@@ -249,7 +272,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                         : 'border border-slate-300/80 glass-pill text-slate-600'
                     }`}
                   >
-                    {'ABCD'[optIdx] || optIdx + 1}
+                    {'ABCD'[optIdx]}
                   </div>
                   <div className="flex-1 text-sm md:text-base leading-relaxed self-center font-medium">
                     {optionText}
@@ -278,7 +301,10 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={handlePrevious}
+            onClick={() => {
+              soundManager.playClick(soundEnabled);
+              if (currentIdx > 0) setCurrentIdx(currentIdx - 1);
+            }}
             disabled={currentIdx === 0}
             className="px-4 py-2.5 rounded-2xl glass-btn-secondary text-slate-700 disabled:opacity-40 font-bold text-xs md:text-sm flex items-center gap-1.5"
           >
@@ -287,10 +313,16 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
           </button>
           <button
             type="button"
-            onClick={handleNext}
-            className="px-6 py-2.5 rounded-2xl glass-btn-primary text-white font-bold text-xs md:text-sm flex items-center gap-1.5 ml-auto"
+            onClick={() => {
+              soundManager.playClick(soundEnabled);
+              if (currentIdx < questions.length - 1) setCurrentIdx(currentIdx + 1);
+              else onOpenReview();
+            }}
+            className="px-6 py-2.5 rounded-2xl glass-btn-primary text-white font-bold text-xs md:text-sm shadow-xs flex items-center gap-1.5 ml-auto"
           >
-            <span>{currentIdx === questions.length - 1 ? 'Review & Submit' : 'Save & Next'}</span>
+            <span>
+              {currentIdx === questions.length - 1 ? 'Review & Submit' : 'Save & Next'}
+            </span>
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
@@ -298,13 +330,17 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
       {isPaletteOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/40 backdrop-blur-md">
-          <div className="glass-card rounded-t-3xl sm:rounded-3xl w-full max-w-xl max-h-[85vh] overflow-hidden shadow-2xl flex flex-col">
+          <div className="glass-card rounded-t-3xl sm:rounded-3xl w-full max-w-xl max-h-[85vh] overflow-hidden shadow-2xl flex flex-col border border-white/90">
+            <div className="w-12 h-1 bg-slate-300 rounded-full mx-auto mt-3 sm:hidden" />
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200/40">
-              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <Grid2X2 className="w-4 h-4 text-blue-600" />
-                Question Palette
-              </h3>
-              <button onClick={() => setIsPaletteOpen(false)} className="p-1.5 rounded-xl glass-btn-secondary">
+                <h3 className="font-bold text-slate-900 text-base">Question Palette</h3>
+              </div>
+              <button
+                onClick={() => setIsPaletteOpen(false)}
+                className="p-1.5 rounded-xl glass-btn-secondary"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -326,12 +362,12 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
               <div className="grid grid-cols-5 gap-2.5">
                 {questions.map((_, idx) => {
                   const state = getQuestionState(idx);
-                  const isCurrent = idx === currentIdx;
-                  let bgClass = 'glass-pill text-slate-700 font-medium';
+                  let bgClass = 'glass-pill text-slate-700';
                   if (state === 'answered') bgClass = 'bg-emerald-600 text-white font-bold';
                   else if (state === 'marked') bgClass = 'bg-amber-500 text-white font-bold';
                   else if (state === 'both') bgClass = 'bg-purple-600 text-white font-bold';
-                  else if (state === 'unanswered') bgClass = 'bg-rose-50 border-2 border-rose-500 text-rose-600 font-bold';
+                  else if (state === 'unanswered')
+                    bgClass = 'bg-rose-50 border-2 border-rose-500 text-rose-600 font-bold';
                   return (
                     <button
                       key={idx}
@@ -342,7 +378,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                         setIsPaletteOpen(false);
                       }}
                       className={`h-10 rounded-2xl flex items-center justify-center font-mono text-sm ${bgClass} ${
-                        isCurrent ? 'ring-3 ring-blue-500 ring-offset-2 scale-105' : ''
+                        idx === currentIdx ? 'ring-3 ring-blue-500 ring-offset-2' : ''
                       }`}
                     >
                       {idx + 1}
@@ -374,13 +410,18 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
             </div>
             <h3 className="text-base font-bold text-slate-900">Leave active exam?</h3>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Your answers are saved on the server. You can resume anytime from Home or Exams.
+              Answers are saved on the server. You can resume from Home or Exams.
             </p>
             <div className="grid grid-cols-2 gap-2 pt-2">
-              <button onClick={() => setShowExitConfirm(false)} className="py-2.5 rounded-2xl glass-btn-secondary text-slate-700 font-bold text-xs">
+              <button
+                type="button"
+                onClick={() => setShowExitConfirm(false)}
+                className="py-2.5 rounded-2xl glass-btn-secondary text-slate-700 font-bold text-xs"
+              >
                 Keep Testing
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setShowExitConfirm(false);
                   onLeaveExam();
