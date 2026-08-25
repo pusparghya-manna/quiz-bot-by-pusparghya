@@ -22,13 +22,9 @@ export type KbSession = {
   qIdx?: number;
   reviewPage?: number;
   gridPage?: number;
-  /** Map button label → action payload */
   labels?: Record<string, string>;
-  /** Last bot message id — edit this instead of sending new menus */
   lastMessageId?: number;
-  /** Kind of last exam question message (text vs photo) for navigation */
   lastMessageKind?: 'text' | 'photo';
-  /** Telegram file_id of last photo question (for caption-only edits) */
   lastPhotoFileId?: string;
 };
 
@@ -40,8 +36,6 @@ export function getKbSession(userId: number): KbSession | undefined {
 
 export function setKbSession(userId: number, s: KbSession) {
   const prev = sessions.get(userId);
-  // Inherit lastMessageId only when the caller omitted the field entirely.
-  // Explicit `lastMessageId: undefined` clears it (e.g. exam entry → new bubble).
   if (prev?.lastMessageId != null && !('lastMessageId' in s)) {
     s = { ...s, lastMessageId: prev.lastMessageId };
   }
@@ -59,20 +53,34 @@ export function clearKbSession(userId: number) {
   sessions.delete(userId);
 }
 
-export function kbMarkup(rows: string[][], opts?: { oneTime?: boolean }): ReplyKeyboardMarkup {
+type KbBtn = { text: string; web_app?: { url: string } };
+
+export function kbMarkup(
+  rows: (string | KbBtn)[][],
+  opts?: { oneTime?: boolean }
+): ReplyKeyboardMarkup {
   return {
-    keyboard: rows.map((row) => row.map((text) => ({ text: text.slice(0, 64) }))),
+    keyboard: rows.map((row) =>
+      row.map((cell) => {
+        if (typeof cell === 'string') return { text: cell.slice(0, 64) };
+        const btn: any = { text: String(cell.text || '').slice(0, 64) };
+        if (cell.web_app?.url) btn.web_app = { url: cell.web_app.url };
+        return btn;
+      })
+    ),
     resize_keyboard: true,
     is_persistent: true,
     one_time_keyboard: opts?.oneTime || false,
     selective: false,
-    // Hint only — keeps many clients from auto-focusing the native text field
     input_field_placeholder: 'Tap a button below',
   } as ReplyKeyboardMarkup;
 }
 
-/** Only for deliberate name entry — opens the native typing keyboard. */
-export function forceReplyNameMarkup(): { force_reply: true; selective: boolean; input_field_placeholder: string } {
+export function forceReplyNameMarkup(): {
+  force_reply: true;
+  selective: boolean;
+  input_field_placeholder: string;
+} {
   return {
     force_reply: true,
     selective: true,
@@ -86,6 +94,7 @@ export const LABELS = {
   leaderboard: '🏆 Leaderboard',
   setName: '✏️ Set my name',
   home: '🏠 Main menu',
+  openApp: '🚀 Open App',
   backExams: '📚 Back to My Exams',
   otherLb: '🏆 Other exams',
   showFullLb: 'Show full ranking',
@@ -108,14 +117,24 @@ export const LABELS = {
   myResults: '📊 My Results',
 } as const;
 
-export function mainNavRows(): string[][] {
+export function webAppBaseUrl(): string {
+  return (
+    process.env.WEBAPP_URL ||
+    process.env.FRONTEND_URL ||
+    'https://quiz-bot-by-pusparghya.vercel.app'
+  ).replace(/\/$/, '');
+}
+
+/** Main menu: Open App (Mini App) + classic navigation */
+export function mainNavRows(): (string | KbBtn)[][] {
+  const url = webAppBaseUrl();
   return [
+    [{ text: LABELS.openApp, web_app: { url } }],
     [LABELS.exams, LABELS.results],
     [LABELS.leaderboard, LABELS.setName],
   ];
 }
 
-/** Build numbered list buttons + optional footer rows */
 export function numberedListRows(
   titles: string[],
   footer: string[][]
