@@ -1,3 +1,4 @@
+import { registerWebappRoutes } from './webappRoutes.js';
 import express from 'express';
 import crypto from 'crypto';
 import cors from 'cors';
@@ -200,6 +201,8 @@ async function startServer(app?: import('express').Express) {
   });
 
 
+  registerWebappRoutes(app);
+
   // --- API ROUTES (protected) ---
   const apiLimiter = rateLimit({
     windowMs: 60_000,
@@ -207,11 +210,11 @@ async function startServer(app?: import('express').Express) {
     keyFn: (req) => `api:${(req as any).teacher?.username || req.ip}`,
   });
   app.use('/api', (req, res, next) => {
-    if (req.path.startsWith('/auth') || req.path.startsWith('/telegram')) return next();
+    if (req.path.startsWith('/auth') || req.path.startsWith('/telegram') || req.path.startsWith('/webapp')) return next();
     return authMiddleware(req, res, next);
   });
   app.use('/api', (req, res, next) => {
-    if (req.path.startsWith('/auth') || req.path.startsWith('/telegram')) return next();
+    if (req.path.startsWith('/auth') || req.path.startsWith('/telegram') || req.path.startsWith('/webapp')) return next();
     return apiLimiter(req, res, next);
   });
 
