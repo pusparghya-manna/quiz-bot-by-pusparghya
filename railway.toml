@@ -1,6 +1,5 @@
 [build]
 builder = "DOCKERFILE"
-# Repository root must be the Railway service root directory
 dockerfilePath = "Dockerfile"
 
 [deploy]

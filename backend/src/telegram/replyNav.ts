@@ -118,11 +118,12 @@ export const LABELS = {
 } as const;
 
 export function webAppBaseUrl(): string {
-  return (
+  const raw =
     process.env.WEBAPP_URL ||
     process.env.FRONTEND_URL ||
-    'https://quiz-bot-by-pusparghya.vercel.app'
-  ).replace(/\/$/, '');
+    // Student Mini App is served by Railway at /app (not the teacher Vercel dashboard)
+    'https://quiz-bot-by-pusparghya-production.up.railway.app/app';
+  return String(raw).replace(/\/$/, '');
 }
 
 /** Main menu: Open App (Mini App) + classic navigation */

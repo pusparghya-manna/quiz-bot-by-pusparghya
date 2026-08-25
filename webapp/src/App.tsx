@@ -435,7 +435,7 @@ export default function App() {
                 <p className="text-[11px] text-slate-500">
                   {profile.studentId
                     ? `${profile.studentId}${profile.name ? ` · ${profile.name}` : ''}`
-                    : 'Assigned Examinations'}
+                    : 'Live student desk'}
                 </p>
               </div>
             </div>

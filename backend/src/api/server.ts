@@ -3,6 +3,9 @@ import express from 'express';
 import crypto from 'crypto';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 import { env, corsOriginDelegate, assertSecureConfig } from '../config/env.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { securityHeaders } from '../middleware/securityHeaders.js';
@@ -202,6 +205,24 @@ async function startServer(app?: import('express').Express) {
 
 
   registerWebappRoutes(app);
+
+  // Student Telegram Mini App (built into public/webapp, served at /app)
+  const webappDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'webapp');
+  const webappDirAlt = path.join(process.cwd(), 'public', 'webapp');
+  const staticWebapp = fs.existsSync(webappDir) ? webappDir : webappDirAlt;
+  if (fs.existsSync(staticWebapp)) {
+    console.log('[webapp] serving Mini App from', staticWebapp);
+    app.use('/app', express.static(staticWebapp, { index: false, maxAge: '1h', fallthrough: true }));
+    app.get(['/app', '/app/*'], (req, res, next) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      const indexHtml = path.join(staticWebapp, 'index.html');
+      if (!fs.existsSync(indexHtml)) return next();
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(indexHtml);
+    });
+  } else {
+    console.warn('[webapp] static Mini App not found — set WEBAPP_URL to an external host');
+  }
 
   // --- API ROUTES (protected) ---
   const apiLimiter = rateLimit({
