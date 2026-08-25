@@ -1,4 +1,4 @@
-/** Telegram Mini App API client — talks to Quiz Bot Railway backend */
+/** Telegram Mini App API client — Railway quiz-bot backend only */
 
 const DEFAULT_API = 'https://quiz-bot-by-pusparghya-production.up.railway.app';
 
@@ -7,7 +7,7 @@ export const API_BASE = (import.meta.env.VITE_API_URL || DEFAULT_API).replace(/\
 export function getTelegramInitData(): string {
   try {
     const w = window as any;
-    return w?.Telegram?.WebApp?.initData || '';
+    return String(w?.Telegram?.WebApp?.initData || '');
   } catch {
     return '';
   }
@@ -27,8 +27,9 @@ export function getTelegramUser(): {
   }
 }
 
+/** True only when Telegram injected a signed initData string (not a normal browser). */
 export function isTelegramWebApp(): boolean {
-  return !!getTelegramInitData() || !!getTelegramUser()?.id;
+  return getTelegramInitData().length > 0;
 }
 
 export function mediaUrl(pathOrFileId: string | null | undefined): string | null {
@@ -42,6 +43,9 @@ export function mediaUrl(pathOrFileId: string | null | undefined): string | null
 
 async function api<T>(path: string, body?: Record<string, unknown>): Promise<T> {
   const initData = getTelegramInitData();
+  if (!initData) {
+    throw new Error('Telegram login required. Open this app from the Quiz Bot in Telegram.');
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -62,7 +66,7 @@ export type ApiExamSummary = {
   totalMarks: number;
   startDate: string;
   status: string;
-  resultVisibility: string;
+  resultVisibility?: string;
   leaderboardVisibility?: string;
   negativeMarking?: number;
 };
@@ -102,12 +106,18 @@ export type ApiAttempt = {
   attemptNumber?: number;
   rank?: number | null;
   studentName?: string;
+  studentId?: string;
 };
 
 export const webappApi = {
   session: () =>
     api<{
-      user: { id: number; firstName?: string; lastName?: string; username?: string };
+      user: {
+        id: number;
+        firstName?: string;
+        lastName?: string;
+        username?: string;
+      };
       student: {
         id: string;
         name: string;

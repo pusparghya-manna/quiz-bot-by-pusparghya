@@ -70,7 +70,27 @@ export function registerWebappRoutes(app: Express) {
     try {
       const auth = authWebapp(req, res);
       if (!auth) return;
-      const student = (await S(store.getStudentByTelegramId(auth.userId))) || null;
+      let student = (await S(store.getStudentByTelegramId(auth.userId))) || null;
+      // Soft-create student on first Mini App open so profile has a real studentId
+      if (!student) {
+        const name =
+          [auth.user?.first_name, auth.user?.last_name].filter(Boolean).join(' ') ||
+          auth.user?.username ||
+          `Student ${auth.userId}`;
+        student = {
+          id: `STU_${auth.userId}`,
+          studentId: `TG-${auth.userId}`,
+          name,
+          className: '',
+          telegramUserId: auth.userId,
+          telegramUsername: auth.user?.username || null,
+          linkCode: '',
+          status: 'linked',
+          teacherIds: [],
+          joinedAt: new Date().toISOString(),
+        } as any;
+        await store.saveStudent(student);
+      }
       const attempts = (await S(store.getAttempts())) as any[];
       const ongoingRaw = attempts.find(
         (a: any) =>

@@ -60,8 +60,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               {profile.name}
             </h1>
             <p className="text-xs text-slate-500 mt-0.5 font-medium">
-              {[profile.classLevel, profile.telegramAccount].filter(Boolean).join(' · ') ||
-                'Telegram student'}
+              {[profile.studentId, profile.classLevel, profile.telegramAccount]
+                .filter(Boolean)
+                .join(' · ') || 'Telegram student'}
             </p>
           </div>
         </div>
