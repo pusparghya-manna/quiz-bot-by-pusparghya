@@ -1,13 +1,5 @@
 import React, { useState } from 'react';
-import {
-  ArrowLeft,
-  AlertTriangle,
-  ClipboardCheck,
-  CheckCircle2,
-  Bookmark,
-  Send,
-  HelpCircle
-} from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Send } from 'lucide-react';
 import { Exam, ExamAttempt } from '../../types';
 
 interface ExamReviewScreenProps {
@@ -23,20 +15,23 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
   attempt,
   onReturnToLive,
   onJumpToQuestion,
-  onFinalSubmit
+  onFinalSubmit,
 }) => {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
 
-  const questions = exam.questions;
-  const answeredCount = attempt.answers.filter(a => a !== null).length;
-  const markedCount = attempt.marked.filter(Boolean).length;
+  const questions = attempt.questions || exam.questions || [];
+  const answeredCount = questions.filter(
+    (q) => attempt.answers[q.id] !== undefined && attempt.answers[q.id] !== null
+  ).length;
+  const markedCount = questions.filter((q) => attempt.marked[q.id]).length;
   const unansweredCount = questions.length - answeredCount;
 
   const getQuestionState = (idx: number) => {
-    const hasAnswer = attempt.answers[idx] !== null;
-    const isMarked = attempt.marked[idx];
-    const isVisited = attempt.visited[idx];
-
+    const q = questions[idx];
+    if (!q) return 'not-visited';
+    const hasAnswer = attempt.answers[q.id] !== undefined && attempt.answers[q.id] !== null;
+    const isMarked = !!attempt.marked[q.id];
+    const isVisited = !!attempt.visited[q.id];
     if (hasAnswer && isMarked) return 'both';
     if (isMarked) return 'marked';
     if (hasAnswer) return 'answered';
@@ -46,7 +41,6 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
 
   return (
     <div className="space-y-5 pb-12 animate-in fade-in duration-300">
-      {/* Top bar */}
       <div className="flex items-center gap-3">
         <button
           onClick={onReturnToLive}
@@ -59,74 +53,52 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
           <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
             Pre-Submission Audit
           </span>
-          <h1 className="text-xl font-bold text-slate-900">
-            Review your exam
-          </h1>
+          <h1 className="text-xl font-bold text-slate-900">Review your exam</h1>
         </div>
       </div>
 
-      {/* Summary Status Matrix */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="p-4 rounded-3xl glass-pill bg-emerald-50/70 border-emerald-200/70 shadow-xs">
           <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
             Answered
           </span>
-          <p className="text-2xl font-black text-emerald-700 mt-1 font-mono">
-            {answeredCount}
-          </p>
+          <p className="text-2xl font-black text-emerald-700 mt-1 font-mono">{answeredCount}</p>
         </div>
-
         <div className="p-4 rounded-3xl glass-pill bg-amber-50/70 border-amber-200/70 shadow-xs">
           <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
             Marked Review
           </span>
-          <p className="text-2xl font-black text-amber-700 mt-1 font-mono">
-            {markedCount}
-          </p>
+          <p className="text-2xl font-black text-amber-700 mt-1 font-mono">{markedCount}</p>
         </div>
-
         <div className="p-4 rounded-3xl glass-pill bg-rose-50/70 border-rose-200/70 shadow-xs">
           <span className="text-xs font-bold text-rose-800 uppercase tracking-wider">
             Unanswered
           </span>
-          <p className="text-2xl font-black text-rose-700 mt-1 font-mono">
-            {unansweredCount}
-          </p>
+          <p className="text-2xl font-black text-rose-700 mt-1 font-mono">{unansweredCount}</p>
         </div>
-
         <div className="p-4 rounded-3xl glass-card shadow-xs">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Total Questions
-          </span>
-          <p className="text-2xl font-black text-slate-900 mt-1 font-mono">
-            {questions.length}
-          </p>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total</span>
+          <p className="text-2xl font-black text-slate-900 mt-1 font-mono">{questions.length}</p>
         </div>
       </div>
 
-      {/* Warning Notice if unanswered */}
       {unansweredCount > 0 && (
         <div className="rounded-3xl glass-pill bg-amber-50/80 border-amber-300/80 p-4 flex gap-3 items-start shadow-xs">
           <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-xs text-amber-900 space-y-0.5">
             <p className="font-bold">You have {unansweredCount} unanswered questions.</p>
             <p className="text-amber-800/90">
-              Click any question square below to directly jump and provide an answer before submitting.
+              Tap a question square below to jump back and answer before submitting.
             </p>
           </div>
         </div>
       )}
 
-      {/* Interactive Question Navigator Grid */}
       <div className="glass-card rounded-3xl p-5 md:p-6 shadow-xs">
-        <h3 className="text-base font-bold text-slate-900 mb-3">
-          Question Navigator
-        </h3>
-
+        <h3 className="text-base font-bold text-slate-900 mb-3">Question Navigator</h3>
         <div className="grid grid-cols-5 sm:grid-cols-10 gap-2.5">
-          {questions.map((_, idx) => {
+          {questions.map((q, idx) => {
             const state = getQuestionState(idx);
-
             let bgClass = 'glass-pill text-slate-700';
             if (state === 'answered') {
               bgClass = 'bg-emerald-600 border-emerald-600 text-white font-bold shadow-xs';
@@ -137,10 +109,9 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
             } else if (state === 'unanswered') {
               bgClass = 'bg-rose-50 border-2 border-rose-500 text-rose-600 font-bold';
             }
-
             return (
               <button
-                key={idx}
+                key={q.id || idx}
                 type="button"
                 onClick={() => onJumpToQuestion(idx)}
                 className={`h-11 rounded-2xl flex items-center justify-center font-mono text-sm font-bold transition hover:scale-105 ${bgClass}`}
@@ -153,7 +124,6 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
         </div>
       </div>
 
-      {/* Action CTA Buttons */}
       <div className="grid grid-cols-2 gap-3 pt-2">
         <button
           onClick={onReturnToLive}
@@ -170,33 +140,29 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
         </button>
       </div>
 
-      {/* Final Submit Confirmation Modal */}
       {showSubmitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md">
           <div className="glass-card rounded-3xl w-full max-w-sm p-6 shadow-2xl space-y-3.5 animate-in zoom-in-95 border-white">
             <div className="w-11 h-11 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center">
               <AlertTriangle className="w-6 h-6" />
             </div>
-
-            <h3 className="text-lg font-bold text-slate-900">
-              Submit your exam?
-            </h3>
-
+            <h3 className="text-lg font-bold text-slate-900">Submit your exam?</h3>
             <p className="text-xs text-slate-600 leading-relaxed">
-              You cannot change your answers after submission. Your score, accuracy analytics, and solution explanations will be computed immediately.
+              You cannot change answers after submission. Score and solutions come from the live
+              quiz database.
             </p>
-
             <div className="p-3.5 rounded-2xl glass-pill text-xs space-y-1.5 border-slate-200/50">
               <div className="flex justify-between">
                 <span className="text-slate-500">Answered questions:</span>
-                <span className="font-bold text-emerald-600">{answeredCount} of {questions.length}</span>
+                <span className="font-bold text-emerald-600">
+                  {answeredCount} of {questions.length}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Marked for review:</span>
                 <span className="font-bold text-amber-600">{markedCount}</span>
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-2 pt-2">
               <button
                 type="button"

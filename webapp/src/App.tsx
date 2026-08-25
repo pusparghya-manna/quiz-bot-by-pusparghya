@@ -1,22 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import {
-  GraduationCap
-} from 'lucide-react';
-import {
-  Exam,
-  ExamAttempt,
-  UserProfile,
-  Question
-} from './types';
-import {
-  MOCK_EXAMS,
-  SAMPLE_INITIAL_ATTEMPT,
-  SAMPLE_PAST_RESULTS
-} from './data/examsData';
-import {
-  DesktopNavigation,
-  MobileNavigation
-} from './components/Navigation';
+import React, { useState, useEffect, useCallback } from 'react';
+import { GraduationCap, AlertCircle } from 'lucide-react';
+import { Exam, ExamAttempt, UserProfile, Question, OngoingSummary } from './types';
+import { DesktopNavigation, MobileNavigation } from './components/Navigation';
 import { HomeScreen } from './components/screens/HomeScreen';
 import { ExamsScreen } from './components/screens/ExamsScreen';
 import { ExamDetailsScreen } from './components/screens/ExamDetailsScreen';
@@ -26,125 +11,229 @@ import { ResultsScreen } from './components/screens/ResultsScreen';
 import { AnswersScreen } from './components/screens/AnswersScreen';
 import { LeaderboardScreen } from './components/screens/LeaderboardScreen';
 import { ProfileScreen } from './components/screens/ProfileScreen';
-import { webappApi, getTelegramUser } from './api';
+import {
+  webappApi,
+  getTelegramUser,
+  isTelegramWebApp,
+  ApiExamSummary,
+  ApiAttempt,
+  ApiQuestion,
+} from './api';
 
-const DEFAULT_PROFILE: UserProfile = {
-  name: 'Pusparghya Manna',
-  studentId: 'QB-10-48219',
-  classLevel: 'Class 10',
-  track: 'Science & Math Track',
-  telegramAccount: '@pusparghya_manna',
+const GUEST_PROFILE: UserProfile = {
+  name: 'Student',
+  studentId: '',
+  classLevel: '',
+  track: '',
+  telegramAccount: '',
   avatarColor: '#2563eb',
   theme: 'light',
   soundEnabled: true,
   timerAlerts: true,
-  fontSize: 'normal'
+  fontSize: 'normal',
 };
+
+function mapExam(e: ApiExamSummary): Exam {
+  return {
+    id: e.id,
+    title: e.title,
+    subject: e.subject || '',
+    className: e.className || '',
+    totalQuestions: e.totalQuestions || 0,
+    durationMinutes: e.durationMinutes || 60,
+    totalMarks: e.totalMarks || 0,
+    startDate: e.startDate,
+    status: e.status,
+    resultVisibility: e.resultVisibility,
+    leaderboardVisibility: e.leaderboardVisibility,
+    negativeMarking: e.negativeMarking,
+    questions: [],
+  };
+}
+
+function mapAttemptFromStart(
+  attempt: ApiAttempt,
+  exam: ApiExamSummary,
+  questions: ApiQuestion[],
+  secondsLeft: number
+): ExamAttempt {
+  const firstId = questions[0]?.id;
+  return {
+    id: attempt.id,
+    examId: exam.id,
+    examTitle: exam.title,
+    className: exam.className,
+    answers: { ...(attempt.answers || {}) },
+    marked: {},
+    visited: firstId ? { [firstId]: true } : {},
+    secondsLeft,
+    totalDurationSeconds: (exam.durationMinutes || 60) * 60,
+    timeSpentSeconds: attempt.timeTakenSeconds || 0,
+    startedAt: attempt.startedAt || new Date().toISOString(),
+    isSubmitted: false,
+    isOfficial: attempt.isOfficial,
+    attemptNumber: attempt.attemptNumber,
+    currentQuestionIndex: attempt.currentQuestionIndex || 0,
+    questions: questions.map((q) => ({
+      id: q.id,
+      question: q.question,
+      options: q.options || [],
+      marks: q.marks ?? 1,
+      negativeMarks: q.negativeMarks ?? 0,
+      subject: q.subject,
+      imageFileId: q.imageFileId,
+      imageUrl: q.imageUrl,
+    })),
+    status: attempt.status,
+  };
+}
+
+function mapResult(r: ApiAttempt & { examTitle: string; resultVisibility?: string }): ExamAttempt {
+  const correct = r.correctCount ?? 0;
+  const wrong = r.wrongCount ?? 0;
+  const attempted = correct + wrong;
+  return {
+    id: r.id,
+    examId: r.examId,
+    examTitle: r.examTitle || 'Exam',
+    answers: { ...(r.answers || {}) },
+    marked: {},
+    visited: {},
+    secondsLeft: 0,
+    totalDurationSeconds: r.timeTakenSeconds || 0,
+    timeSpentSeconds: r.timeTakenSeconds || 0,
+    startedAt: r.startedAt || '',
+    submittedAt: r.submittedAt,
+    completedAt: r.submittedAt || undefined,
+    isSubmitted: true,
+    isOfficial: r.isOfficial,
+    attemptNumber: r.attemptNumber,
+    score: r.score,
+    maxScore: r.maxScore,
+    percentage: r.percentage,
+    correctCount: r.correctCount,
+    wrongCount: r.wrongCount,
+    skippedCount: r.skippedCount,
+    accuracy: attempted > 0 ? Math.round((correct / attempted) * 100) : 0,
+    rank: r.rank,
+    status: r.status,
+    resultVisibility: r.resultVisibility,
+  };
+}
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
-
-  const [profile, setProfile] = useState<UserProfile>(() => {
-    try {
-      const saved = localStorage.getItem('quizbot_profile');
-      return saved ? JSON.parse(saved) : DEFAULT_PROFILE;
-    } catch {
-      return DEFAULT_PROFILE;
-    }
-  });
-
-  const [availableExams, setAvailableExams] = useState<Exam[]>(() => {
-    try {
-      const saved = localStorage.getItem('quizbot_exams');
-      return saved ? JSON.parse(saved) : MOCK_EXAMS;
-    } catch {
-      return MOCK_EXAMS;
-    }
-  });
-
-  const [selectedExam, setSelectedExam] = useState<Exam>(MOCK_EXAMS[0]);
-
-  const [ongoingAttempt, setOngoingAttempt] = useState<ExamAttempt | null>(() => {
-    try {
-      const saved = localStorage.getItem('quizbot_ongoing');
-      return saved ? JSON.parse(saved) : SAMPLE_INITIAL_ATTEMPT;
-    } catch {
-      return SAMPLE_INITIAL_ATTEMPT;
-    }
-  });
-
-  const [pastResults, setPastResults] = useState<ExamAttempt[]>(() => {
-    try {
-      const saved = localStorage.getItem('quizbot_past_results');
-      return saved ? JSON.parse(saved) : SAMPLE_PAST_RESULTS;
-    } catch {
-      return SAMPLE_PAST_RESULTS;
-    }
-  });
-
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [inTelegram, setInTelegram] = useState(false);
+  const [profile, setProfile] = useState<UserProfile>(GUEST_PROFILE);
+  const [availableExams, setAvailableExams] = useState<Exam[]>([]);
+  const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
+  const [ongoingAttempt, setOngoingAttempt] = useState<ExamAttempt | null>(null);
+  const [ongoingSummary, setOngoingSummary] = useState<OngoingSummary | null>(null);
+  const [pastResults, setPastResults] = useState<ExamAttempt[]>([]);
   const [selectedResultAttempt, setSelectedResultAttempt] = useState<ExamAttempt | null>(null);
-
+  const [reviewQuestions, setReviewQuestions] = useState<Question[]>([]);
   const [currentTab, setCurrentTab] = useState<string>('home');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Sync profile to localStorage
-  useEffect(() => {
-    localStorage.setItem('quizbot_profile', JSON.stringify(profile));
-  }, [profile]);
-
-  // Save attempts to localStorage
-  useEffect(() => {
-    if (ongoingAttempt) {
-      localStorage.setItem('quizbot_ongoing', JSON.stringify(ongoingAttempt));
+  const refreshResults = useCallback(async () => {
+    try {
+      const { results } = await webappApi.results();
+      if (results?.length) setPastResults(results.map(mapResult));
+      else setPastResults([]);
+    } catch {
+      /* no results yet */
     }
-  }, [ongoingAttempt]);
+  }, []);
+
+  const refreshExams = useCallback(async () => {
+    const { exams } = await webappApi.exams();
+    setAvailableExams((exams || []).map(mapExam));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const tg = isTelegramWebApp();
+      setInTelegram(tg);
+      if (!tg) {
+        if (!cancelled) {
+          setIsLoading(false);
+          setLoadError(null);
+        }
+        return;
+      }
       try {
+        const session = await webappApi.session();
+        if (cancelled) return;
         const tgUser = getTelegramUser();
-        if (tgUser?.id) {
-          const session = await webappApi.session();
-          if (!cancelled && session.student) {
-            setProfile((p) => ({
-              ...p,
-              name: session.student!.name || p.name,
-              studentId: session.student!.studentId || p.studentId,
-              classLevel: session.student!.className || p.classLevel,
-              telegramAccount: session.user.username
-                ? `@${session.user.username}`
-                : p.telegramAccount,
-            }));
-          }
-          const { exams } = await webappApi.exams();
-          if (!cancelled && exams?.length) {
-            // Map API exams into UI Exam shape (questions loaded on start)
-            setAvailableExams(
-              exams.map((e: any) => ({
-                id: e.id,
-                title: e.title,
-                subject: e.subject || 'General',
-                classLevel: e.className || '',
-                durationMinutes: e.durationMinutes || 60,
-                totalMarks: e.totalMarks || 0,
-                totalQuestions: e.totalQuestions || 0,
-                startDate: e.startDate,
-                status: e.status,
-                questions: [],
-              })) as any
-            );
-          }
+        const displayName =
+          session.student?.name ||
+          [session.user?.firstName, session.user?.lastName].filter(Boolean).join(' ') ||
+          tgUser?.first_name ||
+          'Student';
+        setProfile((p) => ({
+          ...p,
+          name: displayName,
+          studentId: session.student?.studentId || (tgUser?.id ? `TG-${tgUser.id}` : ''),
+          classLevel: session.student?.className || '',
+          telegramAccount: session.user?.username
+            ? `@${session.user.username}`
+            : tgUser?.username
+              ? `@${tgUser.username}`
+              : '',
+        }));
+        if (session.ongoing) setOngoingSummary(session.ongoing);
+        await refreshExams();
+        await refreshResults();
+
+        // Deep-link: /?a=attemptId from Telegram review button
+        const params = new URLSearchParams(window.location.search);
+        const reviewAttemptId = params.get('a');
+        if (reviewAttemptId) {
           try {
-            const { results } = await webappApi.results();
-            if (!cancelled && results?.length) {
-              setPastResults(results as any);
+            const data = await webappApi.review(reviewAttemptId);
+            if (!cancelled) {
+              setReviewQuestions(
+                data.questions.map((q) => ({
+                  id: q.id,
+                  question: q.question,
+                  options: q.options || [],
+                  marks: q.marks ?? 1,
+                  negativeMarks: q.negativeMarks ?? 0,
+                  subject: q.subject,
+                  imageFileId: q.imageFileId,
+                  imageUrl: q.imageUrl,
+                  explanation: q.explanation,
+                  selectedIndex: q.selectedIndex,
+                  correctIndex: q.correctIndex,
+                  status: q.status,
+                }))
+              );
+              setSelectedResultAttempt(mapResult({ ...data.attempt, examTitle: data.exam.title }));
+              setSelectedExam({
+                id: data.exam.id,
+                title: data.exam.title,
+                subject: data.exam.subject,
+                className: '',
+                totalQuestions: data.questions.length,
+                durationMinutes: 0,
+                totalMarks: data.attempt.maxScore || 0,
+                status: 'RESULTS_PUBLISHED',
+                questions: data.questions as Question[],
+              });
+              setCurrentTab('answers');
             }
           } catch {
-            /* no results yet */
+            /* ignore deep link failures */
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn('[webapp] session load', err);
+        if (!cancelled) {
+          setLoadError(err?.message || 'Could not connect to Quiz Bot server');
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -152,90 +241,132 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshExams, refreshResults]);
 
-  // Handle launching an exam (regular scored or practice)
-  const handleStartExam = (exam: Exam, isPractice: boolean = false) => {
-    setSelectedExam(exam);
-    const newAttempt: ExamAttempt = {
-      examId: exam.id,
-      examTitle: exam.title,
-      classLevel: exam.classLevel,
-      answers: Array(exam.questions.length).fill(null),
-      marked: Array(exam.questions.length).fill(false),
-      visited: Array(exam.questions.length).fill(false),
-      eliminated: {},
-      secondsLeft: exam.durationMinutes * 60,
-      totalDurationSeconds: exam.durationMinutes * 60,
-      timeSpentSeconds: 0,
-      startedAt: new Date().toISOString(),
-      isSubmitted: false,
-      isPractice: isPractice
-    };
-    newAttempt.visited[0] = true;
-    setOngoingAttempt(newAttempt);
-    setCurrentTab('live');
+  const handleStartExam = async (exam: Exam, forceNew = false) => {
+    setActionError(null);
+    setBusy(true);
+    try {
+      const data = await webappApi.startExam(exam.id, forceNew);
+      const mapped = mapAttemptFromStart(data.attempt, data.exam, data.questions, data.secondsLeft);
+      setSelectedExam({
+        ...mapExam(data.exam),
+        questions: mapped.questions,
+      });
+      setOngoingAttempt(mapped);
+      setOngoingSummary(null);
+      setCurrentTab('live');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to start exam');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  // Resume ongoing exam
-  const handleResumeOngoing = () => {
-    if (!ongoingAttempt) return;
-    const targetExam = availableExams.find(e => e.id === ongoingAttempt.examId) || availableExams[0];
-    setSelectedExam(targetExam);
-    setCurrentTab('live');
+  const handleResumeOngoing = async () => {
+    const examId = ongoingAttempt?.examId || ongoingSummary?.examId;
+    if (!examId) return;
+    const exam =
+      availableExams.find((e) => e.id === examId) ||
+      ({
+        id: examId,
+        title: ongoingSummary?.examTitle || ongoingAttempt?.examTitle || 'Exam',
+        subject: '',
+        className: '',
+        totalQuestions: ongoingSummary?.totalQuestions || 0,
+        durationMinutes: 60,
+        totalMarks: 0,
+        status: 'LIVE',
+      } as Exam);
+    await handleStartExam(exam, false);
   };
 
-  // Final submit exam
-  const handleFinalSubmit = () => {
+  const handleFinalSubmit = async () => {
     if (!ongoingAttempt) return;
-    const targetExam = availableExams.find(e => e.id === ongoingAttempt.examId) || selectedExam;
-    const questions = targetExam.questions;
-
-    let correct = 0;
-    let wrong = 0;
-    let skipped = 0;
-
-    ongoingAttempt.answers.forEach((ans, idx) => {
-      const q = questions[idx];
-      if (!q) return;
-      if (ans === null) {
-        skipped++;
-      } else if (ans === q.a) {
-        correct++;
-      } else {
-        wrong++;
+    setActionError(null);
+    setBusy(true);
+    try {
+      const { attempt } = await webappApi.submit(ongoingAttempt.id);
+      const completed = mapResult({
+        ...attempt,
+        examTitle: ongoingAttempt.examTitle,
+      });
+      setPastResults((prev) => [completed, ...prev.filter((p) => p.id !== completed.id)]);
+      setSelectedResultAttempt(completed);
+      setOngoingAttempt(null);
+      setOngoingSummary(null);
+      setCurrentTab('results');
+      try {
+        await refreshResults();
+      } catch {
+        /* */
       }
-    });
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to submit exam');
+    } finally {
+      setBusy(false);
+    }
+  };
 
-    const totalAttempted = correct + wrong;
-    const accuracy = totalAttempted > 0 ? Math.round((correct / totalAttempted) * 100) : 0;
-    const score = correct * 4 - wrong * 1;
-    const maxScore = questions.length * 4;
+  const handleReviewAnswers = async (attempt: ExamAttempt) => {
+    setActionError(null);
+    setBusy(true);
+    try {
+      const data = await webappApi.review(attempt.id);
+      setReviewQuestions(
+        data.questions.map((q) => ({
+          id: q.id,
+          question: q.question,
+          options: q.options || [],
+          marks: q.marks ?? 1,
+          negativeMarks: q.negativeMarks ?? 0,
+          subject: q.subject,
+          imageFileId: q.imageFileId,
+          imageUrl: q.imageUrl,
+          explanation: q.explanation,
+          selectedIndex: q.selectedIndex,
+          correctIndex: q.correctIndex,
+          status: q.status,
+        }))
+      );
+      setSelectedResultAttempt(mapResult({ ...data.attempt, examTitle: data.exam.title }));
+      setSelectedExam({
+        id: data.exam.id,
+        title: data.exam.title,
+        subject: data.exam.subject,
+        className: '',
+        totalQuestions: data.questions.length,
+        durationMinutes: 0,
+        totalMarks: data.attempt.maxScore || 0,
+        status: 'RESULTS_PUBLISHED',
+        questions: data.questions as Question[],
+      });
+      setCurrentTab('answers');
+    } catch (err: any) {
+      setActionError(err?.message || 'Results not available');
+    } finally {
+      setBusy(false);
+    }
+  };
 
-    const completedAttempt: ExamAttempt = {
-      ...ongoingAttempt,
-      isSubmitted: true,
-      completedAt: new Date().toISOString(),
-      score,
-      maxScore,
-      correctCount: correct,
-      wrongCount: wrong,
-      skippedCount: skipped,
-      accuracy,
-      rank: accuracy >= 90 ? 4 : accuracy >= 70 ? 24 : 45,
-      totalParticipants: 138
-    };
-
-    setPastResults(prev => [completedAttempt, ...prev.filter(p => p.examId !== completedAttempt.examId)]);
-    setSelectedResultAttempt(completedAttempt);
-    setOngoingAttempt(null);
-    localStorage.removeItem('quizbot_ongoing');
-    setCurrentTab('results');
+  const handleUpdateName = async (newName: string) => {
+    setProfile((p) => ({ ...p, name: newName }));
+    if (!inTelegram) return;
+    try {
+      const { student } = await webappApi.updateProfile(newName);
+      setProfile((p) => ({
+        ...p,
+        name: student.name,
+        studentId: student.studentId || p.studentId,
+        classLevel: student.className || p.classLevel,
+      }));
+    } catch {
+      /* local name still updated */
+    }
   };
 
   const isLiveExamDesk = currentTab === 'live';
 
-  // Loading Screen
   if (isLoading) {
     return (
       <div className="min-h-screen liquid-canvas-bg flex items-center justify-center p-4 relative overflow-hidden">
@@ -246,9 +377,7 @@ export default function App() {
             <GraduationCap className="w-8 h-8" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-slate-900">
-              Quiz Bot by Pusparghya
-            </h1>
+            <h1 className="text-lg font-bold text-slate-900">Quiz Bot by Pusparghya</h1>
             <p className="text-xs text-slate-500 mt-1">Opening your examination desk…</p>
           </div>
         </div>
@@ -258,17 +387,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen liquid-canvas-bg text-slate-900 flex flex-col relative overflow-x-hidden">
-      {/* Background Liquid Light Orbs */}
       <div className="liquid-orb liquid-orb-1" />
       <div className="liquid-orb liquid-orb-2" />
       <div className="liquid-orb liquid-orb-3" />
       <div className="liquid-orb liquid-orb-4" />
 
-      {/* Top Application Header */}
       {!isLiveExamDesk && (
         <header className="sticky top-0 z-30 glass-header px-4 py-3">
           <div className="max-w-4xl mx-auto flex items-center justify-between">
-            {/* Brand Logo & Title */}
             <div
               onClick={() => setCurrentTab('home')}
               className="flex items-center gap-3 cursor-pointer select-none group"
@@ -280,36 +406,63 @@ export default function App() {
                 <h1 className="text-sm md:text-base font-bold text-slate-900 leading-tight">
                   Quiz Bot by Pusparghya
                 </h1>
-                <p className="text-[11px] text-slate-500">
-                  Assigned Examinations & Leaderboards
-                </p>
+                <p className="text-[11px] text-slate-500">Assigned Examinations & Leaderboards</p>
               </div>
             </div>
-
-            {/* Desktop Navigation */}
             <DesktopNavigation
               currentTab={currentTab}
-              onSelectTab={tab => {
-                if (tab === 'results') {
-                  setSelectedResultAttempt(null);
-                }
+              onSelectTab={(tab) => {
+                if (tab === 'results') setSelectedResultAttempt(null);
                 setCurrentTab(tab);
               }}
-              hasOngoing={!!ongoingAttempt && !ongoingAttempt.isSubmitted}
+              hasOngoing={!!(ongoingAttempt && !ongoingAttempt.isSubmitted) || !!ongoingSummary}
             />
           </div>
         </header>
       )}
 
-      {/* Main Content Area */}
       <main className="flex-1 w-full max-w-4xl mx-auto p-4 md:p-6 relative z-10">
+        {!inTelegram && (
+          <div className="mb-4 glass-card rounded-2xl p-4 border border-amber-200/60 flex gap-3 items-start">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-slate-900">Open from Telegram</p>
+              <p className="text-xs text-slate-600 mt-0.5">
+                This Mini App needs Telegram login. Open Quiz Bot in Telegram and tap{' '}
+                <strong>Open App</strong> to see your real exams from the database.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {loadError && inTelegram && (
+          <div className="mb-4 glass-card rounded-2xl p-4 border border-rose-200/60 flex gap-3 items-start">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-slate-900">Could not load data</p>
+              <p className="text-xs text-slate-600 mt-0.5">{loadError}</p>
+            </div>
+          </div>
+        )}
+
+        {actionError && (
+          <div className="mb-4 glass-card rounded-2xl p-3 border border-rose-200/60 text-xs text-rose-700 font-semibold">
+            {actionError}
+          </div>
+        )}
+
+        {busy && (
+          <div className="mb-3 text-xs font-semibold text-blue-600 animate-pulse">Working…</div>
+        )}
+
         {currentTab === 'home' && (
           <HomeScreen
             profile={profile}
             ongoingAttempt={ongoingAttempt}
+            ongoingSummary={ongoingSummary}
             availableExams={availableExams}
             onNavigate={setCurrentTab}
-            onSelectExam={exam => {
+            onSelectExam={(exam) => {
               setSelectedExam(exam);
               setCurrentTab('details');
             }}
@@ -322,42 +475,47 @@ export default function App() {
             exams={availableExams}
             pastResults={pastResults}
             ongoingAttempt={ongoingAttempt}
-            onSelectExam={exam => {
+            ongoingSummary={ongoingSummary}
+            onSelectExam={(exam) => {
               setSelectedExam(exam);
               setCurrentTab('details');
             }}
-            onStartExamDirect={handleStartExam}
+            onStartExamDirect={(exam) => handleStartExam(exam, true)}
             onResumeOngoing={handleResumeOngoing}
           />
         )}
 
-        {currentTab === 'details' && (
+        {currentTab === 'details' && selectedExam && (
           <ExamDetailsScreen
             exam={selectedExam}
             onBack={() => setCurrentTab('exams')}
-            onConfirmStart={handleStartExam}
+            onConfirmStart={(exam) => handleStartExam(exam, false)}
           />
         )}
 
         {currentTab === 'live' && ongoingAttempt && (
           <LiveExamScreen
-            exam={selectedExam}
+            exam={selectedExam || ({ id: ongoingAttempt.examId, title: ongoingAttempt.examTitle } as Exam)}
             attempt={ongoingAttempt}
             soundEnabled={profile.soundEnabled}
             onUpdateAttempt={setOngoingAttempt}
             onOpenReview={() => setCurrentTab('review')}
             onLeaveExam={() => setCurrentTab('exams')}
-            onBookmarkQuestion={() => {}}
-            isBookmarked={() => false}
+            onTimeUp={handleFinalSubmit}
           />
         )}
 
         {currentTab === 'review' && ongoingAttempt && (
           <ExamReviewScreen
-            exam={selectedExam}
+            exam={selectedExam || ({ id: ongoingAttempt.examId, title: ongoingAttempt.examTitle } as Exam)}
             attempt={ongoingAttempt}
             onReturnToLive={() => setCurrentTab('live')}
-            onJumpToQuestion={() => setCurrentTab('live')}
+            onJumpToQuestion={(idx) => {
+              setOngoingAttempt((a) =>
+                a ? { ...a, currentQuestionIndex: idx } : a
+              );
+              setCurrentTab('live');
+            }}
             onFinalSubmit={handleFinalSubmit}
           />
         )}
@@ -368,26 +526,17 @@ export default function App() {
             exams={availableExams}
             selectedAttempt={selectedResultAttempt}
             onSelectAttempt={setSelectedResultAttempt}
-            onReviewAnswers={(attempt, exam) => {
-              setSelectedResultAttempt(attempt);
-              setSelectedExam(exam);
-              setCurrentTab('answers');
-            }}
-            onReattempt={handleStartExam}
+            onReviewAnswers={handleReviewAnswers}
+            onReattempt={(exam) => handleStartExam(exam, true)}
             onGoExams={() => setCurrentTab('exams')}
           />
         )}
 
         {currentTab === 'answers' && (
           <AnswersScreen
-            exam={
-              (selectedResultAttempt && availableExams.find(e => e.id === selectedResultAttempt.examId)) ||
-              selectedExam
-            }
-            attempt={selectedResultAttempt || pastResults[0] || SAMPLE_INITIAL_ATTEMPT}
+            examTitle={selectedResultAttempt?.examTitle || selectedExam?.title || 'Exam'}
+            questions={reviewQuestions}
             onBackToResults={() => setCurrentTab('results')}
-            onBookmarkQuestion={() => {}}
-            isBookmarked={() => false}
           />
         )}
 
@@ -396,7 +545,7 @@ export default function App() {
             pastResults={pastResults}
             exams={availableExams}
             currentUserName={profile.name}
-            onSelectExamResult={attempt => {
+            onSelectExamResult={(attempt) => {
               setSelectedResultAttempt(attempt);
               setCurrentTab('results');
             }}
@@ -404,26 +553,18 @@ export default function App() {
         )}
 
         {currentTab === 'profile' && (
-          <ProfileScreen
-            profile={profile}
-            onUpdateName={newName => {
-              setProfile(prev => ({ ...prev, name: newName }));
-            }}
-          />
+          <ProfileScreen profile={profile} onUpdateName={handleUpdateName} />
         )}
       </main>
 
-      {/* Mobile Bottom Dock (Hidden on active live exam desk) */}
       {!isLiveExamDesk && (
         <MobileNavigation
           currentTab={currentTab}
-          onSelectTab={tab => {
-            if (tab === 'results') {
-              setSelectedResultAttempt(null);
-            }
+          onSelectTab={(tab) => {
+            if (tab === 'results') setSelectedResultAttempt(null);
             setCurrentTab(tab);
           }}
-          hasOngoing={!!ongoingAttempt && !ongoingAttempt.isSubmitted}
+          hasOngoing={!!(ongoingAttempt && !ongoingAttempt.isSubmitted) || !!ongoingSummary}
         />
       )}
     </div>

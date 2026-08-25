@@ -1,6 +1,8 @@
-/** Telegram Mini App API client — talks to Quiz Bot backend */
+/** Telegram Mini App API client — talks to Quiz Bot Railway backend */
 
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const DEFAULT_API = 'https://quiz-bot-by-pusparghya-production.up.railway.app';
+
+export const API_BASE = (import.meta.env.VITE_API_URL || DEFAULT_API).replace(/\/$/, '');
 
 export function getTelegramInitData(): string {
   try {
@@ -11,13 +13,31 @@ export function getTelegramInitData(): string {
   }
 }
 
-export function getTelegramUser(): { id?: number; first_name?: string; username?: string } | null {
+export function getTelegramUser(): {
+  id?: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+} | null {
   try {
     const w = window as any;
     return w?.Telegram?.WebApp?.initDataUnsafe?.user || null;
   } catch {
     return null;
   }
+}
+
+export function isTelegramWebApp(): boolean {
+  return !!getTelegramInitData() || !!getTelegramUser()?.id;
+}
+
+export function mediaUrl(pathOrFileId: string | null | undefined): string | null {
+  if (!pathOrFileId) return null;
+  if (pathOrFileId.startsWith('http://') || pathOrFileId.startsWith('https://')) {
+    return pathOrFileId;
+  }
+  if (pathOrFileId.startsWith('/')) return `${API_BASE}${pathOrFileId}`;
+  return `${API_BASE}/api/media/telegram/${encodeURIComponent(pathOrFileId)}`;
 }
 
 async function api<T>(path: string, body?: Record<string, unknown>): Promise<T> {
@@ -28,7 +48,7 @@ async function api<T>(path: string, body?: Record<string, unknown>): Promise<T> 
     body: JSON.stringify({ initData, ...(body || {}) }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw new Error((data as any).error || `Request failed (${res.status})`);
   return data as T;
 }
 
@@ -43,6 +63,8 @@ export type ApiExamSummary = {
   startDate: string;
   status: string;
   resultVisibility: string;
+  leaderboardVisibility?: string;
+  negativeMarking?: number;
 };
 
 export type ApiQuestion = {
@@ -51,10 +73,13 @@ export type ApiQuestion = {
   options: string[];
   marks: number;
   negativeMarks: number;
+  subject?: string;
   imageFileId?: string | null;
-  /** Only present after submit / review */
-  answer?: number | null;
+  imageUrl?: string | null;
   explanation?: string;
+  selectedIndex?: number | null;
+  correctIndex?: number | null;
+  status?: 'correct' | 'wrong' | 'unattempted';
 };
 
 export type ApiAttempt = {
@@ -72,15 +97,17 @@ export type ApiAttempt = {
   timeTakenSeconds?: number;
   expiresAt?: string;
   startedAt?: string;
+  submittedAt?: string | null;
   isOfficial?: boolean;
   attemptNumber?: number;
   rank?: number | null;
+  studentName?: string;
 };
 
 export const webappApi = {
   session: () =>
     api<{
-      user: { id: number; firstName?: string; username?: string };
+      user: { id: number; firstName?: string; lastName?: string; username?: string };
       student: {
         id: string;
         name: string;
@@ -89,18 +116,41 @@ export const webappApi = {
         telegramUserId: number;
         status: string;
       } | null;
+      ongoing: {
+        attemptId: string;
+        examId: string;
+        examTitle: string;
+        secondsLeft: number;
+        currentQuestionIndex: number;
+        answeredCount: number;
+        totalQuestions: number;
+      } | null;
     }>('/api/webapp/session'),
+
+  updateProfile: (name: string) =>
+    api<{
+      student: {
+        id: string;
+        name: string;
+        studentId: string;
+        className: string;
+        telegramUserId: number;
+        status: string;
+      };
+    }>('/api/webapp/profile', { name }),
 
   exams: () => api<{ exams: ApiExamSummary[] }>('/api/webapp/exams'),
 
   examDetail: (examId: string) =>
-    api<{ exam: ApiExamSummary & { negativeMarking: number } }>('/api/webapp/exam', { examId }),
+    api<{ exam: ApiExamSummary }>('/api/webapp/exam', { examId }),
 
   startExam: (examId: string, forceNew?: boolean) =>
-    api<{ attempt: ApiAttempt; exam: ApiExamSummary; questions: ApiQuestion[]; secondsLeft: number }>(
-      '/api/webapp/start',
-      { examId, forceNew: !!forceNew }
-    ),
+    api<{
+      attempt: ApiAttempt;
+      exam: ApiExamSummary;
+      questions: ApiQuestion[];
+      secondsLeft: number;
+    }>('/api/webapp/start', { examId, forceNew: !!forceNew }),
 
   saveAnswer: (attemptId: string, questionId: string, optionIndex: number | null) =>
     api<{ ok: boolean }>('/api/webapp/answer', { attemptId, questionId, optionIndex }),
@@ -111,24 +161,34 @@ export const webappApi = {
   submit: (attemptId: string) =>
     api<{ attempt: ApiAttempt }>('/api/webapp/submit', { attemptId }),
 
-  results: () => api<{ results: Array<ApiAttempt & { examTitle: string }> }>('/api/webapp/results'),
+  results: () =>
+    api<{
+      results: Array<
+        ApiAttempt & {
+          examTitle: string;
+          resultVisibility?: string;
+        }
+      >;
+    }>('/api/webapp/results'),
 
   review: (attemptId: string) =>
     api<{
       exam: { id: string; title: string; subject: string };
       attempt: ApiAttempt;
-      questions: Array<
-        ApiQuestion & {
-          selectedIndex: number | null;
-          correctIndex: number | null;
-          status: 'correct' | 'wrong' | 'unattempted';
-        }
-      >;
+      questions: ApiQuestion[];
     }>('/api/webapp/review', { attemptId }),
 
   leaderboard: (examId: string) =>
     api<{
       exam: { id: string; title: string };
-      rows: Array<{ rank: number; name: string; score: number; percentage: number; isMe: boolean }>;
+      rows: Array<{
+        rank: number;
+        name: string;
+        score: number;
+        maxScore?: number;
+        percentage: number;
+        timeTakenSeconds?: number;
+        isMe: boolean;
+      }>;
     }>('/api/webapp/leaderboard', { examId }),
 };

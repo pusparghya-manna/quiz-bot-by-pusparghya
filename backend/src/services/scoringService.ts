@@ -40,7 +40,8 @@ export function calculateAttemptScore(
 }
 
 export async function updateExamRanks(examId: string) {
-  const attempts = store.getAttempts(examId).filter(
+  const all = (await Promise.resolve(store.getAttempts(examId))) as any[];
+  const attempts = all.filter(
     (a) =>
       (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED') && a.isOfficial !== false
   );
@@ -53,7 +54,7 @@ export async function updateExamRanks(examId: string) {
     return aTime - bTime;
   });
 
-  for (const att of store.getAttempts(examId)) {
+  for (const att of all) {
     if (att.isOfficial === false) {
       att.rank = undefined;
       await attemptRepository.updateRank(att.id, null);

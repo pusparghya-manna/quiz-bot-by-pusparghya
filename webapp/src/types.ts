@@ -1,61 +1,74 @@
-export type Subject = 'Physics' | 'Chemistry' | 'Biology' | 'Mathematics' | 'General Science';
+/** UI types mapped from the Railway quiz-bot backend (no mock fields). */
 
-export type QuestionType = 'Single correct' | 'Diagram question' | 'Assertion & Reason' | 'Calculation';
+export type ExamStatus =
+  | 'DRAFT'
+  | 'SCHEDULED'
+  | 'LIVE'
+  | 'ENDED'
+  | 'RESULTS_PUBLISHED'
+  | string;
 
 export interface Question {
   id: string;
-  s: Subject;
-  type: QuestionType;
-  t: string; // Question text
-  o: string[]; // Options
-  a: number; // Correct option index (0-3)
-  e: string; // Explanation
-  diagram?: boolean;
-  diagramType?: 'prism' | 'circuit' | 'cell' | 'molecule' | 'parabola' | 'lens';
-  difficulty?: 'Easy' | 'Medium' | 'Hard';
-  marks?: number;
-  negativeMarks?: number;
+  question: string;
+  options: string[];
+  marks: number;
+  negativeMarks: number;
+  subject?: string;
+  imageFileId?: string | null;
+  imageUrl?: string | null;
+  explanation?: string;
+  selectedIndex?: number | null;
+  correctIndex?: number | null;
+  status?: 'correct' | 'wrong' | 'unattempted';
 }
 
 export interface Exam {
   id: string;
   title: string;
-  subtitle: string;
-  classLevel: string;
-  subjects: Subject[];
-  durationMinutes: number;
+  subject: string;
+  className: string;
   totalQuestions: number;
+  durationMinutes: number;
   totalMarks: number;
-  status: 'available' | 'ongoing' | 'past' | 'scheduled';
-  startTime?: string;
-  expiryDate?: string;
-  questions: Question[];
-  instructions?: string[];
+  startDate?: string;
+  status: ExamStatus;
+  resultVisibility?: string;
+  leaderboardVisibility?: string;
+  negativeMarking?: number;
+  questions?: Question[];
 }
 
 export interface ExamAttempt {
+  id: string;
   examId: string;
   examTitle: string;
-  classLevel: string;
-  answers: (number | null)[];
-  marked: boolean[];
-  visited: boolean[];
-  eliminated: Record<number, number[]>; // questionIndex -> array of eliminated option indexes
+  className?: string;
+  answers: Record<string, number>;
+  marked: Record<string, boolean>;
+  visited: Record<string, boolean>;
   secondsLeft: number;
   totalDurationSeconds: number;
   timeSpentSeconds: number;
   startedAt: string;
+  submittedAt?: string | null;
   completedAt?: string;
   isSubmitted: boolean;
   isPractice?: boolean;
+  isOfficial?: boolean;
+  attemptNumber?: number;
+  currentQuestionIndex?: number;
   score?: number;
   maxScore?: number;
+  percentage?: number;
   correctCount?: number;
   wrongCount?: number;
   skippedCount?: number;
   accuracy?: number;
-  rank?: number;
-  totalParticipants?: number;
+  rank?: number | null;
+  status?: string;
+  questions?: Question[];
+  resultVisibility?: string;
 }
 
 export interface UserProfile {
@@ -71,9 +84,22 @@ export interface UserProfile {
   fontSize: 'normal' | 'large';
 }
 
-export interface BookmarkItem {
-  id: string;
-  question: Question;
+export interface LeaderboardRow {
+  rank: number;
+  name: string;
+  score: number;
+  maxScore?: number;
+  percentage: number;
+  timeTakenSeconds?: number;
+  isMe: boolean;
+}
+
+export interface OngoingSummary {
+  attemptId: string;
+  examId: string;
   examTitle: string;
-  savedAt: string;
+  secondsLeft: number;
+  currentQuestionIndex: number;
+  answeredCount: number;
+  totalQuestions: number;
 }
