@@ -425,9 +425,16 @@ export default function App() {
               onClick={() => setCurrentTab('home')}
               className="flex items-center gap-3 cursor-pointer select-none group"
             >
-              <div className="w-10 h-10 rounded-xl glass-btn-primary text-white flex items-center justify-center shadow-md shadow-blue-500/20 group-hover:scale-105 transition">
-                <GraduationCap className="w-5 h-5" />
-              </div>
+              <img
+                src={`${import.meta.env.BASE_URL}exam-bot-logo.png`}
+                alt="Exam Bot logo"
+                className="w-10 h-10 rounded-xl object-cover bg-white shadow-md shadow-blue-500/20"
+                width="40"
+                height="40"
+                loading="eager"
+                decoding="async"
+                draggable="false"
+              />
               <div>
                 <h1 className="text-sm md:text-base font-bold text-slate-900 leading-tight">
                   Quiz Bot by Pusparghya
