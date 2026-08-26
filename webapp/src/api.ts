@@ -13,7 +13,14 @@ export const API_BASE = (
 
 export function getTelegramInitData(): string {
   try {
-    return String((window as any)?.Telegram?.WebApp?.initData || '');
+    const sdkInitData = String((window as any)?.Telegram?.WebApp?.initData || '');
+    if (sdkInitData) return sdkInitData;
+    // Telegram clients can expose the signed payload in either the query string
+    // or the URL fragment. The fragment form is common for Mini App launches.
+    // This fallback also covers clients where the SDK initializes after React.
+    const fromSearch = new URLSearchParams(window.location.search).get('tgWebAppData');
+    const fromHash = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('tgWebAppData');
+    return fromSearch || fromHash || '';
   } catch {
     return '';
   }
@@ -26,10 +33,22 @@ export function getTelegramUser(): {
   username?: string;
 } | null {
   try {
-    return (window as any)?.Telegram?.WebApp?.initDataUnsafe?.user || null;
+    const sdkUser = (window as any)?.Telegram?.WebApp?.initDataUnsafe?.user;
+    if (sdkUser) return sdkUser;
+    const rawUser = new URLSearchParams(getTelegramInitData()).get('user');
+    return rawUser ? JSON.parse(rawUser) : null;
   } catch {
     return null;
   }
+}
+
+export async function waitForTelegramInitData(timeoutMs = 1800): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (getTelegramInitData()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  return Boolean(getTelegramInitData());
 }
 
 /** Requires signed Telegram initData (normal browsers are blocked). */

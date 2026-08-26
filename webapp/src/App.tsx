@@ -15,7 +15,7 @@ import { LoadingSkeleton } from './components/LoadingSkeleton';
 import {
   webappApi,
   getTelegramUser,
-  isTelegramWebApp,
+  waitForTelegramInitData,
   ApiExamSummary,
   ApiAttempt,
   ApiQuestion,
@@ -168,7 +168,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const tg = isTelegramWebApp();
+      const tg = await waitForTelegramInitData();
       setInTelegram(tg);
       if (!tg) {
         if (!cancelled) setIsLoading(false);
