@@ -189,6 +189,8 @@ export interface SimulatorResponse {
    * Only applied on sendMessage (Telegram cannot attach it via editMessageText).
    */
   replyKeyboard?: ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReplyMarkup;
+  /** Remove a persistent reply keyboard before sending this response. */
+  clearReplyKeyboard?: boolean;
   messageId?: number;
   /** Delete this message id before sending (photo↔text transition) */
   deletePreviousMessageId?: number;

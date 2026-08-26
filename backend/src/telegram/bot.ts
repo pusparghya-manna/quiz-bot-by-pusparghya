@@ -101,7 +101,7 @@ const pendingNameUsers = new Set<number>();
 
 
 function mainNavReplyKeyboard() {
-  return kbMarkup(mainNavRows());
+  return { remove_keyboard: true } as const;
 }
 
 function matchMainNav(text: string): string | null {
@@ -288,7 +288,10 @@ function renderMainMenu(student: Student): SimulatorResponse {
   return {
     chatId: student.telegramUserId!,
     text,
-    replyKeyboard: mainNavReplyKeyboard(),
+    replyMarkup: {
+      inline_keyboard: [[{ text: LABELS.openApp, web_app: { url: webAppBaseUrl() } }]],
+    },
+    clearReplyKeyboard: true,
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -316,6 +319,7 @@ function examStartPrompt(examId: string, chatId: number): SimulatorResponse {
     replyMarkup: {
       inline_keyboard: [[{ text: '▶️ Start Exam', web_app: { url: miniAppExamUrl(exam.id) } }]],
     },
+    clearReplyKeyboard: true,
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -2107,9 +2111,27 @@ export async function sendTelegramResponse(respIn: SimulatorResponse): Promise<v
   const token = process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken;
   if (!token) return;
 
+  const chatId = resp.chatId;
+
+  if (resp.clearReplyKeyboard) {
+    // Reply keyboards persist at chat level. Remove the old keyboard first so
+    // users cannot relaunch the unauthenticated keyboard-button Web App.
+    const clearResult = await sendSafeTelegramMessage(token, chatId, '⁠', {
+      replyKeyboard: { remove_keyboard: true },
+    });
+    const carrierId = clearResult.messageIds?.[0];
+    if (carrierId) {
+      await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: carrierId }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {});
+    }
+  }
+
   const hasReplyKb = Boolean(resp.replyKeyboard);
   const hasInline = Boolean(resp.replyMarkup && (resp.replyMarkup as any).inline_keyboard);
-  const chatId = resp.chatId;
 
   const rememberId = (ids?: number[]) => {
     const mid = ids && ids.length ? ids[ids.length - 1] : undefined;
