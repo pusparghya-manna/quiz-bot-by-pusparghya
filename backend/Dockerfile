@@ -1,7 +1,23 @@
-# DEPRECATED for monorepo builds.
-# Railway service Root Directory must be the repository root.
-# Use the root Dockerfile (../Dockerfile) which builds API + Mini App at /app.
-# syntax=docker/dockerfile:1
-FROM node:20-bookworm-slim
+# Railway backend image. This Dockerfile is valid when the service Root Directory is /backend.
+# The repository-root Dockerfile remains available for the combined API + Mini App image.
+
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
-RUN echo "Set Railway Root Directory to repo root and dockerfilePath=Dockerfile" && exit 1
+
+COPY package*.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+FROM node:20-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package*.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+COPY --from=builder /app/dist ./dist
+
+EXPOSE 3000
+CMD ["node", "dist/index.js"]
