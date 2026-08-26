@@ -218,6 +218,40 @@
   50% { opacity: 0.42; }
 }
 
+.action-loading-card {
+  animation: actionLoadingLift 220ms ease-out both;
+}
+
+.action-loading-logo {
+  animation: actionLoadingPulse 1.4s ease-in-out infinite;
+}
+
+.action-loading-dot {
+  animation: actionLoadingDot 900ms ease-in-out infinite;
+}
+
+@keyframes actionLoadingLift {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes actionLoadingPulse {
+  0%, 100% { transform: scale(1); opacity: 0.92; }
+  50% { transform: scale(1.035); opacity: 1; }
+}
+
+@keyframes actionLoadingDot {
+  0%, 100% { opacity: 0.35; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-loading-card,
+  .action-loading-logo,
+  .action-loading-dot,
+  .skeleton-bar { animation: none; }
+}
+
 /* Compact surfaces and type scale. */
 .compact-ui .rounded-3xl { border-radius: 1.15rem; }
 .compact-ui .rounded-2xl { border-radius: 0.9rem; }

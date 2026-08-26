@@ -74,3 +74,42 @@ export const LoadingSkeleton: React.FC = () => (
     </div>
   </div>
 );
+
+export type ActionLoadingKind = 'start' | 'submit';
+
+export const ActionLoadingSkeleton: React.FC<{ kind: ActionLoadingKind }> = ({ kind }) => {
+  const isSubmit = kind === 'submit';
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/20 p-4"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label={isSubmit ? 'Submitting your exam' : 'Starting your exam'}
+    >
+      <div className="action-loading-card glass-card w-full max-w-sm rounded-3xl p-5 text-center shadow-2xl shadow-slate-900/15">
+        <div className="flex justify-center">
+          <div className="action-loading-logo rounded-2xl bg-white p-1 shadow-md shadow-blue-500/15">
+            <Logo />
+          </div>
+        </div>
+        <h2 className="mt-4 text-base font-extrabold text-slate-900">
+          {isSubmit ? 'Submitting your exam' : 'Preparing your exam'}
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          {isSubmit ? 'Saving your answers and calculating your result…' : 'Loading questions and setting up your attempt…'}
+        </p>
+        <div className="mt-5 space-y-2 text-left">
+          <SkeletonBar className="h-3 w-full" />
+          <SkeletonBar className="h-3 w-10/12" />
+          <SkeletonBar className="h-10 w-full rounded-xl" />
+          <SkeletonBar className="h-10 w-11/12 rounded-xl" />
+        </div>
+        <div className="mt-4 flex items-center justify-center gap-2 text-[11px] font-bold text-blue-700">
+          <span className="action-loading-dot h-1.5 w-1.5 rounded-full bg-blue-600" />
+          Please wait
+        </div>
+      </div>
+    </div>
+  );
+};

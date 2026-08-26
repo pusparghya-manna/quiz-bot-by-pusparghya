@@ -11,7 +11,7 @@ import { ResultsScreen } from './components/screens/ResultsScreen';
 import { AnswersScreen } from './components/screens/AnswersScreen';
 import { LeaderboardScreen } from './components/screens/LeaderboardScreen';
 import { ProfileScreen } from './components/screens/ProfileScreen';
-import { LoadingSkeleton } from './components/LoadingSkeleton';
+import { ActionLoadingSkeleton, LoadingSkeleton, type ActionLoadingKind } from './components/LoadingSkeleton';
 import {
   webappApi,
   getTelegramUser,
@@ -152,6 +152,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState('home');
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [actionLoading, setActionLoading] = useState<ActionLoadingKind | null>(null);
 
   const refreshResults = useCallback(async () => {
     const { results } = await webappApi.results();
@@ -269,6 +270,7 @@ export default function App() {
   const handleStartExam = async (exam: Exam, forceNew = false) => {
     setActionError(null);
     setBusy(true);
+    setActionLoading('start');
     try {
       // Prefer fresh detail metadata
       try {
@@ -298,6 +300,7 @@ export default function App() {
       setActionError(err?.message || 'Failed to start exam');
     } finally {
       setBusy(false);
+      setActionLoading(null);
     }
   };
 
@@ -323,6 +326,7 @@ export default function App() {
     if (!ongoingAttempt) return;
     setActionError(null);
     setBusy(true);
+    setActionLoading('submit');
     try {
       const { attempt } = await webappApi.submit(ongoingAttempt.id);
       const completed = mapResult({
@@ -343,6 +347,7 @@ export default function App() {
       setActionError(err?.message || 'Failed to submit exam');
     } finally {
       setBusy(false);
+      setActionLoading(null);
     }
   };
 
@@ -483,7 +488,7 @@ export default function App() {
             {actionError}
           </div>
         )}
-        {busy && (
+        {busy && !actionLoading && (
           <div className="mb-3 text-xs font-semibold text-blue-600 animate-pulse">Working…</div>
         )}
 
@@ -600,6 +605,8 @@ export default function App() {
           <ProfileScreen profile={profile} onUpdateName={handleUpdateName} />
         )}
       </main>
+
+      {actionLoading && <ActionLoadingSkeleton kind={actionLoading} />}
 
       {!isLiveExamDesk && (
         <MobileNavigation
