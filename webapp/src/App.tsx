@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GraduationCap, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import { Exam, ExamAttempt, UserProfile, Question, OngoingSummary } from './types';
 import { DesktopNavigation, MobileNavigation } from './components/Navigation';
 import { HomeScreen } from './components/screens/HomeScreen';
@@ -11,6 +11,7 @@ import { ResultsScreen } from './components/screens/ResultsScreen';
 import { AnswersScreen } from './components/screens/AnswersScreen';
 import { LeaderboardScreen } from './components/screens/LeaderboardScreen';
 import { ProfileScreen } from './components/screens/ProfileScreen';
+import { LoadingSkeleton } from './components/LoadingSkeleton';
 import {
   webappApi,
   getTelegramUser,
@@ -368,21 +369,7 @@ export default function App() {
   };
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen liquid-canvas-bg flex items-center justify-center p-4 relative overflow-hidden">
-        <div className="liquid-orb liquid-orb-1" />
-        <div className="liquid-orb liquid-orb-2" />
-        <div className="text-center space-y-4 relative z-10 glass-card p-8 rounded-3xl">
-          <div className="w-16 h-16 rounded-2xl glass-btn-primary text-white flex items-center justify-center mx-auto shadow-xl shadow-blue-500/20">
-            <GraduationCap className="w-8 h-8" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-slate-900">Quiz Bot by Pusparghya</h1>
-            <p className="text-xs text-slate-500 mt-1">Opening your examination desk…</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
   if (!inTelegram) {
@@ -391,9 +378,16 @@ export default function App() {
         <div className="liquid-orb liquid-orb-1" />
         <div className="liquid-orb liquid-orb-2" />
         <div className="text-center space-y-4 relative z-10 glass-card p-8 rounded-3xl max-w-sm w-full">
-          <div className="w-16 h-16 rounded-2xl glass-btn-primary text-white flex items-center justify-center mx-auto shadow-xl shadow-blue-500/20">
-            <GraduationCap className="w-8 h-8" />
-          </div>
+          <img
+            src={`${import.meta.env.BASE_URL}exam-bot-logo.png`}
+            alt="Exam Bot logo"
+            className="w-16 h-16 rounded-2xl object-cover bg-white mx-auto shadow-lg shadow-blue-500/15"
+            width="64"
+            height="64"
+            loading="eager"
+            decoding="async"
+            draggable="false"
+          />
           <div>
             <h1 className="text-lg font-bold text-slate-900">Telegram login required</h1>
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
@@ -439,11 +433,6 @@ export default function App() {
                 <h1 className="text-sm md:text-base font-bold text-slate-900 leading-tight">
                   Quiz Bot by Pusparghya
                 </h1>
-                <p className="text-[11px] text-slate-500">
-                  {profile.studentId
-                    ? `${profile.studentId}${profile.name ? ` · ${profile.name}` : ''}`
-                    : 'Live student desk'}
-                </p>
               </div>
             </div>
             <DesktopNavigation

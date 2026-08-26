@@ -207,6 +207,17 @@
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15), inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
+/* Lightweight skeleton feedback for initial Telegram/API loading. */
+.skeleton-bar {
+  min-height: 0.75rem;
+  animation: skeletonPulse 1.35s ease-in-out infinite;
+}
+
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 0.42; }
+}
+
 /* Compact surfaces and type scale. */
 .compact-ui .rounded-3xl { border-radius: 1.15rem; }
 .compact-ui .rounded-2xl { border-radius: 0.9rem; }
