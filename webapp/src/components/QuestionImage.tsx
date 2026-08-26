@@ -1,5 +1,5 @@
 import React from "react";
-import { mediaUrl } from "../../api";
+import { mediaUrl } from "../api";
 
 interface Props {
   imageUrl?: string | null;

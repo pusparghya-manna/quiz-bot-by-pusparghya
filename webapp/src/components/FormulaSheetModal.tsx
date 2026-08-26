@@ -16,10 +16,10 @@ export const FormulaSheetModal: React.FC<FormulaSheetModalProps> = ({ isOpen, on
   const categories = ['All', 'Physics', 'Chemistry', 'Mathematics'];
 
   const filtered = FORMULA_CONSTANTS.filter(item => {
-    const matchesCat = activeCategory === 'All' || item.category === activeCategory;
+    const matchesCat = activeCategory === 'All' || item.subject === activeCategory;
     const matchesSearch =
-      item.title.toLowerCase().includes(search.toLowerCase()) ||
-      item.items.some(f => f.toLowerCase().includes(search.toLowerCase()));
+      item.name.toLowerCase().includes(search.toLowerCase()) ||
+      item.formula.toLowerCase().includes(search.toLowerCase());
     return matchesCat && matchesSearch;
   });
 
@@ -89,14 +89,14 @@ export const FormulaSheetModal: React.FC<FormulaSheetModalProps> = ({ isOpen, on
               >
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                    {sec.title}
+                    {sec.name}
                   </h4>
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                    {sec.category}
+                    {sec.subject}
                   </span>
                 </div>
                 <div className="space-y-1.5 font-mono text-xs">
-                  {sec.items.map((formula, fIdx) => (
+                  {[sec.formula].map((formula, fIdx) => (
                     <div
                       key={fIdx}
                       className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 text-slate-800 dark:text-slate-200 font-semibold"
