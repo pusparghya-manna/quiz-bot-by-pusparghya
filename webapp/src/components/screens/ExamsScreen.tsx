@@ -36,7 +36,7 @@ export const ExamsScreen: React.FC<ExamsScreenProps> = ({
     (ongoingAttempt && !ongoingAttempt.isSubmitted) || !!ongoingSummary;
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-4 pb-8">
       <div>
         <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
           Curriculum Assessments
@@ -60,7 +60,7 @@ export const ExamsScreen: React.FC<ExamsScreenProps> = ({
         </button>
       )}
 
-      <section className="space-y-3">
+      <section className="space-y-2">
         <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
           Active exams ({assigned.length})
         </h2>
@@ -70,7 +70,7 @@ export const ExamsScreen: React.FC<ExamsScreenProps> = ({
           </div>
         ) : (
           assigned.map((exam) => (
-            <div key={exam.id} className="glass-card rounded-3xl p-5 shadow-xs">
+            <div key={exam.id} className="glass-card rounded-2xl p-4 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-emerald-50/90 text-emerald-700 border border-emerald-200/80">
                   {exam.status}
@@ -85,7 +85,7 @@ export const ExamsScreen: React.FC<ExamsScreenProps> = ({
               <p className="text-xs text-slate-500 mt-0.5">
                 {[exam.subject, exam.className].filter(Boolean).join(' · ')}
               </p>
-              <div className="flex flex-wrap items-center gap-2 mt-3 text-xs">
+              <div className="flex flex-wrap items-center gap-1.5 mt-2.5 text-[11px]">
                 <span className="px-3 py-1 rounded-xl glass-pill text-slate-700 font-semibold">
                   {exam.totalQuestions} Questions
                 </span>
@@ -96,10 +96,10 @@ export const ExamsScreen: React.FC<ExamsScreenProps> = ({
                   +{exam.totalMarks} Marks
                 </span>
               </div>
-              <div className="mt-4 pt-3 border-t border-slate-200/40">
+              <div className="mt-3 pt-2.5 border-t border-slate-200/40">
                 <button
                   onClick={() => onSelectExam(exam)}
-                  className="w-full py-2.5 px-4 rounded-xl glass-btn-primary text-white font-bold text-xs shadow-xs flex items-center justify-center gap-1.5"
+                  className="w-full py-2 px-3 rounded-lg glass-btn-primary text-white font-bold text-[11px] shadow-xs flex items-center justify-center gap-1.5"
                 >
                   <PlayCircle className="w-4 h-4" />
                   Start Exam

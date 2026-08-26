@@ -45,6 +45,13 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const [secondsLeft, setSecondsLeft] = useState(attempt.secondsLeft);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timeUpFired = useRef(false);
+  const onTimeUpRef = useRef(onTimeUp);
+  const soundEnabledRef = useRef(soundEnabled);
+
+  useEffect(() => {
+    onTimeUpRef.current = onTimeUp;
+    soundEnabledRef.current = soundEnabled;
+  }, [onTimeUp, soundEnabled]);
 
   const currentQ = questions[currentIdx];
 
@@ -74,18 +81,18 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
         if (s <= 1) {
           if (!timeUpFired.current) {
             timeUpFired.current = true;
-            onTimeUp();
+            onTimeUpRef.current();
           }
           return 0;
         }
-        if (soundEnabled && (s - 1 === 300 || s - 1 === 60)) {
+        if (soundEnabledRef.current && (s - 1 === 300 || s - 1 === 60)) {
           soundManager.playWarning(true);
         }
         return s - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [soundEnabled, onTimeUp]);
+  }, []);
 
   const formatTimer = (secs: number) => {
     const m = Math.max(0, Math.floor(secs / 60));
@@ -167,7 +174,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   }
 
   return (
-    <div className="min-h-screen flex flex-col pb-36 md:pb-28 animate-in fade-in duration-300">
+    <div className="min-h-[calc(100dvh-7rem)] flex flex-col pb-28 md:pb-24">
       <header className="sticky top-0 z-30 glass-header -mx-4 px-4 py-2.5 shadow-2xs">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -234,8 +241,8 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
         </div>
       </header>
 
-      <main className="max-w-4xl w-full mx-auto mt-4 space-y-4 flex-1">
-        <div className="glass-card rounded-3xl p-5 md:p-6 shadow-xs relative">
+      <main className="max-w-4xl w-full mx-auto mt-3 space-y-3 flex-1">
+        <div className="glass-card rounded-2xl p-4 md:p-5 shadow-xs relative">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">
               Question {currentIdx + 1}
@@ -248,25 +255,25 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
             alt={`Diagram for question ${currentIdx + 1}`}
           />
 
-          <h1 className="font-semibold text-slate-900 leading-relaxed text-base md:text-lg">
+          <h1 className="font-semibold text-slate-900 leading-relaxed text-sm md:text-base">
             {currentQ.question}
           </h1>
 
-          <div className="mt-6 space-y-3">
+          <div className="mt-4 space-y-2.5">
             {(currentQ.options || []).map((optionText, optIdx) => {
               const isSelected = selected === optIdx;
               return (
                 <div
                   key={optIdx}
                   onClick={() => handleSelectOption(optIdx)}
-                  className={`group relative flex items-start gap-3.5 p-3.5 md:p-4 rounded-2xl border transition cursor-pointer select-none ${
+                  className={`group relative flex items-start gap-2.5 p-3 md:p-3.5 rounded-xl border cursor-pointer select-none ${
                     isSelected
                       ? 'border-blue-500 bg-blue-50/80 text-blue-950 ring-2 ring-blue-400/30'
                       : 'glass-panel text-slate-800 hover:bg-white/90'
                   }`}
                 >
                   <div
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
                       isSelected
                         ? 'glass-btn-primary text-white'
                         : 'border border-slate-300/80 glass-pill text-slate-600'
@@ -274,7 +281,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                   >
                     {'ABCD'[optIdx]}
                   </div>
-                  <div className="flex-1 text-sm md:text-base leading-relaxed self-center font-medium">
+                  <div className="flex-1 text-xs md:text-sm leading-relaxed self-center font-medium">
                     {optionText}
                   </div>
                 </div>
@@ -329,8 +336,8 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       </footer>
 
       {isPaletteOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/40 backdrop-blur-md">
-          <div className="glass-card rounded-t-3xl sm:rounded-3xl w-full max-w-xl max-h-[85vh] overflow-hidden shadow-2xl flex flex-col border border-white/90">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/40">
+          <div className="glass-card rounded-t-2xl sm:rounded-2xl w-full max-w-xl max-h-[calc(100dvh-1rem)] overflow-hidden shadow-xl flex flex-col border border-white/90">
             <div className="w-12 h-1 bg-slate-300 rounded-full mx-auto mt-3 sm:hidden" />
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200/40">
               <div className="flex items-center gap-2">
@@ -358,7 +365,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                 <p className="text-base font-bold text-slate-700 font-mono">{unansweredCount}</p>
               </div>
             </div>
-            <div className="p-5 overflow-y-auto flex-1">
+            <div className="p-4 overflow-y-auto overscroll-contain min-h-0 flex-1">
               <div className="grid grid-cols-5 gap-2.5">
                 {questions.map((_, idx) => {
                   const state = getQuestionState(idx);
@@ -403,7 +410,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       )}
 
       {showExitConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
           <div className="glass-card rounded-3xl w-full max-w-sm p-6 shadow-2xl space-y-3">
             <div className="w-10 h-10 rounded-2xl bg-amber-100/90 text-amber-700 flex items-center justify-center">
               <AlertTriangle className="w-5 h-5" />

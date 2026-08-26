@@ -55,17 +55,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       .toUpperCase();
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
-      <div className="glass-card rounded-3xl p-5 md:p-6 shadow-xs relative overflow-hidden">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl glass-btn-primary text-white font-black text-xl flex items-center justify-center shadow-lg shadow-blue-500/25">
+    <div className="space-y-4 pb-10">
+      <div className="glass-card rounded-2xl p-4 shadow-xs relative overflow-hidden">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl glass-btn-primary text-white font-black text-base flex items-center justify-center shadow-md shadow-blue-500/20">
             {initials}
           </div>
           <div className="min-w-0">
             <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
               Welcome back
             </span>
-            <h1 className="text-xl md:text-2xl font-bold text-slate-900 leading-tight truncate">
+            <h1 className="text-lg md:text-xl font-bold text-slate-900 leading-tight truncate">
               {profile.name || 'Student'}
             </h1>
             <p className="text-xs text-slate-500 mt-0.5 font-medium truncate">
@@ -79,19 +79,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
       {hasOngoing && (
         <section>
-          <div className="flex items-center justify-between mb-2.5">
-            <h2 className="text-base md:text-lg font-bold text-slate-900 flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm md:text-base font-bold text-slate-900 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
               Continue your exam
             </h2>
             <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-50/80 text-amber-800 border border-amber-200/80">
               Ongoing
             </span>
           </div>
-          <div className="glass-card rounded-3xl p-5 shadow-xs border-amber-200/60">
+          <div className="glass-card rounded-2xl p-4 shadow-xs border-amber-200/60">
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="font-bold text-slate-900 text-base">{ongoingTitle}</h3>
+                <h3 className="font-bold text-slate-900 text-sm">{ongoingTitle}</h3>
                 <p className="text-xs text-slate-500 mt-1">
                   {answered} of {total || '—'} answered · {minutesLeft} min left
                 </p>
@@ -114,7 +114,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </div>
             <button
               onClick={onResumeOngoing}
-              className="mt-4 w-full py-3 px-4 rounded-2xl glass-btn-primary text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs"
+              className="mt-3 w-full py-2.5 px-3 rounded-xl glass-btn-primary text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs"
             >
               <PlayCircle className="w-4 h-4" />
               Resume Exam
@@ -124,8 +124,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       )}
 
       <section>
-        <div className="flex items-center justify-between mb-2.5">
-          <h2 className="text-base md:text-lg font-bold text-slate-900">Available exams</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm md:text-base font-bold text-slate-900">Available exams</h2>
           <button
             onClick={() => onNavigate('exams')}
             className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-0.5"
@@ -136,14 +136,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
 
         {!featured ? (
-          <div className="glass-card rounded-3xl p-6 text-center">
+          <div className="glass-card rounded-2xl p-4 text-center">
             <p className="text-sm font-semibold text-slate-600">No exams assigned yet</p>
             <p className="text-xs text-slate-400 mt-1">
               When your teacher publishes a test, it will appear here from the live database.
             </p>
           </div>
         ) : (
-          <div className="glass-card rounded-3xl p-5 shadow-xs">
+          <div className="glass-card rounded-2xl p-4 shadow-xs">
             <div className="flex items-center justify-between">
               <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-50/90 text-emerald-700 border border-emerald-200/80">
                 {featured.status === 'LIVE' ? 'Live now' : featured.status || 'Available'}
@@ -152,7 +152,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 {featured.subject || featured.className || 'Exam'}
               </span>
             </div>
-            <h3 className="text-lg font-bold text-slate-900 mt-2.5">{featured.title}</h3>
+            <h3 className="text-base font-bold text-slate-900 mt-2">{featured.title}</h3>
             <p className="text-xs text-slate-500 mt-1">
               {[featured.subject, featured.className].filter(Boolean).join(' · ')}
             </p>
@@ -169,7 +169,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </div>
             <button
               onClick={() => onSelectExam(featured)}
-              className="mt-4 w-full py-2.5 px-4 rounded-xl glass-btn-primary text-white font-bold text-xs shadow-xs"
+              className="mt-3 w-full py-2 px-3 rounded-lg glass-btn-primary text-white font-bold text-[11px] shadow-xs"
             >
               View & Start
             </button>

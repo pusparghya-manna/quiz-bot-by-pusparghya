@@ -55,7 +55,7 @@ export const MobileNavigation: React.FC<NavigationProps> = ({
   hasOngoing
 }) => {
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 glass-dock px-3 py-1.5 safe-bottom">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 glass-dock px-2 py-1 safe-bottom">
       <div className="grid grid-cols-5 gap-1 max-w-md mx-auto">
         {NAV_ITEMS.map(item => {
           const Icon = item.icon;
@@ -66,19 +66,19 @@ export const MobileNavigation: React.FC<NavigationProps> = ({
             <button
               key={item.id}
               onClick={() => onSelectTab(item.id)}
-              className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition relative ${
+              className={`flex flex-col items-center justify-center py-1 px-1 rounded-lg transition relative ${
                 isActive
                   ? 'text-blue-600 glass-pill font-bold shadow-xs'
                   : 'text-slate-500 hover:text-slate-800 font-medium'
               }`}
             >
               <div className="relative">
-                <Icon className="w-5 h-5" />
+                <Icon className="w-4 h-4" />
                 {isExamTab && hasOngoing && (
                   <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white" />
                 )}
               </div>
-              <span className="text-[10px] mt-1 tracking-tight truncate">{item.label}</span>
+              <span className="text-[9px] mt-0.5 tracking-tight truncate">{item.label}</span>
             </button>
           );
         })}

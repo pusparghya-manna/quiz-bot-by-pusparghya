@@ -39,7 +39,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
 }) => {
   if (!selectedAttempt) {
     return (
-      <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+      <div className="space-y-4 pb-8">
         <div>
           <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
             Assessment History
@@ -94,7 +94,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
               return (
                 <div
                   key={`${attempt.id || attempt.examId}-${idx}`}
-                  className="glass-card rounded-2xl p-4 shadow-xs transition hover:scale-[1.01]"
+                  className="glass-card rounded-2xl p-3.5 shadow-xs"
                 >
                   <div onClick={() => onSelectAttempt(attempt)} className="cursor-pointer">
                     <div className="flex items-center justify-between gap-2">
@@ -184,7 +184,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
     } as Exam);
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-4 pb-8">
       <div className="flex items-center justify-between">
         <button
           onClick={() => onSelectAttempt(null)}
@@ -198,7 +198,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
         </span>
       </div>
 
-      <div className="glass-card rounded-3xl p-6 md:p-8 shadow-xs text-center relative overflow-hidden">
+      <div className="glass-card rounded-2xl p-4 md:p-5 shadow-xs text-center relative overflow-hidden">
         <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block">
           Your Recorded Score
         </span>
@@ -220,7 +220,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
           {selectedAttempt.rank != null ? ` · Rank #${selectedAttempt.rank}` : ''}
         </p>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-6 text-left">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 text-left">
           <div className="p-3.5 rounded-2xl glass-pill bg-emerald-50/60 border-emerald-200/60">
             <span className="text-[10px] uppercase font-bold text-emerald-600 block">Correct</span>
             <span className="text-xl font-bold text-slate-900 mt-0.5 block font-mono">{correct}</span>
@@ -245,14 +245,14 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
       <div className="grid grid-cols-2 gap-3 pt-2">
         <button
           onClick={() => onReviewAnswers(selectedAttempt, matchedExam)}
-          className="py-3.5 px-3 rounded-2xl glass-btn-primary text-white font-bold text-xs md:text-sm shadow-xs flex items-center justify-center gap-1.5 transition"
+          className="py-2.5 px-3 rounded-xl glass-btn-primary text-white font-bold text-xs shadow-xs flex items-center justify-center gap-1.5"
         >
           <BookOpen className="w-4 h-4" />
           Review Solutions
         </button>
         <button
           onClick={() => onReattempt(matchedExam, true)}
-          className="py-3.5 px-3 rounded-2xl glass-btn-secondary text-slate-800 font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition"
+          className="py-2.5 px-3 rounded-xl glass-btn-secondary text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5"
         >
           <RotateCcw className="w-4 h-4" />
           Reattempt

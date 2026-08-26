@@ -40,7 +40,7 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
   };
 
   return (
-    <div className="space-y-5 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-4 pb-8">
       <div className="flex items-center gap-3">
         <button
           onClick={onReturnToLive}
@@ -57,7 +57,7 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <div className="p-4 rounded-3xl glass-pill bg-emerald-50/70 border-emerald-200/70 shadow-xs">
           <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
             Answered
@@ -94,9 +94,9 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
         </div>
       )}
 
-      <div className="glass-card rounded-3xl p-5 md:p-6 shadow-xs">
+      <div className="glass-card rounded-2xl p-4 shadow-xs">
         <h3 className="text-base font-bold text-slate-900 mb-3">Question Navigator</h3>
-        <div className="grid grid-cols-5 sm:grid-cols-10 gap-2.5">
+        <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
           {questions.map((q, idx) => {
             const state = getQuestionState(idx);
             let bgClass = 'glass-pill text-slate-700';
@@ -114,7 +114,7 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
                 key={q.id || idx}
                 type="button"
                 onClick={() => onJumpToQuestion(idx)}
-                className={`h-11 rounded-2xl flex items-center justify-center font-mono text-sm font-bold transition hover:scale-105 ${bgClass}`}
+                className={`h-9 rounded-xl flex items-center justify-center font-mono text-xs font-bold ${bgClass}`}
                 title={`Jump to question ${idx + 1}`}
               >
                 {idx + 1}
@@ -127,13 +127,13 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
       <div className="grid grid-cols-2 gap-3 pt-2">
         <button
           onClick={onReturnToLive}
-          className="py-3.5 px-4 rounded-2xl glass-btn-secondary text-slate-700 font-bold text-sm transition"
+          className="py-2.5 px-3 rounded-xl glass-btn-secondary text-slate-700 font-bold text-xs"
         >
           Return to Exam
         </button>
         <button
           onClick={() => setShowSubmitModal(true)}
-          className="py-3.5 px-4 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-[0.98]"
+          className="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md flex items-center justify-center gap-1.5"
         >
           <Send className="w-4 h-4" />
           Submit Exam
@@ -141,8 +141,8 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
       </div>
 
       {showSubmitModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md">
-          <div className="glass-card rounded-3xl w-full max-w-sm p-6 shadow-2xl space-y-3.5 animate-in zoom-in-95 border-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
+          <div className="glass-card rounded-2xl w-full max-w-sm p-4 shadow-xl space-y-3 border-white">
             <div className="w-11 h-11 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center">
               <AlertTriangle className="w-6 h-6" />
             </div>

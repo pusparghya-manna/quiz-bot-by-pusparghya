@@ -78,7 +78,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
 
   if (examOptions.length === 0) {
     return (
-      <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+      <div className="space-y-4 pb-8">
         <div>
           <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
             Rankings & Standings
@@ -97,7 +97,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
   }
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-4 pb-8">
       <div>
         <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
           Rankings & Standings
@@ -112,7 +112,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
         <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
           Select exam ({examOptions.length})
         </label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {examOptions.map((opt) => {
             const isSelected = opt.id === selectedExamId;
             return (
@@ -123,7 +123,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
                 className={`p-3.5 transition text-left rounded-2xl ${
                   isSelected
                     ? 'glass-card border-blue-400/80 shadow-md ring-2 ring-blue-500/20'
-                    : 'glass-card hover:scale-[1.01]'
+                    : 'glass-card'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -160,7 +160,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
       </section>
 
       {selectedMeta && (
-        <section className="glass-card rounded-3xl p-5 md:p-6 shadow-xs">
+        <section className="glass-card rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-3">
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
@@ -176,7 +176,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
               </span>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-2.5 text-center mt-3">
+          <div className="grid grid-cols-3 gap-2 text-center mt-3">
             <div className="p-3 rounded-2xl glass-pill bg-blue-50/60 border-blue-200/60">
               <span className="text-[10px] uppercase font-bold text-slate-400 block">Your Rank</span>
               <p className="text-base md:text-lg font-black text-blue-600 font-mono mt-0.5">
@@ -214,7 +214,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
 
       {!loading && !error && rows.length > 0 && (
         <>
-          <section className="space-y-3">
+          <section className="space-y-2">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
               Top Rankers
             </h2>
@@ -255,7 +255,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
             </div>
           </section>
 
-          <section className="glass-card rounded-3xl overflow-hidden shadow-xs">
+          <section className="glass-card rounded-2xl overflow-hidden shadow-xs">
             <div className="p-4 border-b border-slate-200/40 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Trophy className="w-4 h-4 text-blue-600" />
@@ -270,7 +270,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
                 return (
                   <div
                     key={`${entry.rank}-${entry.name}`}
-                    className={`p-3.5 flex items-center justify-between gap-2 transition ${
+                    className={`p-3 flex items-center justify-between gap-2 ${
                       isMe
                         ? 'bg-blue-50/70 border-l-4 border-blue-600 font-semibold'
                         : 'hover:bg-white/40'
