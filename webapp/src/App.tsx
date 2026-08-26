@@ -160,7 +160,9 @@ export default function App() {
 
   const refreshExams = useCallback(async () => {
     const { exams } = await webappApi.exams();
-    setAvailableExams((exams || []).map(mapExam));
+    const mapped = (exams || []).map(mapExam);
+    setAvailableExams(mapped);
+    return mapped;
   }, []);
 
   useEffect(() => {
@@ -203,7 +205,7 @@ export default function App() {
           fontSize: 'normal',
         });
         if (session.ongoing) setOngoingSummary(session.ongoing);
-        await refreshExams();
+        const examList = await refreshExams();
         try {
           await refreshResults();
         } catch {
@@ -212,6 +214,23 @@ export default function App() {
 
         const params = new URLSearchParams(window.location.search);
         const reviewAttemptId = params.get('a');
+        const linkedExamId = params.get('exam');
+
+        if (linkedExamId && !reviewAttemptId) {
+          let linkedExam = examList.find((exam) => exam.id === linkedExamId) || null;
+          if (!linkedExam) {
+            try {
+              const { exam } = await webappApi.examDetail(linkedExamId);
+              linkedExam = mapExam(exam);
+            } catch {
+              linkedExam = null;
+            }
+          }
+          if (linkedExam && !cancelled) {
+            setSelectedExam(linkedExam);
+            setCurrentTab('details');
+          }
+        }
         if (reviewAttemptId) {
           try {
             const data = await webappApi.review(reviewAttemptId);

@@ -123,14 +123,9 @@ export function webAppBaseUrl(): string {
   return STABLE_WEBAPP_URL;
 }
 
-/** Main menu: Open App (Mini App) + classic navigation */
+/** Main menu: one Open App button; exam navigation lives in the Mini App. */
 export function mainNavRows(): (string | KbBtn)[][] {
-  const url = webAppBaseUrl();
-  return [
-    [{ text: LABELS.openApp, web_app: { url } }],
-    [LABELS.exams, LABELS.results],
-    [LABELS.leaderboard, LABELS.setName],
-  ];
+  return [[{ text: LABELS.openApp, web_app: { url: webAppBaseUrl() } }]];
 }
 
 export function numberedListRows(

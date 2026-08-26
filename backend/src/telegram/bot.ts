@@ -7,8 +7,8 @@ import {
   kbMarkup,
   LABELS,
   mainNavRows,
+  webAppBaseUrl,
   numberedListRows,
-  forceReplyNameMarkup,
 } from './replyNav.js';
 import { validateExamCallback, logTelegramDiag } from './examUiController.js';
 import {
@@ -265,18 +265,14 @@ export async function getOrCreateStudent(user: TelegramUser): Promise<Student> {
 
 
 function renderMainMenu(student: Student): SimulatorResponse {
-  const notice = store.getSettings().systemNotice;
   if (student.telegramUserId) {
     setKbSession(student.telegramUserId, { screen: 'main' });
   }
   const displayName = escapeHtml((student.name || 'Student').trim() || 'Student');
-  const noticeHtml = notice
-    ? `\n\n📢 <b>${escapeHtml(notice)}</b>\n`
-    : '';
   const text =
     `<blockquote>` +
     `<b>Qᴜɪᴢ Bᴏᴛ</b>\n` +
-    `<i>ʙʏ Pᴜsᴘᴀʀɢʜʏᴀ <tg-emoji emoji-id="6185737106585814820">🎖️</tg-emoji></i>\n\n` +
+    `<i>ʙʏ Pᴜsᴘᴀʀɢʜʏᴀ 🕵️</i>\n\n` +
     `<b><i>Wᴇʟᴄᴏᴍᴇ, ${displayName} 👀</i></b>\n\n` +
     `<b>📚 Hᴏᴡ Iᴛ Wᴏʀᴋs:</b>\n\n` +
     `🔗 Oᴘᴇɴ ᴛʜᴇ ᴇxᴀᴍ ʟɪɴᴋ sʜᴀʀᴇᴅ ʙʏ ʏᴏᴜʀ ᴛᴇᴀᴄʜᴇʀ.\n` +
@@ -287,13 +283,39 @@ function renderMainMenu(student: Student): SimulatorResponse {
     `🏆 Lᴇᴀᴅᴇʀʙᴏᴀʀᴅs\n` +
     `📈 Pᴇʀғᴏʀᴍᴀɴᴄᴇ ᴛʀᴀᴄᴋɪɴɢ\n\n` +
     `<i>Exᴀᴍɪɴᴀᴛɪᴏɴs ᴍᴀᴅᴇ sɪᴍᴘʟᴇ.</i>` +
-    `</blockquote>` +
-    noticeHtml;
+    `</blockquote>`;
 
   return {
     chatId: student.telegramUserId!,
     text,
     replyKeyboard: mainNavReplyKeyboard(),
+    parseMode: 'HTML',
+    type: 'sendMessage',
+  };
+}
+
+function miniAppExamUrl(examId: string): string {
+  return `${webAppBaseUrl()}/?exam=${encodeURIComponent(examId)}`;
+}
+
+function examStartPrompt(examId: string, chatId: number): SimulatorResponse {
+  const exam = store.getExamById(examId);
+  if (!exam || !exam.teacherId) {
+    return {
+      chatId,
+      text: '❌ This exam link is invalid or the exam is no longer available.',
+      parseMode: 'HTML',
+      type: 'sendMessage',
+    };
+  }
+  return {
+    chatId,
+    text:
+      `<blockquote><b>${escapeHtml(exam.title)}</b>\n\n` +
+      `Your teacher shared this exam with you. Tap the button below to open the exam start page.</blockquote>`,
+    replyMarkup: {
+      inline_keyboard: [[{ text: '▶️ Start Exam', web_app: { url: miniAppExamUrl(exam.id) } }]],
+    },
     parseMode: 'HTML',
     type: 'sendMessage',
   };
@@ -362,9 +384,18 @@ async function processTelegramUpdateInner(update: TelegramUpdate): Promise<Simul
     const cbMessageId = cb.message?.message_id;
 
     let response: SimulatorResponse | null = null;
+    const isLegacyExamCallback =
+      data === 'btn_exams' ||
+      data === 'btn_results' ||
+      data === 'btn_leaderboard' ||
+      data === 'leaderboard_more' ||
+      /^(exam_view_|lb_exam_|lb_more_|start_exam_|resume_exam_|reattempt_|viewres_|ans_|nav_|grid_|revatt_|rev_|confirm_submit_|do_submit_)/.test(data);
 
-    // 1. Navigation / List Exams
-    if (data === 'btn_home' || data === 'btn_menu') {
+    // Legacy text-exam buttons now return users to the single Open App menu.
+    // Exam questions and results are delivered only inside the Mini App.
+    if (isLegacyExamCallback) {
+      response = renderMainMenu(student);
+    } else if (data === 'btn_home' || data === 'btn_menu') {
       pendingNameUsers.delete(user.id);
       // Main menu always re-applies ReplyKeyboard (closes ForceReply / Gboard)
       response = renderMainMenu(student);
@@ -676,7 +707,14 @@ This name will appear on results and the leaderboard.`,
 
 
 
-    // ReplyKeyboard navigation (all non-MCQ actions)
+    // Legacy reply-keyboard taps no longer open text-based exam flows.
+    // Return the one-button Mini App menu so stale Telegram keyboards self-correct.
+    if (resolveReplyAction(user.id, text)) {
+      return renderMainMenu(student);
+    }
+
+    // ReplyKeyboard navigation is retained below only for backwards-compatible code paths.
+    // It is unreachable for current users because all recognized labels return above.
     {
       const resolved = resolveReplyAction(user.id, text);
       if (resolved && !pendingNameUsers.has(user.id)) {
@@ -912,57 +950,16 @@ Open the full scrollable review below.`,
       // Deep link: /start exam_<examId>
       if (payload.startsWith('exam_')) {
         const examId = payload.slice(5);
-        // Typing indicator while attempt is prepared (non-blocking)
-        try {
-          const token =
-            process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken || '';
-          if (token) {
-            void fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chat_id: user.id, action: 'typing' }),
-              signal: AbortSignal.timeout(3000),
-            });
-          }
-        } catch {
-          /* ignore */
-        }
-        return await handleStartOrResumeExam(examId, student, user);
+        return examStartPrompt(examId, user.id);
       }
 
-      if (needsNameSetup(student)) {
-        pendingNameUsers.add(user.id);
-        return {
-          chatId: user.id,
-          text:
-            `👋 *Welcome to Quiz Bot by Pusparghya!*
-
-` +
-            `✏️ *Set my name* (one-time setup)
-
-` +
-            `Please type your full name and send it as a message.
-` +
-            `This name appears on results and the leaderboard.`,
-          replyKeyboard: forceReplyNameMarkup() as any,
-          type: 'sendMessage',
-        };
-      }
-
+      pendingNameUsers.delete(user.id);
       const menu = renderMainMenu(student);
       return { ...menu, type: 'sendMessage', chatId: user.id };
     }
 
-    if (text === '/exams') {
-      return renderExamsList(student);
-    }
-
-    if (text === '/results') {
-      return renderStudentResults(student);
-    }
-
-    if (text === '/leaderboard') {
-      return renderStudentLeaderboard(student, false);
+    if (text === '/exams' || text === '/results' || text === '/leaderboard') {
+      return renderMainMenu(student);
     }
   }
 
