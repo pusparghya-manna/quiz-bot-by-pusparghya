@@ -117,13 +117,10 @@ export const LABELS = {
   myResults: '📊 My Results',
 } as const;
 
+const STABLE_WEBAPP_URL = 'https://quiz-bot-telegram-webapp-pusparghyamannas-projects.vercel.app';
+
 export function webAppBaseUrl(): string {
-  const raw =
-    process.env.WEBAPP_URL ||
-    process.env.FRONTEND_URL ||
-    // Student Mini App is served by Railway at /app (not the teacher Vercel dashboard)
-    'https://quiz-bot-by-pusparghya-production.up.railway.app/app';
-  return String(raw).replace(/\/$/, '');
+  return STABLE_WEBAPP_URL;
 }
 
 /** Main menu: Open App (Mini App) + classic navigation */

@@ -2,6 +2,8 @@
 
 Telegram WebApp for students. Talks to the Railway backend (`/api/webapp/*`) with Telegram `initData` auth. **No mock exams or leaderboards.**
 
+Stable production URL: `https://quiz-bot-telegram-webapp-pusparghyamannas-projects.vercel.app/`
+
 ## Deploy (Vercel)
 
 1. New Vercel project from this repo

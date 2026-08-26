@@ -77,7 +77,7 @@ export function registerWebappRoutes(app: Express) {
           [auth.user?.first_name, auth.user?.last_name].filter(Boolean).join(' ') ||
           auth.user?.username ||
           `Student ${auth.userId}`;
-        student = {
+        const createdStudent = {
           id: `STU_${auth.userId}`,
           studentId: `TG-${auth.userId}`,
           name,
@@ -89,7 +89,8 @@ export function registerWebappRoutes(app: Express) {
           teacherIds: [],
           joinedAt: new Date().toISOString(),
         } as any;
-        await store.saveStudent(student);
+        student = createdStudent;
+        await store.saveStudent(createdStudent);
       }
       const attempts = (await S(store.getAttempts())) as any[];
       const ongoingRaw = attempts.find(
@@ -226,7 +227,7 @@ export function registerWebappRoutes(app: Express) {
           [auth.user?.first_name, auth.user?.last_name].filter(Boolean).join(' ') ||
           auth.user?.username ||
           `Student ${auth.userId}`;
-        student = {
+        const createdStudent = {
           id: `STU_${auth.userId}`,
           studentId: `TG-${auth.userId}`,
           name,
@@ -238,7 +239,8 @@ export function registerWebappRoutes(app: Express) {
           teacherIds: exam.teacherId ? [exam.teacherId] : [],
           joinedAt: new Date().toISOString(),
         } as any;
-        await store.saveStudent(student);
+        student = createdStudent;
+        await store.saveStudent(createdStudent);
       } else if (exam.teacherId) {
         try {
           await (store as any).linkStudentTeacher?.(student.id, exam.teacherId);
@@ -268,6 +270,8 @@ export function registerWebappRoutes(app: Express) {
         }
       }
 
+      if (!student) return res.status(500).json({ error: 'Student initialization failed' });
+
       const now = new Date();
       const attemptNumber = await store.nextAttemptNumber(examId, auth.userId);
       const windowStart = new Date(exam.startDate).getTime();
@@ -281,7 +285,7 @@ export function registerWebappRoutes(app: Express) {
       let expiresMs = now.getTime() + Math.max(1, exam.durationMinutes || 60) * 60 * 1000;
       if (isOfficial) expiresMs = Math.min(expiresMs, windowEnd);
 
-      attempt = {
+      const createdAttempt = {
         id: `ATT_${Date.now()}_${auth.userId}`,
         examId,
         studentId: student.studentId || student.id,
@@ -305,7 +309,8 @@ export function registerWebappRoutes(app: Express) {
         isOfficial,
         attemptNumber,
       } as any;
-      await store.saveAttempt(attempt);
+      attempt = createdAttempt;
+      await store.saveAttempt(createdAttempt);
 
       res.json({
         attempt,

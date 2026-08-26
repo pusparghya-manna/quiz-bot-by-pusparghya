@@ -1729,11 +1729,7 @@ async function autoSubmitExam(exam: Exam, attempt: Attempt): Promise<SimulatorRe
 }
 
 function reviewWebAppUrl(attemptId: string): string {
-  const base = (
-    process.env.FRONTEND_URL ||
-    process.env.WEBAPP_URL ||
-    'https://quiz-bot-by-pusparghya.vercel.app'
-  ).replace(/\/$/, '');
+  const base = 'https://quiz-bot-telegram-webapp-pusparghyamannas-projects.vercel.app';
   return `${base}/review?a=${encodeURIComponent(attemptId)}`;
 }
 
