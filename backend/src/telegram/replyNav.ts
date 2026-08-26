@@ -117,7 +117,7 @@ export const LABELS = {
   myResults: '📊 My Results',
 } as const;
 
-const STABLE_WEBAPP_URL = 'https://quiz-bot-telegram-webapp-pusparghyamannas-projects.vercel.app';
+const STABLE_WEBAPP_URL = 'https://quiz-bot-webapp-tg.vercel.app';
 
 export function webAppBaseUrl(): string {
   return STABLE_WEBAPP_URL;
