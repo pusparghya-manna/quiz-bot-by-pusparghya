@@ -79,11 +79,10 @@ CRITICAL RULES:
    - 3 = Option D / Fourth option
    - If the paper includes an answer key or marked answer, convert it to the matching index.
    - If no key is printed, solve the question from the visible text when the answer is clear and academically unambiguous.
-   - Use null only when the answer is unreadable, ambiguous, outside the options, or cannot be determined reliably. NEVER guess when uncertain.
 4. Default "marks" to 1 unless explicitly specified otherwise.
 5. Default "negativeMarks" to 0 unless explicitly specified otherwise.
 6. Extract EVERY single question accurately without skipping.
-7. question_number should be the printed number when visible.
+7. Don't include question numbers from the given image. 
 
 IMAGE / DIAGRAM DETECTION (per question — be careful):
 For every question, decide if it has a REAL drawn visual (diagram, figure, graph, chart, map, biological drawing, chemical structure, pedigree, Venn circles, labeled organ drawing).
