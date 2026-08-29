@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Trophy, Clock } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Trophy, Clock, ChevronDown, Check } from 'lucide-react';
 import { ExamAttempt, Exam, LeaderboardRow } from '../../types';
 import { webappApi } from '../../api';
 
@@ -8,6 +8,133 @@ interface LeaderboardScreenProps {
   exams?: Exam[];
   currentUserName: string;
   onSelectExamResult?: (attempt: ExamAttempt) => void;
+}
+
+
+type ExamOption = {
+  id: string;
+  title: string;
+  score?: number;
+  maxScore?: number;
+  rank?: number | null;
+  accuracy?: number;
+};
+
+/** Custom in-app dropdown (avoids native mobile select UI). */
+function ExamSelectDropdown({
+  options,
+  value,
+  onChange,
+}: {
+  options: ExamOption[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.id === value) || options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent | TouchEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('touchstart', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('touchstart', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const metaLine = (opt: ExamOption) => {
+    const parts: string[] = [];
+    if (opt.rank != null) parts.push(`Rank #${opt.rank}`);
+    if (opt.score !== undefined) {
+      parts.push(`${opt.score}${opt.maxScore != null ? `/${opt.maxScore}` : ''} pts`);
+    }
+    return parts.join(' · ');
+  };
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-labelledby="lb-exam-label"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full glass-card rounded-2xl px-4 py-3 text-left flex items-center gap-3 transition border ${
+          open
+            ? 'border-blue-400/80 ring-2 ring-blue-500/20 shadow-md'
+            : 'border-slate-200/60 hover:border-slate-300'
+        }`}
+      >
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-slate-900 truncate">
+            {selected?.title || 'Select an exam'}
+          </p>
+          {selected && metaLine(selected) ? (
+            <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate">
+              {metaLine(selected)}
+            </p>
+          ) : null}
+        </div>
+        <ChevronDown
+          className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <ul
+          role="listbox"
+          aria-labelledby="lb-exam-label"
+          className="absolute z-30 left-0 right-0 mt-1.5 max-h-64 overflow-y-auto rounded-2xl border border-slate-200/70 bg-white/95 backdrop-blur-md shadow-xl shadow-slate-900/10 py-1.5"
+        >
+          {options.map((opt) => {
+            const isSelected = opt.id === value;
+            return (
+              <li key={opt.id} role="option" aria-selected={isSelected}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.id);
+                    setOpen(false);
+                  }}
+                  className={`w-full text-left px-3.5 py-2.5 flex items-start gap-2.5 transition ${
+                    isSelected
+                      ? 'bg-blue-50/90 text-blue-900'
+                      : 'hover:bg-slate-50 text-slate-900'
+                  }`}
+                >
+                  <span
+                    className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                      isSelected ? 'bg-blue-600 text-white' : 'border border-slate-300'
+                    }`}
+                  >
+                    {isSelected ? <Check className="w-2.5 h-2.5" strokeWidth={3} /> : null}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold truncate">{opt.title}</span>
+                    {metaLine(opt) ? (
+                      <span className="block text-[11px] text-slate-500 font-medium mt-0.5">
+                        {metaLine(opt)}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
@@ -109,23 +236,14 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
       </div>
 
       <section className="space-y-2">
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-500" htmlFor="lb-exam-select">
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-500" id="lb-exam-label">
           Select exam
         </label>
-        <select
-          id="lb-exam-select"
+        <ExamSelectDropdown
+          options={examOptions}
           value={selectedExamId}
-          onChange={(e) => setSelectedExamId(e.target.value)}
-          className="w-full glass-card rounded-2xl px-4 py-3 text-sm font-bold text-slate-900 border border-slate-200/60 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-        >
-          {examOptions.map((opt) => (
-            <option key={opt.id} value={opt.id}>
-              {opt.title}
-              {opt.rank != null ? ` · Rank #${opt.rank}` : ''}
-              {opt.score !== undefined ? ` · ${opt.score}${opt.maxScore != null ? `/${opt.maxScore}` : ''} pts` : ''}
-            </option>
-          ))}
-        </select>
+          onChange={setSelectedExamId}
+        />
       </section>
 
       {selectedMeta && (
