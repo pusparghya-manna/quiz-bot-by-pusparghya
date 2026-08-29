@@ -39,6 +39,30 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   const [editQ, setEditQ] = useState<Question | null>(null);
   const [jsonText, setJsonText] = useState('');
   const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrQueue, setOcrQueue] = useState<{ id: string; name: string; status: 'pending' | 'running' | 'done' | 'error'; error?: string; file?: File }[]>([]);
+  const [ocrProgress, setOcrProgress] = useState({ done: 0, total: 0 });
+  const draftKey = form.id ? `exam_draft_${form.id}` : 'exam_draft_new';
+
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (d?.qs && Array.isArray(d.qs) && d.qs.length && qs.length === 0 && step === 'questions') {
+        setQs(d.qs);
+      }
+    } catch { /* */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  React.useEffect(() => {
+    try {
+      if (step === 'questions' || step === 'info') {
+        localStorage.setItem(draftKey, JSON.stringify({ form, qs, savedAt: Date.now() }));
+      }
+    } catch { /* */ }
+  }, [form, qs, step, draftKey]);
+
   const [ocrPhase, setOcrPhase] = useState<'idle' | 'extract' | 'diagrams' | 'done'>('idle');
   const [ocrPageDataUrl, setOcrPageDataUrl] = useState<string | null>(null);
   const [ocrPageMime, setOcrPageMime] = useState('image/jpeg');
@@ -183,7 +207,9 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   };
 
   const delExam = async (id: string) => {
-    if (!(await confirmAsync('Delete this exam?'))) return;
+    const exam = exams.find((e) => e.id === id);
+    const label = exam?.title ? `"${exam.title}"` : 'this exam';
+    if (!(await confirmAsync(`Delete ${label}? This cannot be undone. Tap Delete only if you are sure.`))) return;
     setActionLabel('Deleting exam…');
     setDeleting(true);
     try {
@@ -199,6 +225,27 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     } finally {
       setDeleting(false);
     }
+  };
+
+
+  const exportQuestionsTxt = (list: Question[] = qs) => {
+    const lines: string[] = [];
+    list.forEach((q, i) => {
+      lines.push(`${i + 1}. ${q.question || ''}`);
+      (q.options || []).slice(0, 4).forEach((opt, oi) => {
+        lines.push(`${String.fromCharCode(65 + oi)}. ${opt || ''}`);
+      });
+      const ans = q.answer == null ? '' : String.fromCharCode(65 + q.answer);
+      lines.push(`Answer Option ${ans}`);
+      lines.push('');
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(form.title || 'questions').replace(/[^\w\-]+/g, '_')}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const addManual = () => {
@@ -297,9 +344,123 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       setTimeout(() => setToastMsg(''), 4000);
     } catch (e: any) {
       toastError(e.message || 'OCR failed');
+      throw e;
     } finally {
       setOcrBusy(false);
       setOcrPhase('idle');
+    }
+  };
+
+  const processOneOcrFile = async (file: File): Promise<number> => {
+    const prepared = await prepareImageForOcr(file);
+    const pageDataUrl = `data:${prepared.mimeType};base64,${prepared.base64}`;
+    setOcrPageDataUrl(pageDataUrl);
+    setOcrPageMime(prepared.mimeType);
+    const res = await api('/api/ocr/parse', {
+      method: 'POST',
+      body: JSON.stringify({ fileBase64: prepared.base64, mimeType: prepared.mimeType }),
+      timeoutMs: 180_000,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'OCR failed');
+    const list: any[] = Array.isArray(data) ? data : data.questions || data.parsed || [];
+    const mapped: Question[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      const bbox =
+        item.image_bbox && item.has_image !== false ? (item.image_bbox as BBox) : null;
+      let preview: string | null = null;
+      if (bbox) {
+        try {
+          preview = await cropBBoxFromDataUrl(pageDataUrl, bbox);
+        } catch {
+          preview = null;
+        }
+      }
+      mapped.push({
+        id: `Q_OCR_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
+        question: item.question || item.text || '',
+        options: (item.options || ['', '', '', '']).slice(0, 4),
+        answer: normalizeAnswer(
+          item.answer ?? item.correctAnswer ?? item.correct_option ?? item.correctOption,
+          4
+        ),
+        marks: item.marks ?? 1,
+        negativeMarks: item.negativeMarks ?? 0,
+        subject: item.subject || form.subject,
+        explanation: item.explanation || '',
+        image_bbox: bbox,
+        imagePreview: preview,
+        image: undefined,
+      });
+    }
+    const validQuestions = mapped.filter((q) => q.question.trim());
+    setQs((prev) => [...prev, ...validQuestions]);
+    return validQuestions.length;
+  };
+
+  const onOcrFiles = async (files: FileList | File[]) => {
+    const arr = Array.from(files || []).filter((f) => f.type.startsWith('image/'));
+    if (!arr.length) return;
+    const items = arr.map((f, i) => ({
+      id: `ocr_${Date.now()}_${i}`,
+      name: f.name || `Image ${i + 1}`,
+      status: 'pending' as const,
+      file: f,
+    }));
+    setOcrQueue((prev) => [...prev, ...items]);
+    setOcrBusy(true);
+    setOcrProgress({ done: 0, total: items.length });
+    setOcrPhase('extract');
+    let totalAdded = 0;
+    const concurrency = Math.min(3, items.length);
+    let idx = 0;
+    const runNext = async (): Promise<void> => {
+      const my = idx++;
+      if (my >= items.length) return;
+      const item = items[my];
+      setOcrQueue((prev) => prev.map((x) => (x.id === item.id ? { ...x, status: 'running' } : x)));
+      try {
+        const n = await processOneOcrFile(item.file!);
+        totalAdded += n;
+        setOcrQueue((prev) => prev.map((x) => (x.id === item.id ? { ...x, status: 'done' } : x)));
+      } catch (e: any) {
+        setOcrQueue((prev) =>
+          prev.map((x) =>
+            x.id === item.id ? { ...x, status: 'error', error: e?.message || 'OCR failed' } : x
+          )
+        );
+      } finally {
+        setOcrProgress((p) => ({ ...p, done: p.done + 1 }));
+      }
+      await runNext();
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => runNext()));
+    setOcrBusy(false);
+    setOcrPhase('done');
+    setQMode('list');
+    if (totalAdded > 0) {
+      setToastMsg(`OCR added ${totalAdded} questions from ${items.length} image(s) — review, then save exam`);
+      setTimeout(() => setToastMsg(''), 5000);
+    }
+  };
+
+  const retryOcrItem = async (id: string) => {
+    const item = ocrQueue.find((x) => x.id === id);
+    if (!item?.file) return;
+    setOcrQueue((prev) => prev.map((x) => (x.id === id ? { ...x, status: 'running', error: undefined } : x)));
+    setOcrBusy(true);
+    try {
+      const n = await processOneOcrFile(item.file);
+      setOcrQueue((prev) => prev.map((x) => (x.id === id ? { ...x, status: 'done' } : x)));
+      if (n > 0) toastSuccess(`Retry added ${n} questions`);
+    } catch (e: any) {
+      setOcrQueue((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, status: 'error', error: e?.message || 'OCR failed' } : x))
+      );
+      toastError(e?.message || 'Retry failed');
+    } finally {
+      setOcrBusy(false);
     }
   };
 
@@ -803,7 +964,12 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                 <>
                   <div className="flex items-center justify-between">
                     <span className="text-[13px] font-semibold text-slate-700 inline-flex items-center gap-1.5"><IconFileText className="w-3.5 h-3.5 text-blue-500" />{qs.length} questions</span>
-                    <button type="button" className={btnS + ' !py-1 text-[12px]'} onClick={addManual}><IconPlus className="w-3.5 h-3.5" /> Add</button>
+                    <div className="flex gap-1.5">
+                      {qs.length > 0 && (
+                        <button type="button" className={btnS + ' !py-1 text-[12px]'} onClick={() => exportQuestionsTxt()} title="Export questions as TXT">Export TXT</button>
+                      )}
+                      <button type="button" className={btnS + ' !py-1 text-[12px]'} onClick={addManual}><IconPlus className="w-3.5 h-3.5" /> Add</button>
+                    </div>
                   </div>
                   {qs.length === 0 && <p className="text-sm text-slate-500 text-center py-5">No questions yet. Use Photo, Manual, or JSON.</p>}
                   <div className="space-y-1.5 max-h-[45vh] overflow-y-auto pr-0.5">
@@ -822,7 +988,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                         </div>
                         <div className="flex gap-1.5 mt-1.5">
                           <button type="button" className={btnS + ' !py-1 text-[11px]'} onClick={() => void openEditQuestion(q)}><IconEdit className="w-3 h-3" /> Edit</button>
-                          <button type="button" className={btnD + ' text-[11px]'} onClick={() => setQs((p) => p.filter((x) => x.id !== q.id))}><IconTrash className="w-3 h-3" /> Remove</button>
+                          <button type="button" className={btnD + ' text-[11px]'} onClick={async () => { if (await confirmAsync(`Remove question ${i + 1}? Select and confirm only if you intend to delete it.`)) setQs((p) => p.filter((x) => x.id !== q.id)); }}><IconTrash className="w-3 h-3" /> Remove</button>
                         </div>
                       </div>
                     ))}
@@ -1046,29 +1212,53 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                     {ocrBusy ? (
                       <div className="space-y-1.5">
                         <p className="text-xs font-medium text-slate-700">
-                          {ocrPhase === 'extract' && 'Detecting question blocks on the page…'}
-                          {ocrPhase === 'diagrams' && 'Extracting text and cropping diagram questions…'}
-                          {ocrPhase !== 'extract' && ocrPhase !== 'diagrams' && 'Processing…'}
+                          Processing images in background ({ocrProgress.done}/{ocrProgress.total})…
                         </p>
-                        <div className="h-1.5 w-full max-w-[200px] mx-auto rounded-full bg-slate-200 overflow-hidden">
+                        <div className="h-1.5 w-full max-w-[220px] mx-auto rounded-full bg-slate-200 overflow-hidden">
                           <div
-                            className="h-full rounded-full bg-blue-500 animate-pulse"
-                            style={{ width: ocrPhase === 'extract' ? '45%' : ocrPhase === 'diagrams' ? '85%' : '60%' }}
+                            className="h-full rounded-full bg-blue-500 transition-all"
+                            style={{ width: ocrProgress.total ? `${Math.round((ocrProgress.done / ocrProgress.total) * 100)}%` : '30%' }}
                           />
                         </div>
-                        <p className="text-[10px] text-slate-500">This can take up to a few minutes for diagram pages.</p>
+                        <p className="text-[10px] text-slate-500">You can add more images while work continues.</p>
                       </div>
                     ) : (
-                      <p className="text-xs text-slate-600">Upload a photo of questions.</p>
+                      <p className="text-xs text-slate-600">Upload one or more photos of questions. OCR runs in parallel.</p>
                     )}
                   </div>
-                  <label className={btnP + ' w-full cursor-pointer' + (ocrBusy ? ' opacity-70 pointer-events-none' : '')}>
+                  {ocrQueue.length > 0 && (
+                    <ul className="space-y-1.5 max-h-36 overflow-y-auto text-left">
+                      {ocrQueue.map((item) => (
+                        <li key={item.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px]">
+                          <span className="truncate flex-1 font-medium text-slate-700">{item.name}</span>
+                          {item.status === 'pending' && <span className="text-slate-400">Queued</span>}
+                          {item.status === 'running' && <span className="text-blue-600 font-semibold">OCR…</span>}
+                          {item.status === 'done' && <span className="text-emerald-600 font-semibold">Done</span>}
+                          {item.status === 'error' && (
+                            <span className="flex items-center gap-1 text-amber-700 font-semibold" title={item.error}>
+                              <span aria-hidden>!</span> Failed
+                              <button type="button" className="underline ml-1" onClick={() => void retryOcrItem(item.id)}>Retry</button>
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <label className={btnP + ' w-full cursor-pointer'}>
                     <IconUpload className="w-4 h-4" />
-                    {ocrBusy ? 'Working…' : 'Choose photo'}
-                    <input type="file" accept="image/*" className="hidden" disabled={ocrBusy}
-                      onChange={(e) => e.target.files?.[0] && onOcr(e.target.files[0])} />
+                    {ocrBusy ? 'Add more images' : 'Choose photos'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files?.length) void onOcrFiles(e.target.files);
+                        e.target.value = '';
+                      }}
+                    />
                   </label>
-                  <button type="button" className={btnS + ' w-full'} disabled={ocrBusy} onClick={() => setQMode('list')}>Back to list</button>
+                  <button type="button" className={btnS + ' w-full'} onClick={() => setQMode('list')}>Back to list</button>
                 </div>
               )}
             </div>

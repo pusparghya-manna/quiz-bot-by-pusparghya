@@ -41,9 +41,6 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
     return (
       <div className="space-y-4 pb-8">
         <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
-            Assessment History
-          </span>
           <h1 className="text-xl md:text-2xl font-bold text-slate-900">
             Your Exam Results ({pastResults.length})
           </h1>

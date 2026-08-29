@@ -137,6 +137,37 @@ function mapResult(
   };
 }
 
+const WEBAPP_CACHE_KEY = 'quizbot_webapp_cache_v1';
+
+function readWebappCache(): {
+  profile?: UserProfile;
+  exams?: Exam[];
+  results?: ExamAttempt[];
+  ongoingSummary?: OngoingSummary | null;
+} | null {
+  try {
+    const raw = localStorage.getItem(WEBAPP_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeWebappCache(data: {
+  profile?: UserProfile;
+  exams?: Exam[];
+  results?: ExamAttempt[];
+  ongoingSummary?: OngoingSummary | null;
+}) {
+  try {
+    const prev = readWebappCache() || {};
+    localStorage.setItem(WEBAPP_CACHE_KEY, JSON.stringify({ ...prev, ...data, updatedAt: Date.now() }));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -156,18 +187,29 @@ export default function App() {
 
   const refreshResults = useCallback(async () => {
     const { results } = await webappApi.results();
-    setPastResults((results || []).map(mapResult));
+    const mapped = (results || []).map(mapResult);
+    setPastResults(mapped);
+    writeWebappCache({ results: mapped });
   }, []);
 
   const refreshExams = useCallback(async () => {
     const { exams } = await webappApi.exams();
     const mapped = (exams || []).map(mapExam);
     setAvailableExams(mapped);
+    writeWebappCache({ exams: mapped });
     return mapped;
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    const cached = readWebappCache();
+    if (cached) {
+      if (cached.profile) setProfile(cached.profile);
+      if (cached.exams) setAvailableExams(cached.exams);
+      if (cached.results) setPastResults(cached.results);
+      if (cached.ongoingSummary !== undefined) setOngoingSummary(cached.ongoingSummary ?? null);
+      setIsLoading(false);
+    }
     (async () => {
       const tg = await waitForTelegramInitData();
       setInTelegram(tg);
@@ -204,8 +246,30 @@ export default function App() {
           soundEnabled: true,
           timerAlerts: true,
           fontSize: 'normal',
+          photoUrl: (session.user as any)?.photo_url || (typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.photo_url) || null,
         });
         if (session.ongoing) setOngoingSummary(session.ongoing);
+        writeWebappCache({
+          profile: {
+            name: displayName,
+            studentId: sid,
+            classLevel: session.student?.className || '',
+            track: session.user?.id ? `Telegram ID ${session.user.id}` : '',
+            telegramAccount: session.user?.username
+              ? `@${session.user.username}`
+              : tgUser?.username
+                ? `@${tgUser.username}`
+                : '',
+            telegramUserId: session.user?.id || tgUser?.id,
+            avatarColor: '#2563eb',
+            theme: 'light',
+            soundEnabled: true,
+            timerAlerts: true,
+            fontSize: 'normal',
+            photoUrl: (session.user as any)?.photo_url || null,
+          },
+          ongoingSummary: session.ongoing || null,
+        });
         const examList = await refreshExams();
         try {
           await refreshResults();
@@ -278,6 +342,14 @@ export default function App() {
         exam = { ...exam, ...mapExam(detail) };
       } catch {
         /* use list summary */
+      }
+      if (exam.startDate) {
+        const startMs = new Date(exam.startDate).getTime();
+        if (Number.isFinite(startMs) && Date.now() < startMs) {
+          throw new Error(
+            `Exam has not started yet. It opens at ${new Date(startMs).toLocaleString()}.`
+          );
+        }
       }
       const data = await webappApi.startExam(exam.id, forceNew);
       if (!data.questions?.length) {

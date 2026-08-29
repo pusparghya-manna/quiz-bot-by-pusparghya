@@ -44,9 +44,20 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onUpdateN
         <div className="px-6 pb-6 pt-0 relative">
           <div className="flex flex-col sm:flex-row items-center sm:items-end justify-between -mt-14 mb-4 gap-3">
             <div className="relative">
-              <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-blue-600 to-sky-400 text-white font-black text-2xl flex items-center justify-center ring-4 ring-white shadow-lg select-none">
-                {initials}
-              </div>
+              {profile.photoUrl ? (
+                <img
+                  src={profile.photoUrl}
+                  alt=""
+                  className="w-24 h-24 rounded-full object-cover ring-4 ring-white shadow-lg"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-blue-600 to-sky-400 text-white flex items-center justify-center ring-4 ring-white shadow-lg select-none">
+                  <svg viewBox="0 0 24 24" className="w-12 h-12" fill="currentColor" aria-hidden>
+                    <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v1.2c0 .7.5 1.2 1.2 1.2h16.8c.7 0 1.2-.5 1.2-1.2v-1.2c0-3.2-6.4-4.8-9.6-4.8z" />
+                  </svg>
+                </div>
+              )}
               <div
                 className="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-emerald-500 ring-2 ring-white"
                 title="Linked"
@@ -136,7 +147,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onUpdateN
                 </span>
               </div>
             </div>
-            {profile.classLevel ? (
+            {profile.classLevel && profile.classLevel.trim().toLowerCase() !== 'all' ? (
               <div className="p-3 rounded-2xl glass-pill flex items-center gap-3">
                 <GraduationCap className="w-4 h-4 text-blue-600 shrink-0" />
                 <div className="min-w-0">

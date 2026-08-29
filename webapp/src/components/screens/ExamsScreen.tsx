@@ -38,9 +38,6 @@ export const ExamsScreen: React.FC<ExamsScreenProps> = ({
   return (
     <div className="space-y-4 pb-8">
       <div>
-        <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
-          Curriculum Assessments
-        </span>
         <h1 className="text-xl md:text-2xl font-bold text-slate-900">Teacher Given Exams</h1>
         <p className="text-xs text-slate-500 mt-0.5">
           Live data from your teacher&apos;s exam database.

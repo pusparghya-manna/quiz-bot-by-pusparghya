@@ -276,6 +276,11 @@ export function registerWebappRoutes(app: Express) {
       const attemptNumber = await store.nextAttemptNumber(examId, auth.userId);
       const windowStart = new Date(exam.startDate).getTime();
       const windowEnd = windowStart + Math.max(1, exam.durationMinutes || 60) * 60 * 1000;
+      if (Number.isFinite(windowStart) && Date.now() < windowStart) {
+        return res.status(403).json({
+          error: `Exam has not started yet. It opens at ${new Date(windowStart).toLocaleString()}.`,
+        });
+      }
       const windowOpen = Date.now() >= windowStart && Date.now() < windowEnd;
       const priorOfficial = (await S(store.getStudentAttempts(examId, auth.userId))).some(
         (a: any) =>

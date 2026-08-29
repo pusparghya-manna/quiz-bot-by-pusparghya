@@ -68,9 +68,6 @@ export const LoadingSkeleton: React.FC = () => (
         </section>
       </div>
 
-      <p className="mt-4 text-center text-[11px] font-semibold text-slate-500">
-        Loading your live student desk…
-      </p>
     </div>
   </div>
 );
@@ -81,7 +78,7 @@ export const ActionLoadingSkeleton: React.FC<{ kind: ActionLoadingKind }> = ({ k
   const isSubmit = kind === 'submit';
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/20 p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 backdrop-blur-sm p-4"
       role="status"
       aria-live="polite"
       aria-busy="true"

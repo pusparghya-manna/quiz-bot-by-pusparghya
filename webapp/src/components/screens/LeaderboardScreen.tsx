@@ -108,55 +108,24 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
         </p>
       </div>
 
-      <section className="space-y-2.5">
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
-          Select exam ({examOptions.length})
+      <section className="space-y-2">
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-500" htmlFor="lb-exam-select">
+          Select exam
         </label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {examOptions.map((opt) => {
-            const isSelected = opt.id === selectedExamId;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setSelectedExamId(opt.id)}
-                className={`p-3.5 transition text-left rounded-2xl ${
-                  isSelected
-                    ? 'glass-card border-blue-400/80 shadow-md ring-2 ring-blue-500/20'
-                    : 'glass-card'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span
-                    className={`text-xs font-bold truncate ${
-                      isSelected ? 'text-blue-900' : 'text-slate-900'
-                    }`}
-                  >
-                    {opt.title}
-                  </span>
-                  {isSelected && (
-                    <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-blue-600 text-white shrink-0">
-                      Active
-                    </span>
-                  )}
-                </div>
-                {(opt.score !== undefined || opt.rank != null) && (
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-200/40 text-[11px]">
-                    <span className="font-bold text-slate-900 font-mono">
-                      {opt.score !== undefined
-                        ? `${opt.score}${opt.maxScore != null ? `/${opt.maxScore}` : ''}`
-                        : '—'}{' '}
-                      pts
-                    </span>
-                    {opt.rank != null && (
-                      <span className="font-bold text-blue-600 font-mono">Rank #{opt.rank}</span>
-                    )}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        <select
+          id="lb-exam-select"
+          value={selectedExamId}
+          onChange={(e) => setSelectedExamId(e.target.value)}
+          className="w-full glass-card rounded-2xl px-4 py-3 text-sm font-bold text-slate-900 border border-slate-200/60 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+        >
+          {examOptions.map((opt) => (
+            <option key={opt.id} value={opt.id}>
+              {opt.title}
+              {opt.rank != null ? ` · Rank #${opt.rank}` : ''}
+              {opt.score !== undefined ? ` · ${opt.score}${opt.maxScore != null ? `/${opt.maxScore}` : ''} pts` : ''}
+            </option>
+          ))}
+        </select>
       </section>
 
       {selectedMeta && (
@@ -204,7 +173,22 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
       )}
 
       {loading && (
-        <p className="text-xs font-semibold text-blue-600 animate-pulse">Loading leaderboard…</p>
+        <div className="space-y-3 animate-pulse" aria-busy="true" aria-label="Loading leaderboard">
+          <div className="glass-card rounded-2xl p-4 space-y-3">
+            <div className="h-4 w-40 rounded bg-slate-200/80" />
+            <div className="h-3 w-56 rounded bg-slate-200/60" />
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              <div className="h-16 rounded-2xl bg-slate-200/70" />
+              <div className="h-16 rounded-2xl bg-slate-200/70" />
+              <div className="h-16 rounded-2xl bg-slate-200/70" />
+            </div>
+          </div>
+          <div className="glass-card rounded-2xl p-4 space-y-2">
+            <div className="h-10 rounded-xl bg-slate-200/70" />
+            <div className="h-10 rounded-xl bg-slate-200/60" />
+            <div className="h-10 rounded-xl bg-slate-200/50" />
+          </div>
+        </div>
       )}
       {error && (
         <div className="glass-card rounded-2xl p-4 text-xs text-amber-800 border border-amber-200">
