@@ -41,27 +41,54 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrQueue, setOcrQueue] = useState<{ id: string; name: string; status: 'pending' | 'running' | 'done' | 'error'; error?: string; file?: File }[]>([]);
   const [ocrProgress, setOcrProgress] = useState({ done: 0, total: 0 });
-  const draftKey = form.id ? `exam_draft_${form.id}` : 'exam_draft_new';
+  const [draftBanner, setDraftBanner] = useState<string | null>(null);
+  // Key off editId (not form.id — form has no id field)
+  const draftKey = editId ? `exam_draft_${editId}` : 'exam_draft_new';
+  const skipDraftSave = React.useRef(false);
 
-  React.useEffect(() => {
+  const readDraft = React.useCallback(() => {
     try {
       const raw = localStorage.getItem(draftKey);
-      if (!raw) return;
+      if (!raw) return null;
       const d = JSON.parse(raw);
-      if (d?.qs && Array.isArray(d.qs) && d.qs.length && qs.length === 0 && step === 'questions') {
-        setQs(d.qs);
-      }
-    } catch { /* */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (!d || typeof d !== 'object') return null;
+      return d as { form?: typeof form; qs?: Question[]; step?: typeof step; savedAt?: number };
+    } catch {
+      return null;
+    }
   }, [draftKey]);
 
-  React.useEffect(() => {
+  const writeDraft = React.useCallback(
+    (payload: { form: typeof form; qs: Question[]; step: typeof step }) => {
+      try {
+        // Never clobber a non-empty draft with an empty shell
+        const existing = readDraft();
+        const hasContent =
+          (payload.qs && payload.qs.length > 0) ||
+          !!(payload.form?.title && String(payload.form.title).trim());
+        if (!hasContent && existing && ((existing.qs && existing.qs.length > 0) || existing.form?.title)) {
+          return;
+        }
+        localStorage.setItem(
+          draftKey,
+          JSON.stringify({ ...payload, savedAt: Date.now() })
+        );
+      } catch { /* quota */ }
+    },
+    [draftKey, readDraft]
+  );
+
+  const clearDraft = React.useCallback(() => {
     try {
-      if (step === 'questions' || step === 'info') {
-        localStorage.setItem(draftKey, JSON.stringify({ form, qs, savedAt: Date.now() }));
-      }
+      localStorage.removeItem(draftKey);
     } catch { /* */ }
-  }, [form, qs, step, draftKey]);
+  }, [draftKey]);
+
+  // Persist while sheet is open
+  React.useEffect(() => {
+    if (!open || skipDraftSave.current) return;
+    writeDraft({ form, qs, step });
+  }, [form, qs, step, open, writeDraft]);
 
   const [ocrPhase, setOcrPhase] = useState<'idle' | 'extract' | 'diagrams' | 'done'>('idle');
   const [ocrPageDataUrl, setOcrPageDataUrl] = useState<string | null>(null);
@@ -118,45 +145,112 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     return !s || e.title.toLowerCase().includes(s) || e.subject?.toLowerCase().includes(s);
   });
 
+  const emptyForm = () => ({
+    title: '', subject: '', className: '', testNumber: '',
+    startDate: toDatetimeLocalIST(new Date().toISOString()),
+    durationMinutes: 60, negativeMarking: 0, status: 'DRAFT' as ExamStatus,
+    randomizeQuestions: false, randomizeOptions: false,
+  });
+
   const reset = () => {
-    setForm({
-      title: '', subject: '', className: '', testNumber: '',
-      startDate: toDatetimeLocalIST(new Date().toISOString()),
-      durationMinutes: 60, negativeMarking: 0, status: 'DRAFT',
-      randomizeQuestions: false, randomizeOptions: false,
-    });
+    skipDraftSave.current = true;
+    setForm(emptyForm());
     setQs([]);
     setStep('info');
     setQMode('list');
     setEditId(null);
     setEditQ(null);
+    setDraftBanner(null);
+    setOcrQueue([]);
+    setOcrProgress({ done: 0, total: 0 });
+    setTimeout(() => { skipDraftSave.current = false; }, 0);
   };
 
-  const startCreate = () => { reset(); setOpen(true); };
+  const applyDraft = (d: { form?: typeof form; qs?: Question[]; step?: typeof step }) => {
+    if (d.form) setForm((prev) => ({ ...prev, ...d.form }));
+    if (Array.isArray(d.qs) && d.qs.length) setQs(d.qs);
+    if (d.step === 'info' || d.step === 'questions' || d.step === 'review') setStep(d.step);
+    const n = Array.isArray(d.qs) ? d.qs.length : 0;
+    if (n > 0) setDraftBanner(`Draft restored — ${n} question${n === 1 ? '' : 's'} kept`);
+  };
+
+  const startCreate = () => {
+    skipDraftSave.current = true;
+    setEditId(null);
+    setEditQ(null);
+    setQMode('list');
+    setOcrQueue([]);
+    setOcrProgress({ done: 0, total: 0 });
+    // Always try restore new-exam draft
+    let restored = false;
+    try {
+      const raw = localStorage.getItem('exam_draft_new');
+      if (raw) {
+        const d = JSON.parse(raw);
+        const hasQs = Array.isArray(d?.qs) && d.qs.length > 0;
+        const hasTitle = !!(d?.form?.title && String(d.form.title).trim());
+        if (hasQs || hasTitle) {
+          setForm({ ...emptyForm(), ...(d.form || {}) });
+          setQs(hasQs ? d.qs : []);
+          setStep(d.step === 'questions' || d.step === 'review' || d.step === 'info' ? d.step : hasQs ? 'questions' : 'info');
+          setDraftBanner(hasQs ? `Draft restored — ${d.qs.length} question${d.qs.length === 1 ? '' : 's'}` : 'Draft form restored');
+          restored = true;
+        }
+      }
+    } catch { /* */ }
+    if (!restored) {
+      setForm(emptyForm());
+      setQs([]);
+      setStep('info');
+      setDraftBanner(null);
+    }
+    setOpen(true);
+    setTimeout(() => { skipDraftSave.current = false; }, 0);
+  };
+
   const startEdit = (exam: Exam) => {
+    skipDraftSave.current = true;
     setEditId(exam.id);
-    setForm({
+    const serverQs = (exam.questions || []).map((q) => {
+      const opts = [...(q.options || ['', '', '', ''])].slice(0, 4);
+      return {
+        ...q,
+        options: opts,
+        imagePreview: q.imagePreview || null,
+      };
+    });
+    const serverForm = {
       title: exam.title, subject: exam.subject || '', className: exam.className || '',
       testNumber: exam.testNumber || '', startDate: toDatetimeLocalIST(exam.startDate) || '',
       durationMinutes: exam.durationMinutes || 60, negativeMarking: exam.negativeMarking || 0,
       status: exam.status, randomizeQuestions: !!exam.randomizeQuestions, randomizeOptions: !!exam.randomizeOptions,
-    });
-    setQs(
-      (exam.questions || []).map((q) => {
-        const opts = [...(q.options || ['', '', '', ''])].slice(0, 4);
-        const fileId = q.image?.fileId;
-        return {
-          ...q,
-          options: opts,
-          // Restore diagram preview after exam was saved (via media proxy)
-          imagePreview: q.imagePreview || null,
-        };
-      })
-    );
-    setOcrPageDataUrl(null); // no original page after reload — expand/crop limited; Replace still works
-    setStep('info');
+    };
+    // Prefer local draft for this exam if it has more/newer questions
+    let usedDraft = false;
+    try {
+      const raw = localStorage.getItem(`exam_draft_${exam.id}`);
+      if (raw) {
+        const d = JSON.parse(raw);
+        const draftQs: Question[] = Array.isArray(d?.qs) ? d.qs : [];
+        if (draftQs.length > serverQs.length) {
+          setForm({ ...serverForm, ...(d.form || {}) });
+          setQs(draftQs);
+          setStep(d.step === 'questions' || d.step === 'review' || d.step === 'info' ? d.step : 'questions');
+          setDraftBanner(`Unsaved draft restored — ${draftQs.length} questions`);
+          usedDraft = true;
+        }
+      }
+    } catch { /* */ }
+    if (!usedDraft) {
+      setForm(serverForm);
+      setQs(serverQs);
+      setStep('info');
+      setDraftBanner(null);
+    }
+    setOcrPageDataUrl(null);
     setQMode('list');
     setOpen(true);
+    setTimeout(() => { skipDraftSave.current = false; }, 0);
   };
 
   const saveExam = async () => {
@@ -194,6 +288,11 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       }
       const saved = await res.json().catch(() => ({}));
       const newId = saved.id || editId;
+      try {
+        localStorage.removeItem(editId ? `exam_draft_${editId}` : 'exam_draft_new');
+        if (newId && newId !== editId) localStorage.removeItem(`exam_draft_${newId}`);
+      } catch { /* */ }
+      setDraftBanner(null);
       setOpen(false);
       onRefresh();
       if (newId) {
@@ -351,11 +450,10 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     }
   };
 
-  const processOneOcrFile = async (file: File): Promise<number> => {
+  const processOneOcrFile = async (file: File, subjectHint: string): Promise<{ count: number; pageDataUrl: string; mime: string }> => {
     const prepared = await prepareImageForOcr(file);
     const pageDataUrl = `data:${prepared.mimeType};base64,${prepared.base64}`;
-    setOcrPageDataUrl(pageDataUrl);
-    setOcrPageMime(prepared.mimeType);
+    // Fire OCR network call immediately (parallel-safe; no shared mutable state during request)
     const res = await api('/api/ocr/parse', {
       method: 'POST',
       body: JSON.stringify({ fileBase64: prepared.base64, mimeType: prepared.mimeType }),
@@ -365,6 +463,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     if (!res.ok) throw new Error(data.error || 'OCR failed');
     const list: any[] = Array.isArray(data) ? data : data.questions || data.parsed || [];
     const mapped: Question[] = [];
+    const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     for (let i = 0; i < list.length; i++) {
       const item = list[i];
       const bbox =
@@ -378,7 +477,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
         }
       }
       mapped.push({
-        id: `Q_OCR_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
+        id: `Q_OCR_${stamp}_${i}`,
         question: item.question || item.text || '',
         options: (item.options || ['', '', '', '']).slice(0, 4),
         answer: normalizeAnswer(
@@ -387,7 +486,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
         ),
         marks: item.marks ?? 1,
         negativeMarks: item.negativeMarks ?? 0,
-        subject: item.subject || form.subject,
+        subject: item.subject || subjectHint,
         explanation: item.explanation || '',
         image_bbox: bbox,
         imagePreview: preview,
@@ -395,73 +494,103 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
       });
     }
     const validQuestions = mapped.filter((q) => q.question.trim());
-    setQs((prev) => [...prev, ...validQuestions]);
-    return validQuestions.length;
+    if (validQuestions.length) {
+      setQs((prev) => [...prev, ...validQuestions]);
+    }
+    return { count: validQuestions.length, pageDataUrl, mime: prepared.mimeType };
+  };
+
+  // Shared running set so adding more images mid-flight stays parallel (up to CONCURRENCY)
+  const ocrRunningRef = React.useRef(0);
+  const ocrPendingRef = React.useRef<{ id: string; name: string; file: File }[]>([]);
+  const OCR_CONCURRENCY = 3;
+
+  const pumpOcrQueue = async () => {
+    const subjectHint = form.subject;
+    while (ocrPendingRef.current.length > 0 && ocrRunningRef.current < OCR_CONCURRENCY) {
+      const item = ocrPendingRef.current.shift()!;
+      ocrRunningRef.current += 1;
+      setOcrBusy(true);
+      setOcrPhase('extract');
+      setOcrQueue((prev) => prev.map((x) => (x.id === item.id ? { ...x, status: 'running' } : x)));
+      // Do NOT await here — launch job and continue pumping
+      (async () => {
+        try {
+          const { count, pageDataUrl, mime } = await processOneOcrFile(item.file, subjectHint);
+          // Keep last page for expand/crop tools
+          setOcrPageDataUrl(pageDataUrl);
+          setOcrPageMime(mime);
+          setOcrQueue((prev) => prev.map((x) => (x.id === item.id ? { ...x, status: 'done' } : x)));
+          if (count > 0) {
+            setToastMsg((m) => {
+              /* progressive feedback handled below */
+              return m;
+            });
+          }
+        } catch (e: any) {
+          setOcrQueue((prev) =>
+            prev.map((x) =>
+              x.id === item.id ? { ...x, status: 'error', error: e?.message || 'OCR failed' } : x
+            )
+          );
+        } finally {
+          ocrRunningRef.current -= 1;
+          setOcrProgress((p) => ({ ...p, done: p.done + 1 }));
+          // Pump more from pending
+          void pumpOcrQueue();
+          if (ocrRunningRef.current === 0 && ocrPendingRef.current.length === 0) {
+            setOcrBusy(false);
+            setOcrPhase('done');
+            setQMode('list');
+            setOcrQueue((prev) => {
+              const doneCount = prev.filter((x) => x.status === 'done').length;
+              if (doneCount > 0) {
+                setToastMsg(`OCR finished ${doneCount} image(s) — review questions, then save exam`);
+                setTimeout(() => setToastMsg(''), 5000);
+              }
+              return prev;
+            });
+          }
+        }
+      })();
+    }
   };
 
   const onOcrFiles = async (files: FileList | File[]) => {
     const arr = Array.from(files || []).filter((f) => f.type.startsWith('image/'));
     if (!arr.length) return;
     const items = arr.map((f, i) => ({
-      id: `ocr_${Date.now()}_${i}`,
+      id: `ocr_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
       name: f.name || `Image ${i + 1}`,
       status: 'pending' as const,
       file: f,
     }));
     setOcrQueue((prev) => [...prev, ...items]);
-    setOcrBusy(true);
-    setOcrProgress({ done: 0, total: items.length });
-    setOcrPhase('extract');
-    let totalAdded = 0;
-    const concurrency = Math.min(3, items.length);
-    let idx = 0;
-    const runNext = async (): Promise<void> => {
-      const my = idx++;
-      if (my >= items.length) return;
-      const item = items[my];
-      setOcrQueue((prev) => prev.map((x) => (x.id === item.id ? { ...x, status: 'running' } : x)));
-      try {
-        const n = await processOneOcrFile(item.file!);
-        totalAdded += n;
-        setOcrQueue((prev) => prev.map((x) => (x.id === item.id ? { ...x, status: 'done' } : x)));
-      } catch (e: any) {
-        setOcrQueue((prev) =>
-          prev.map((x) =>
-            x.id === item.id ? { ...x, status: 'error', error: e?.message || 'OCR failed' } : x
-          )
-        );
-      } finally {
-        setOcrProgress((p) => ({ ...p, done: p.done + 1 }));
-      }
-      await runNext();
-    };
-    await Promise.all(Array.from({ length: concurrency }, () => runNext()));
-    setOcrBusy(false);
-    setOcrPhase('done');
-    setQMode('list');
-    if (totalAdded > 0) {
-      setToastMsg(`OCR added ${totalAdded} questions from ${items.length} image(s) — review, then save exam`);
-      setTimeout(() => setToastMsg(''), 5000);
+    setOcrProgress((p) => ({
+      done: p.done,
+      total: p.total + items.length,
+    }));
+    // If starting fresh batch, reset counters when previous fully idle
+    if (ocrRunningRef.current === 0 && ocrPendingRef.current.length === 0) {
+      setOcrProgress({ done: 0, total: items.length });
     }
+    for (const it of items) {
+      ocrPendingRef.current.push({ id: it.id, name: it.name, file: it.file! });
+    }
+    setOcrBusy(true);
+    setOcrPhase('extract');
+    // Launch up to OCR_CONCURRENCY jobs in parallel immediately
+    void pumpOcrQueue();
   };
 
   const retryOcrItem = async (id: string) => {
     const item = ocrQueue.find((x) => x.id === id);
     if (!item?.file) return;
-    setOcrQueue((prev) => prev.map((x) => (x.id === id ? { ...x, status: 'running', error: undefined } : x)));
+    setOcrQueue((prev) => prev.map((x) => (x.id === id ? { ...x, status: 'pending', error: undefined } : x)));
+    ocrPendingRef.current.push({ id: item.id, name: item.name, file: item.file });
+    setOcrProgress((p) => ({ done: p.done, total: Math.max(p.total, p.done + 1) }));
     setOcrBusy(true);
-    try {
-      const n = await processOneOcrFile(item.file);
-      setOcrQueue((prev) => prev.map((x) => (x.id === id ? { ...x, status: 'done' } : x)));
-      if (n > 0) toastSuccess(`Retry added ${n} questions`);
-    } catch (e: any) {
-      setOcrQueue((prev) =>
-        prev.map((x) => (x.id === id ? { ...x, status: 'error', error: e?.message || 'OCR failed' } : x))
-      );
-      toastError(e?.message || 'Retry failed');
-    } finally {
-      setOcrBusy(false);
-    }
+    void pumpOcrQueue();
   };
 
   const applyCropFromEditor = async (bbox: BBox) => {
@@ -763,6 +892,12 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
 
           {step === 'info' && (
             <div className="space-y-2.5 sm:space-y-3">
+              {draftBanner && (
+                <div className="flex items-center justify-between gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span className="font-medium">{draftBanner}</span>
+                  <button type="button" className="text-[11px] font-bold text-amber-900 underline shrink-0" onClick={() => setDraftBanner(null)}>Dismiss</button>
+                </div>
+              )}
               <div>
                 <label className={labelReq}>
                   Exam title <span className="text-red-500">*</span>
@@ -958,6 +1093,26 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                 ))}
               </div>
 
+              {draftBanner && (
+                <div className="flex items-center justify-between gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span className="font-medium">{draftBanner}</span>
+                  <button
+                    type="button"
+                    className="text-[11px] font-bold text-amber-900 underline shrink-0"
+                    onClick={() => {
+                      clearDraft();
+                      setDraftBanner(null);
+                      if (!editId) {
+                        setQs([]);
+                        setForm(emptyForm());
+                        setStep('info');
+                      }
+                    }}
+                  >
+                    Discard
+                  </button>
+                </div>
+              )}
               {toastMsg && <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2"><IconCheck className="w-3.5 h-3.5 shrink-0" />{toastMsg}</div>}
 
               {qMode === 'list' && (
