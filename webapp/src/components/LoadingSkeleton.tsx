@@ -12,7 +12,6 @@ const Logo: React.FC = () => (
     height="56"
     loading="eager"
     decoding="async"
-    draggable="false"
   />
 );
 

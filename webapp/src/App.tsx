@@ -500,7 +500,6 @@ export default function App() {
             height="64"
             loading="eager"
             decoding="async"
-            draggable="false"
           />
           <div>
             <h1 className="text-lg font-bold text-slate-900">Telegram login required</h1>
@@ -544,7 +543,6 @@ export default function App() {
                 height="40"
                 loading="eager"
                 decoding="async"
-                draggable="false"
               />
               <div>
                 <h1 className="text-sm md:text-base font-bold text-slate-900 leading-tight">

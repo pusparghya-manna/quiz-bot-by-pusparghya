@@ -259,5 +259,3 @@ export const AnswersScreen: React.FC<AnswersScreenProps> = ({
     </div>
   );
 };
-'''
-print('AnswersScreen written')
