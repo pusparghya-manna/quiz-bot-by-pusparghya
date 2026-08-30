@@ -81,11 +81,18 @@ async function api<T>(
       signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data as any).error || `Request failed (${res.status})`);
+    if (!res.ok) {
+      const error = new Error((data as any).error || `Request failed (${res.status})`);
+      (error as any).status = res.status;
+      (error as any).retryable = Boolean((data as any).retryable) || res.status >= 500;
+      throw error;
+    }
     return data as T;
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      throw new Error('Request timed out. Please tap Resume again.');
+      const timeoutError = new Error('Resume request is taking longer than expected. Retrying…');
+      (timeoutError as any).retryable = true;
+      throw timeoutError;
     }
     throw err;
   } finally {
@@ -157,6 +164,23 @@ export type ApiStudent = {
   status: string;
 };
 
+async function apiWithRetry<T>(
+  path: string,
+  body: Record<string, unknown> | undefined,
+  options: { timeoutMs?: number; maxRetries?: number } = {}
+): Promise<T> {
+  const maxRetries = options.maxRetries ?? 1;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await api<T>(path, body, { timeoutMs: options.timeoutMs });
+    } catch (err: any) {
+      const retryable = Boolean(err?.retryable) || err?.status === 503 || err?.status === 504;
+      if (!retryable || attempt >= maxRetries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+    }
+  }
+}
+
 export const webappApi = {
   session: () =>
     api<{
@@ -182,12 +206,12 @@ export const webappApi = {
     api<{ exam: ApiExamSummary }>('/api/webapp/exam', { examId }),
 
   startExam: (examId: string, forceNew?: boolean) =>
-    api<{
+    apiWithRetry<{
       attempt: ApiAttempt;
       exam: ApiExamSummary;
       questions: ApiQuestion[];
       secondsLeft: number;
-    }>('/api/webapp/start', { examId, forceNew: !!forceNew }, { timeoutMs: 15_000 }),
+    }>('/api/webapp/start', { examId, forceNew: !!forceNew }, { timeoutMs: 30_000, maxRetries: 2 }),
 
   saveAnswer: (attemptId: string, questionId: string, optionIndex: number | null) =>
     api<{ ok: boolean }>('/api/webapp/answer', {
