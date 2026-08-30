@@ -90,7 +90,11 @@ async function api<T>(
     return data as T;
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      const timeoutError = new Error('Resume request is taking longer than expected. Retrying…');
+      const timeoutError = new Error(
+        path.endsWith('/pause')
+          ? 'Pause update is taking longer than expected. Retrying…'
+          : 'Resume request is taking longer than expected. Retrying…'
+      );
       (timeoutError as any).retryable = true;
       throw timeoutError;
     }
@@ -174,7 +178,8 @@ async function apiWithRetry<T>(
     try {
       return await api<T>(path, body, { timeoutMs: options.timeoutMs });
     } catch (err: any) {
-      const retryable = Boolean(err?.retryable) || err?.status === 503 || err?.status === 504;
+      const networkFailure = /failed to fetch|networkerror|load failed/i.test(String(err?.message || err));
+      const retryable = Boolean(err?.retryable) || err?.status === 503 || err?.status === 504 || networkFailure;
       if (!retryable || attempt >= maxRetries) throw err;
       await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
     }
@@ -224,13 +229,13 @@ export const webappApi = {
     api<{ ok: boolean }>('/api/webapp/index', { attemptId, index }),
 
   pause: (attemptId: string, pause: boolean) =>
-    api<{
+    apiWithRetry<{
       ok: boolean;
       paused: boolean;
       pausedAt: string | null;
       pausedSeconds: number;
       secondsLeft: number;
-    }>('/api/webapp/pause', { attemptId, pause }),
+    }>('/api/webapp/pause', { attemptId, pause }, { timeoutMs: 10_000, maxRetries: 1 }),
 
   submit: (attemptId: string, answers?: Record<string, number>) =>
     api<{ attempt: ApiAttempt }>('/api/webapp/submit', {

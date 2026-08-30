@@ -59,6 +59,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const soundEnabledRef = useRef(soundEnabled);
   const answersRef = useRef(attempt.answers);
   const pausedRef = useRef(false);
+  const pauseBusyRef = useRef(false);
 
   useEffect(() => {
     onTimeUpRef.current = onTimeUp;
@@ -97,7 +98,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
   useEffect(() => {
     const timer = setInterval(() => {
-      if (pausedRef.current) return; // practice pause freezes countdown
+      if (pausedRef.current || pauseBusyRef.current) return; // freeze during pause persistence too
       setSecondsLeft((s) => {
         if (s <= 1) {
           if (!timeUpFired.current) {
@@ -187,6 +188,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const handlePauseToggle = async () => {
     if (!isPractice || pauseBusy || submitting) return;
     const nextPaused = !paused;
+    pauseBusyRef.current = true;
     setPauseBusy(true);
     setPauseError(null);
     setPaused(nextPaused);
@@ -204,6 +206,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       setPaused(!nextPaused);
       setPauseError(err?.message || 'Could not update the practice pause');
     } finally {
+      pauseBusyRef.current = false;
       setPauseBusy(false);
     }
   };

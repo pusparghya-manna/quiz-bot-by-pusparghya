@@ -68,6 +68,17 @@ export const attemptRepository = {
     });
   },
 
+  /** Update only pause metadata; never rewrite the saved answer set. */
+  async updatePauseState(id: string, pausedAt: string | null, pausedSeconds: number): Promise<boolean> {
+    const result = await db.execute({
+      sql: `UPDATE attempts
+            SET paused_at = ?, paused_seconds = ?
+            WHERE id = ? AND status = 'IN_PROGRESS' AND is_official = 0`,
+      args: [pausedAt, pausedSeconds, id],
+    });
+    return Number((result as any).rowsAffected ?? 0) > 0;
+  },
+
   /** Conditional submit — returns whether a row transitioned from IN_PROGRESS. */
   async submitIfInProgress(attempt: Attempt): Promise<boolean> {
     return withWriteTx(async (tx) => {

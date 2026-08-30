@@ -465,6 +465,17 @@ class Store {
     return attempt;
   }
 
+  /** Persist only practice pause metadata; avoids rewriting all attempt answers. */
+  async updateAttemptPause(attempt: Attempt): Promise<boolean> {
+    const idx = this.data.attempts.findIndex((a) => a.id === attempt.id);
+    if (idx >= 0) this.data.attempts[idx] = attempt;
+    return attemptRepository.updatePauseState(
+      attempt.id,
+      attempt.pausedAt || null,
+      attempt.pausedSeconds || 0,
+    );
+  }
+
   getQuestions() {
     return this.data.questionBank;
   }

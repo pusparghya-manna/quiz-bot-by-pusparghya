@@ -87,6 +87,23 @@ function findAttemptById(attemptId: string): any | undefined {
   return all.find((a: any) => a.id === attemptId);
 }
 
+const pausePersistenceQueue = new Map<string, Promise<boolean>>();
+
+function queuePausePersistence(attempt: any): Promise<boolean> {
+  const snapshot = { ...attempt };
+  const previous = pausePersistenceQueue.get(attempt.id) || Promise.resolve(true);
+  const next = previous
+    .catch(() => false)
+    .then(() => (store as any).updateAttemptPause(snapshot));
+  const tracked = next.finally(() => {
+    if (pausePersistenceQueue.get(attempt.id) === tracked) {
+      pausePersistenceQueue.delete(attempt.id);
+    }
+  });
+  pausePersistenceQueue.set(attempt.id, tracked);
+  return tracked;
+}
+
 export function registerWebappRoutes(app: Express) {
   app.post('/api/webapp/session', async (req, res) => {
     try {
@@ -391,7 +408,18 @@ export function registerWebappRoutes(app: Express) {
         attempt.pausedAt = null;
       }
 
-      await store.saveAttempt(attempt);
+      if (typeof (store as any).updateAttemptPause === 'function') {
+        // Do not make the student wait on a slow remote DB round trip. Writes
+        // are serialized per attempt and continue in the background after a
+        // short grace period, so rapid pause/resume taps remain ordered.
+        const persisted = queuePausePersistence(attempt);
+        await Promise.race([
+          persisted,
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1500)),
+        ]);
+      } else {
+        await store.saveAttempt(attempt);
+      }
       res.json({
         ok: true,
         paused: Boolean(attempt.pausedAt),
