@@ -41,28 +41,45 @@ const ADDITIVE_COLUMNS: { table: string; column: string; ddl: string }[] = [
 ];
 
 async function ensureAdditiveColumns(): Promise<void> {
-  for (const { table, column, ddl } of ADDITIVE_COLUMNS) {
+  const tables = [...new Set(ADDITIVE_COLUMNS.map(({ table }) => table))];
+  const existing = new Map<string, Set<string>>();
+  for (const table of tables) {
     try {
       const info = await db.execute(`PRAGMA table_info(${table})`);
-      const cols = new Set((info.rows as any[]).map((r) => String(r.name)));
-      if (!cols.has(column)) {
+      existing.set(table, new Set((info.rows as any[]).map((r) => String(r.name))));
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (!msg.includes('no such table')) console.warn(`[schema] inspect ${table}:`, msg);
+      existing.set(table, new Set());
+    }
+  }
+
+  const missing = ADDITIVE_COLUMNS.filter(({ table, column }) => !existing.get(table)?.has(column));
+  if (missing.length === 0) return;
+
+  // One remote batch is substantially faster than one request per ALTER TABLE.
+  try {
+    await db.batch(missing.map(({ ddl }) => ({ sql: ddl, args: [] })), 'write');
+    for (const { table, column } of missing) console.log(`[schema] added ${table}.${column}`);
+  } catch (batchError: any) {
+    // Keep the migration resilient to a concurrent deploy that added a column first.
+    console.warn('[schema] additive batch retrying individually:', batchError?.message || batchError);
+    for (const { table, column, ddl } of missing) {
+      try {
         await db.execute(ddl);
         console.log(`[schema] added ${table}.${column}`);
-      }
-    } catch (e: any) {
-      // Table may not exist yet (created by SCHEMA_SQL first) or column already exists
-      const msg = String(e?.message || e);
-      if (!msg.includes('duplicate column') && !msg.includes('no such table')) {
-        console.warn(`[schema] alter ${table}.${column}:`, msg);
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        if (!msg.includes('duplicate column') && !msg.includes('no such table')) {
+          console.warn(`[schema] alter ${table}.${column}:`, msg);
+        }
       }
     }
   }
 }
-
 export async function ensureSchema(): Promise<void> {
-  for (const stmt of SCHEMA_SQL.split(';').map((s) => s.trim()).filter(Boolean)) {
-    await db.execute(stmt);
-  }
+  const statements = SCHEMA_SQL.split(';').map((s) => s.trim()).filter(Boolean);
+  await db.batch(statements.map((sql) => ({ sql, args: [] })), 'write');
   await ensureAdditiveColumns();
 }
 
