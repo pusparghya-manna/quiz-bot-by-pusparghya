@@ -122,6 +122,8 @@ export type ApiAttempt = {
   skippedCount?: number;
   timeTakenSeconds?: number;
   expiresAt?: string;
+  pausedAt?: string | null;
+  pausedSeconds?: number;
   startedAt?: string;
   submittedAt?: string | null;
   isOfficial?: boolean;
@@ -181,6 +183,15 @@ export const webappApi = {
 
   setIndex: (attemptId: string, index: number) =>
     api<{ ok: boolean }>('/api/webapp/index', { attemptId, index }),
+
+  pause: (attemptId: string, pause: boolean) =>
+    api<{
+      ok: boolean;
+      paused: boolean;
+      pausedAt: string | null;
+      pausedSeconds: number;
+      secondsLeft: number;
+    }>('/api/webapp/pause', { attemptId, pause }),
 
   submit: (attemptId: string, answers?: Record<string, number>) =>
     api<{ attempt: ApiAttempt }>('/api/webapp/submit', {

@@ -49,7 +49,9 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(attempt.secondsLeft);
-  const [paused, setPaused] = useState(false);
+  const [paused, setPaused] = useState(Boolean(attempt.pausedAt));
+  const [pauseBusy, setPauseBusy] = useState(false);
+  const [pauseError, setPauseError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timeUpFired = useRef(false);
@@ -143,6 +145,9 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       answers: { ...attempt.answers, [currentQ.id]: optIdx },
       visited: { ...attempt.visited, [currentQ.id]: true },
     };
+    // Keep the auto-submit snapshot current even if the timer ticks before
+    // React has committed the parent state update.
+    answersRef.current = next.answers;
     onUpdateAttempt(next);
     persistAnswer(currentQ.id, optIdx);
   };
@@ -152,6 +157,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     soundManager.playClick(soundEnabled);
     const answers = { ...attempt.answers };
     delete answers[currentQ.id];
+    answersRef.current = answers;
     onUpdateAttempt({ ...attempt, answers });
     persistAnswer(currentQ.id, null);
   };
@@ -176,6 +182,30 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     if (hasAnswer) return 'answered';
     if (isVisited) return 'unanswered';
     return 'not-visited';
+  };
+
+  const handlePauseToggle = async () => {
+    if (!isPractice || pauseBusy || submitting) return;
+    const nextPaused = !paused;
+    setPauseBusy(true);
+    setPauseError(null);
+    setPaused(nextPaused);
+    try {
+      const state = await webappApi.pause(attempt.id, nextPaused);
+      setPaused(state.paused);
+      setSecondsLeft(state.secondsLeft);
+      onUpdateAttempt({
+        ...attempt,
+        pausedAt: state.pausedAt,
+        pausedSeconds: state.pausedSeconds,
+        secondsLeft: state.secondsLeft,
+      });
+    } catch (err: any) {
+      setPaused(!nextPaused);
+      setPauseError(err?.message || 'Could not update the practice pause');
+    } finally {
+      setPauseBusy(false);
+    }
   };
 
   const answeredCount = questions.filter((q) => attempt.answers[q.id] !== undefined).length;
@@ -212,11 +242,17 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
           <span>Practice paused — timer frozen. Tap Resume when ready.</span>
           <button
             type="button"
-            onClick={() => setPaused(false)}
-            className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold shrink-0"
+            onClick={() => void handlePauseToggle()}
+            disabled={pauseBusy}
+            className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold shrink-0 disabled:opacity-60"
           >
-            Resume
+            {pauseBusy ? 'Saving…' : 'Resume'}
           </button>
+        </div>
+      )}
+      {pauseError && isPractice && !submitting && (
+        <div className="mb-2 rounded-xl border border-rose-200 bg-rose-50/90 px-3 py-2 text-[11px] font-semibold text-rose-700">
+          {pauseError}
         </div>
       )}
       <header className="sticky top-0 z-30 glass-header -mx-4 px-4 py-2.5 shadow-2xs">
@@ -245,9 +281,10 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                 type="button"
                 onClick={() => {
                   soundManager.playClick(soundEnabled);
-                  setPaused((p) => !p);
+                  void handlePauseToggle();
                 }}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-bold border ${
+                disabled={pauseBusy}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-bold border disabled:opacity-60 ${
                   paused
                     ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
                     : 'bg-amber-50 text-amber-800 border-amber-200'

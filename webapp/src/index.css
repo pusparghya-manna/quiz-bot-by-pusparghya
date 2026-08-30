@@ -25,6 +25,14 @@
     overscroll-behavior-x: none;
   }
 
+  .protected-logo {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+    touch-action: manipulation;
+  }
+
   .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }

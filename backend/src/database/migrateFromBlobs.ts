@@ -23,6 +23,8 @@ const ADDITIVE_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: 'students', column: 'status', ddl: "ALTER TABLE students ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'" },
   { table: 'attempt_answers', column: 'updated_at', ddl: 'ALTER TABLE attempt_answers ADD COLUMN updated_at TEXT' },
   { table: 'attempts', column: 'rank', ddl: 'ALTER TABLE attempts ADD COLUMN rank INTEGER' },
+  { table: 'attempts', column: 'paused_at', ddl: 'ALTER TABLE attempts ADD COLUMN paused_at TEXT' },
+  { table: 'attempts', column: 'paused_seconds', ddl: 'ALTER TABLE attempts ADD COLUMN paused_seconds INTEGER NOT NULL DEFAULT 0' },
   { table: 'attempts', column: 'is_official', ddl: 'ALTER TABLE attempts ADD COLUMN is_official INTEGER NOT NULL DEFAULT 1' },
   { table: 'attempts', column: 'attempt_number', ddl: 'ALTER TABLE attempts ADD COLUMN attempt_number INTEGER NOT NULL DEFAULT 1' },
   { table: 'exams', column: 'updated_at', ddl: 'ALTER TABLE exams ADD COLUMN updated_at TEXT' },

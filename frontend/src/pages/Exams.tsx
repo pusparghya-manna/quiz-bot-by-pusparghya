@@ -28,7 +28,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
   const [step, setStep] = useState<'info' | 'questions' | 'review'>('info');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [actionLabel, setActionLabel] = useState('Working…');
+  const [actionLabel, setActionLabel] = useState('Loading…');
   const [form, setForm] = useState({
     title: '', subject: '', className: '', testNumber: '', startDate: '',
     durationMinutes: 60, negativeMarking: 0, status: 'DRAFT' as ExamStatus,

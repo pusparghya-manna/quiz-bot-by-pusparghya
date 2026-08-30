@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 type QStatus = 'correct' | 'wrong' | 'unattempted';
-type Filter = 'all' | 'correct' | 'wrong' | 'unattempted';
 
 interface ReviewQuestion {
   index: number;
@@ -65,7 +64,6 @@ export default function TelegramReview() {
   const [data, setData] = useState<ReviewPayload | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<Filter>('all');
   const [bookmarks, setBookmarks] = useState<Record<string, boolean>>({});
   const [gridCollapsed, setGridCollapsed] = useState(false);
   const gridCollapsedRef = useRef(false);
@@ -127,11 +125,6 @@ export default function TelegramReview() {
     load();
   }, [attemptId]);
 
-  const filtered = useMemo(() => {
-    if (!data) return [];
-    if (filter === 'all') return data.questions;
-    return data.questions.filter((q) => q.status === filter);
-  }, [data, filter]);
 
   const settleScroll = (ms = 550) => {
     ignoreScrollUntil.current = Date.now() + ms;
@@ -239,7 +232,14 @@ export default function TelegramReview() {
   if (loading) {
     return (
       <div style={s.shell}>
-        <div style={s.centerCard}>⏳ Loading review…</div>
+        <div style={s.loadingCard} role="status" aria-live="polite" aria-busy="true">
+          <div style={s.loadingLogo} aria-hidden>▦</div>
+          <div style={s.skeletonLineWide} />
+          <div style={s.skeletonLine} />
+          <div style={s.skeletonBlock} />
+          <div style={s.skeletonBlock} />
+          <span style={s.loadingLabel}>Loading solutions</span>
+        </div>
       </div>
     );
   }
@@ -269,51 +269,23 @@ export default function TelegramReview() {
             </div>
             <p style={s.examName}>{exam.title}</p>
           </div>
-          <div style={s.scoreBadge}>
-            <span style={s.scoreStar}>⭐</span>
-            <div>
-              <div style={s.scoreNums}>
-                {summary.score} / {summary.maxScore}
+          <div style={s.headerActions}>
+            <div style={s.scoreBadge}>
+              <span style={s.scoreStar}>⭐</span>
+              <div>
+                <div style={s.scoreNums}>
+                  {summary.score} / {summary.maxScore}
+                </div>
+                <div style={s.scorePct}>Score ({scorePct}%)</div>
               </div>
-              <div style={s.scorePct}>Score ({scorePct}%)</div>
             </div>
+            <button type="button" style={s.paletteBtn} onClick={openGrid} aria-label="Open question palette">
+              <span aria-hidden>▦</span>
+              <span>Palette</span>
+            </button>
           </div>
         </div>
 
-        <div style={s.filterRow}>
-          {(
-            [
-              ['all', 'ALL QUESTIONS', summary.total, '#2563eb', '#eff6ff'],
-              ['correct', 'CORRECT', summary.correct, '#16a34a', '#f0fdf4'],
-              ['wrong', 'WRONG', summary.wrong, '#dc2626', '#fef2f2'],
-              ['unattempted', 'SKIPPED', summary.unattempted, '#d97706', '#fffbeb'],
-            ] as [Filter, string, number, string, string][]
-          ).map(([key, label, count, color, bg]) => {
-            const active = filter === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setFilter(key)}
-                style={{
-                  ...s.filterCard,
-                  borderColor: active ? color : '#e2e8f0',
-                  background: active ? bg : '#fff',
-                  boxShadow: active ? `0 0 0 1px ${color}33` : 'none',
-                }}
-              >
-                <span style={{ ...s.filterCount, color: active ? color : '#0f172a' }}>{count}</span>
-                <span style={{ ...s.filterLabel, color: active ? color : '#64748b' }}>
-                  {key === 'all' && '▦ '}
-                  {key === 'correct' && '✅ '}
-                  {key === 'wrong' && '❌ '}
-                  {key === 'unattempted' && '○ '}
-                  {label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
       </header>
 
       {/* Sticky collapsible question grid */}
@@ -325,19 +297,26 @@ export default function TelegramReview() {
             onClick={openGrid}
             aria-expanded={false}
           >
-            <span style={s.compactBarLeft}>☰ Questions · {filtered.length}</span>
+              <span style={s.compactBarLeft}>☰ Questions · {data.questions.length}</span>
             <span style={s.compactBarRight}>Show grid ▾</span>
           </button>
         ) : (
           <div style={s.gridPanel}>
-            <div style={s.gridPanelHead}>
-              <span style={s.gridHint}>Tap a number to jump · scroll down to hide</span>
+              <div style={s.gridPanelHead}>
+              <div>
+                <span style={s.gridHint}>Tap a number to jump · scroll down to hide</span>
+                <div style={s.gridLegend} aria-label="Question status legend">
+                  <span><i style={{ ...s.legendDot, background: '#16a34a' }} /> Correct {summary.correct}</span>
+                  <span><i style={{ ...s.legendDot, background: '#dc2626' }} /> Wrong {summary.wrong}</span>
+                  <span><i style={{ ...s.legendDot, background: '#94a3b8' }} /> Skipped {summary.unattempted}</span>
+                </div>
+              </div>
               <button type="button" style={s.collapseBtn} onClick={closeGrid}>
                 Hide ▴
               </button>
             </div>
             <div style={s.grid}>
-              {filtered.map((q) => {
+              {data.questions.map((q) => {
                 const bg =
                   q.status === 'correct'
                     ? '#dcfce7'
@@ -379,7 +358,7 @@ export default function TelegramReview() {
       </div>
 
       <main style={s.main}>
-        {filtered.map((q) => {
+        {data.questions.map((q) => {
           const bookmarked = !!bookmarks[q.id];
           return (
             <article key={q.id} id={`q-${q.index}`} style={s.qCard}>
@@ -536,6 +515,12 @@ const s: Record<string, CSSProperties> = {
     lineHeight: 1.35,
     wordBreak: 'break-word',
   },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'stretch',
+    gap: 6,
+    flexShrink: 0,
+  },
   scoreBadge: {
     display: 'flex',
     alignItems: 'center',
@@ -545,6 +530,21 @@ const s: Record<string, CSSProperties> = {
     borderRadius: 14,
     padding: '8px 12px',
     flexShrink: 0,
+  },
+  paletteBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 5,
+    border: '1px solid #bfdbfe',
+    background: '#eff6ff',
+    color: '#1d4ed8',
+    borderRadius: 12,
+    padding: '7px 9px',
+    fontSize: 11,
+    fontWeight: 800,
+    cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+    whiteSpace: 'nowrap',
   },
   scoreStar: { fontSize: 18 },
   scoreNums: {
@@ -559,34 +559,57 @@ const s: Record<string, CSSProperties> = {
     color: '#b45309',
     fontWeight: 600,
   },
-  filterRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: 8,
-  },
-  filterCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 2,
-    padding: '10px 4px',
-    borderRadius: 12,
-    border: '1.5px solid #e2e8f0',
+  loadingCard: {
+    margin: 24,
+    padding: 20,
     background: '#fff',
-    cursor: 'pointer',
-    WebkitTapHighlightColor: 'transparent',
+    borderRadius: 16,
+    border: '1px solid #e2e8f0',
+    boxShadow: '0 8px 24px rgba(15,23,42,0.08)',
   },
-  filterCount: {
-    fontSize: 18,
+  loadingLogo: {
+    width: 42,
+    height: 42,
+    display: 'grid',
+    placeItems: 'center',
+    margin: '0 auto 16px',
+    borderRadius: 12,
+    background: '#dbeafe',
+    color: '#2563eb',
+    fontSize: 20,
     fontWeight: 800,
-    lineHeight: 1.2,
+    animation: 'reviewPulse 1.35s ease-in-out infinite',
   },
-  filterLabel: {
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '0.02em',
+  skeletonLineWide: {
+    height: 12,
+    width: '76%',
+    borderRadius: 999,
+    background: '#cbd5e1',
+    animation: 'reviewPulse 1.35s ease-in-out infinite',
+  },
+  skeletonLine: {
+    height: 10,
+    width: '48%',
+    marginTop: 9,
+    borderRadius: 999,
+    background: '#e2e8f0',
+    animation: 'reviewPulse 1.35s ease-in-out infinite',
+  },
+  skeletonBlock: {
+    height: 44,
+    width: '100%',
+    marginTop: 12,
+    borderRadius: 10,
+    background: '#f1f5f9',
+    animation: 'reviewPulse 1.35s ease-in-out infinite',
+  },
+  loadingLabel: {
+    display: 'block',
+    marginTop: 16,
     textAlign: 'center',
-    lineHeight: 1.25,
+    fontSize: 12,
+    fontWeight: 700,
+    color: '#475569',
   },
   gridSticky: {
     position: 'sticky',
@@ -624,10 +647,26 @@ const s: Record<string, CSSProperties> = {
   },
   gridPanelHead: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 8,
     marginBottom: 8,
+  },
+  gridLegend: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px 10px',
+    marginTop: 5,
+    fontSize: 10,
+    fontWeight: 600,
+    color: '#64748b',
+  },
+  legendDot: {
+    display: 'inline-block',
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    marginRight: 3,
   },
   gridHint: {
     fontSize: 11,
@@ -674,18 +713,18 @@ const s: Record<string, CSSProperties> = {
   },
   qCard: {
     background: '#fff',
-    borderRadius: 16,
+    borderRadius: 13,
     border: '1px solid #e2e8f0',
     boxShadow: '0 1px 3px rgba(15,23,42,0.05)',
-    padding: '14px 14px 12px',
-    marginBottom: 12,
+    padding: '10px 11px 9px',
+    marginBottom: 8,
   },
   qHead: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 10,
+    gap: 6,
+    marginBottom: 7,
   },
   qHeadLeft: {
     display: 'flex',
@@ -694,15 +733,15 @@ const s: Record<string, CSSProperties> = {
     minWidth: 0,
   },
   qNum: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: 800,
     color: '#0f172a',
   },
   statusPill: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: 700,
     borderRadius: 999,
-    padding: '3px 10px',
+    padding: '2px 7px',
     whiteSpace: 'nowrap',
   },
   bookmarkBtn: {
@@ -716,9 +755,9 @@ const s: Record<string, CSSProperties> = {
     WebkitTapHighlightColor: 'transparent',
   },
   qText: {
-    margin: '0 0 12px',
-    fontSize: 14,
-    lineHeight: 1.55,
+    margin: '0 0 8px',
+    fontSize: 13,
+    lineHeight: 1.42,
     color: '#0f172a',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
@@ -727,18 +766,18 @@ const s: Record<string, CSSProperties> = {
   opts: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 8,
+    gap: 5,
   },
   opt: {
     display: 'flex',
     alignItems: 'flex-start',
-    gap: 8,
-    padding: '10px 12px',
-    borderRadius: 12,
+    gap: 7,
+    padding: '7px 9px',
+    borderRadius: 10,
     border: '1px solid #e2e8f0',
     background: '#f8fafc',
-    fontSize: 13,
-    lineHeight: 1.45,
+    fontSize: 12,
+    lineHeight: 1.35,
   },
   optMark: {
     flexShrink: 0,

@@ -90,6 +90,8 @@ function mapAttemptFromStart(
     marked: {},
     visited,
     secondsLeft: Math.max(0, secondsLeft),
+    pausedAt: attempt.pausedAt || null,
+    pausedSeconds: attempt.pausedSeconds || 0,
     totalDurationSeconds: Math.max(60, (exam.durationMinutes || 60) * 60),
     timeSpentSeconds: attempt.timeTakenSeconds || 0,
     startedAt: attempt.startedAt || new Date().toISOString(),
@@ -407,12 +409,9 @@ export default function App() {
     // Leave live UI immediately so the student sees submit skeleton, not the exam
     setOngoingSummary(null);
     try {
-      // Best-effort flush of individual answers (ignore failures after expiry)
-      await Promise.all(
-        Object.entries(answersPayload).map(([qid, idx]) =>
-          webappApi.saveAnswer(snapshot.id, qid, idx).catch(() => null)
-        )
-      );
+      // Submit the complete local snapshot in one request. This preserves the
+      // last tap even when the server deadline has just elapsed and avoids a
+      // slow N-request flush for large exams.
       const { attempt } = await webappApi.submit(snapshot.id, answersPayload);
       const completed = mapResult({
         ...attempt,
@@ -495,7 +494,7 @@ export default function App() {
             draggable={false}
             onContextMenu={(e) => e.preventDefault()}
             onDragStart={(e) => e.preventDefault()}
-            className="w-16 h-16 rounded-2xl object-cover bg-white mx-auto shadow-lg shadow-blue-500/15"
+            className="protected-logo w-16 h-16 rounded-2xl object-cover bg-white mx-auto shadow-lg shadow-blue-500/15"
             width="64"
             height="64"
             loading="eager"
@@ -538,7 +537,7 @@ export default function App() {
                 draggable={false}
                 onContextMenu={(e) => e.preventDefault()}
                 onDragStart={(e) => e.preventDefault()}
-                className="w-10 h-10 rounded-xl object-cover bg-white shadow-md shadow-blue-500/20"
+                className="protected-logo w-10 h-10 rounded-xl object-cover bg-white shadow-md shadow-blue-500/20"
                 width="40"
                 height="40"
                 loading="eager"

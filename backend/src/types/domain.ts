@@ -72,6 +72,9 @@ export interface Attempt {
   studentClass: string;
   startedAt: string;
   expiresAt: string;
+  /** Practice-only pause state; official attempts never use these fields. */
+  pausedAt?: string | null;
+  pausedSeconds?: number;
   submittedAt: string | null;
   status: AttemptStatus;
   answers: Record<string, number>;

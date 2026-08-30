@@ -31,13 +31,14 @@ export const attemptRepository = {
       await tx.execute({
         sql: `INSERT INTO attempts (
                 id, exam_id, student_id, telegram_user_id, student_name, student_class,
-                started_at, expires_at, submitted_at, status, current_question_index,
+                started_at, expires_at, paused_at, paused_seconds, submitted_at, status, current_question_index,
                 score, max_score, percentage, correct_count, wrong_count, skipped_count,
                 time_taken_seconds, rank, is_official, attempt_number
-              ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO UPDATE SET
                 student_id=excluded.student_id, student_name=excluded.student_name,
                 student_class=excluded.student_class, expires_at=excluded.expires_at,
+                paused_at=excluded.paused_at, paused_seconds=excluded.paused_seconds,
                 submitted_at=excluded.submitted_at, status=excluded.status,
                 current_question_index=excluded.current_question_index,
                 score=excluded.score, max_score=excluded.max_score, percentage=excluded.percentage,
@@ -47,7 +48,8 @@ export const attemptRepository = {
         args: [
           attempt.id, attempt.examId, attempt.studentId || null, attempt.telegramUserId,
           attempt.studentName || null, attempt.studentClass || null, attempt.startedAt, attempt.expiresAt,
-          attempt.submittedAt || null, attempt.status, attempt.currentQuestionIndex || 0,
+          attempt.pausedAt || null, attempt.pausedSeconds || 0, attempt.submittedAt || null, attempt.status,
+          attempt.currentQuestionIndex || 0,
           attempt.score || 0, attempt.maxScore || 0, attempt.percentage || 0,
           attempt.correctCount || 0, attempt.wrongCount || 0, attempt.skippedCount || 0,
           attempt.timeTakenSeconds || 0, attempt.rank ?? null,
@@ -71,12 +73,12 @@ export const attemptRepository = {
     return withWriteTx(async (tx) => {
       const upd = await tx.execute({
         sql: `UPDATE attempts SET
-                status = ?, submitted_at = ?, score = ?, max_score = ?, percentage = ?,
+                status = ?, submitted_at = ?, paused_at = ?, paused_seconds = ?, score = ?, max_score = ?, percentage = ?,
                 correct_count = ?, wrong_count = ?, skipped_count = ?, time_taken_seconds = ?,
                 rank = ?, is_official = ?, attempt_number = ?
               WHERE id = ? AND status = 'IN_PROGRESS'`,
         args: [
-          attempt.status, attempt.submittedAt || new Date().toISOString(),
+          attempt.status, attempt.submittedAt || new Date().toISOString(), null, attempt.pausedSeconds || 0,
           attempt.score || 0, attempt.maxScore || 0, attempt.percentage || 0,
           attempt.correctCount || 0, attempt.wrongCount || 0, attempt.skippedCount || 0,
           attempt.timeTakenSeconds || 0, attempt.rank ?? null,

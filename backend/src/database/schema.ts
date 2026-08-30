@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS attempts (
   student_class TEXT,
   started_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
+  paused_at TEXT,
+  paused_seconds INTEGER NOT NULL DEFAULT 0,
   submitted_at TEXT,
   status TEXT NOT NULL,
   current_question_index INTEGER NOT NULL DEFAULT 0,

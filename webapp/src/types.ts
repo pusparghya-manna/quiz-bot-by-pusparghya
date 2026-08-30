@@ -52,6 +52,8 @@ export interface ExamAttempt {
   /** questionId → visited */
   visited: Record<string, boolean>;
   secondsLeft: number;
+  pausedAt?: string | null;
+  pausedSeconds?: number;
   totalDurationSeconds: number;
   timeSpentSeconds: number;
   startedAt: string;

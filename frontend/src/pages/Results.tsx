@@ -20,7 +20,7 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   const [dmText, setDmText] = useState('');
   const [dmBusy, setDmBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
-  const [actionLabel, setActionLabel] = useState('Working…');
+  const [actionLabel, setActionLabel] = useState('Loading…');
 
   const selectedExam = exams.find((e) => e.id === examId);
 

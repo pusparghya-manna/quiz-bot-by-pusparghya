@@ -57,7 +57,29 @@ function publicQuestions(exam: any) {
 
 function secondsLeft(attempt: any): number {
   if (!attempt?.expiresAt) return 0;
-  return Math.max(0, Math.floor((new Date(attempt.expiresAt).getTime() - Date.now()) / 1000));
+  const now = Date.now();
+  let deadline = new Date(attempt.expiresAt).getTime();
+  // Practice pauses stop the server-authoritative deadline as well as the UI timer.
+  // Keep both completed and currently active pause time outside the deadline.
+  if (attempt.isOfficial === false) {
+    deadline += Math.max(0, Number(attempt.pausedSeconds || 0) * 1000);
+  }
+  if (attempt.isOfficial === false && attempt.pausedAt) {
+    const pausedAt = new Date(attempt.pausedAt).getTime();
+    if (Number.isFinite(pausedAt)) deadline += Math.max(0, now - pausedAt);
+  }
+  return Math.max(0, Math.floor((deadline - now) / 1000));
+}
+
+function activeElapsedSeconds(attempt: any, now = Date.now()): number {
+  const started = new Date(attempt.startedAt).getTime();
+  if (!Number.isFinite(started)) return 0;
+  let pausedMs = Math.max(0, Number(attempt.pausedSeconds || 0) * 1000);
+  if (attempt.isOfficial === false && attempt.pausedAt) {
+    const pausedAt = new Date(attempt.pausedAt).getTime();
+    if (Number.isFinite(pausedAt)) pausedMs += Math.max(0, now - pausedAt);
+  }
+  return Math.max(0, Math.floor((now - started - pausedMs) / 1000));
 }
 
 function findAttemptById(attemptId: string): any | undefined {
@@ -286,7 +308,8 @@ export function registerWebappRoutes(app: Express) {
         (a: any) =>
           a.isOfficial !== false && (a.status === 'SUBMITTED' || a.status === 'AUTO_SUBMITTED')
       );
-      const isOfficial = windowOpen && !priorOfficial;
+      // A forced reattempt is always practice, even while the official exam window is open.
+      const isOfficial = !forceNew && windowOpen && !priorOfficial;
       let expiresMs = now.getTime() + Math.max(1, exam.durationMinutes || 60) * 60 * 1000;
       if (isOfficial) expiresMs = Math.min(expiresMs, windowEnd);
 
@@ -299,6 +322,8 @@ export function registerWebappRoutes(app: Express) {
         studentClass: student.className || '',
         startedAt: now.toISOString(),
         expiresAt: new Date(expiresMs).toISOString(),
+        pausedAt: null,
+        pausedSeconds: 0,
         submittedAt: null,
         status: 'IN_PROGRESS',
         currentQuestionIndex: 0,
@@ -326,6 +351,55 @@ export function registerWebappRoutes(app: Express) {
     } catch (e: any) {
       console.error('[webapp/start]', e?.message || e);
       res.status(500).json({ error: 'Failed to start exam' });
+    }
+  });
+
+  app.post('/api/webapp/pause', async (req, res) => {
+    try {
+      const auth = authWebapp(req, res);
+      if (!auth) return;
+      const attemptId = String(req.body?.attemptId || '');
+      const shouldPause = Boolean(req.body?.pause);
+      const attempt = findAttemptById(attemptId);
+      if (!attempt || Number(attempt.telegramUserId) !== auth.userId) {
+        return res.status(404).json({ error: 'Attempt not found' });
+      }
+      if (attempt.status !== 'IN_PROGRESS') {
+        return res.status(400).json({ error: 'Exam not in progress' });
+      }
+      if (attempt.isOfficial !== false) {
+        return res.status(400).json({ error: 'Pause is available for practice exams only' });
+      }
+
+      if (shouldPause) {
+        if (!attempt.pausedAt) {
+          if (secondsLeft(attempt) <= 0) {
+            return res.status(400).json({ error: 'Time expired' });
+          }
+          attempt.pausedAt = new Date().toISOString();
+        }
+      } else if (attempt.pausedAt) {
+        const pausedAt = new Date(attempt.pausedAt).getTime();
+        if (Number.isFinite(pausedAt)) {
+          attempt.pausedSeconds = Math.max(
+            0,
+            Number(attempt.pausedSeconds || 0) + Math.floor((Date.now() - pausedAt) / 1000)
+          );
+        }
+        attempt.pausedAt = null;
+      }
+
+      await store.saveAttempt(attempt);
+      res.json({
+        ok: true,
+        paused: Boolean(attempt.pausedAt),
+        pausedAt: attempt.pausedAt || null,
+        pausedSeconds: attempt.pausedSeconds || 0,
+        secondsLeft: secondsLeft(attempt),
+      });
+    } catch (e: any) {
+      console.error('[webapp/pause]', e?.message || e);
+      res.status(500).json({ error: 'Failed to update practice pause' });
     }
   });
 
@@ -427,10 +501,7 @@ export function registerWebappRoutes(app: Express) {
         }
       }
 
-      const timeTakenSeconds = Math.max(
-        0,
-        Math.floor((Date.now() - new Date(attempt.startedAt).getTime()) / 1000)
-      );
+      const timeTakenSeconds = activeElapsedSeconds(attempt);
       const scored = calculateAttemptScore(exam, attempt.answers || {}, timeTakenSeconds);
       Object.assign(attempt, scored);
       attempt.status = secondsLeft(attempt) <= 0 ? 'AUTO_SUBMITTED' : 'SUBMITTED';
@@ -447,11 +518,11 @@ export function registerWebappRoutes(app: Express) {
         await store.saveAttempt(attempt);
       }
 
-      try {
-        await updateExamRanks(exam.id);
-      } catch {
-        /* */
-      }
+      // Ranking is secondary to showing the student their completed result. Do not
+      // keep the submit request open while every attempt rank is recalculated.
+      void updateExamRanks(exam.id).catch((err: any) => {
+        console.warn('[webapp/submit] deferred rank update failed:', err?.message || err);
+      });
       res.json({ attempt });
     } catch (e: any) {
       console.error('[webapp/submit]', e?.message || e);

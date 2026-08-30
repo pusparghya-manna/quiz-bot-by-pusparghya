@@ -40,6 +40,8 @@ function mapAttemptRow(r: any, answers: Record<string, number> = {}): Attempt {
     studentClass: r.student_class ? String(r.student_class) : '',
     startedAt: String(r.started_at),
     expiresAt: String(r.expires_at),
+    pausedAt: r.paused_at ? String(r.paused_at) : null,
+    pausedSeconds: Number(r.paused_seconds || 0),
     submittedAt: r.submitted_at ? String(r.submitted_at) : null,
     status: r.status as Attempt['status'],
     currentQuestionIndex: Number(r.current_question_index || 0),
