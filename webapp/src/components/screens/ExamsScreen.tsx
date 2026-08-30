@@ -10,6 +10,7 @@ interface ExamsScreenProps {
   onSelectExam: (exam: Exam) => void;
   onStartExamDirect: (exam: Exam, isPractice?: boolean) => void;
   onResumeOngoing: () => void;
+  isBusy?: boolean;
 }
 
 function isActive(status: string) {
@@ -28,6 +29,7 @@ export const ExamsScreen: React.FC<ExamsScreenProps> = ({
   onSelectExam,
   onStartExamDirect,
   onResumeOngoing,
+  isBusy = false,
 }) => {
   const assigned = exams.filter((e) => isActive(e.status));
   const past = exams.filter((e) => isPast(e.status));
@@ -46,14 +48,16 @@ export const ExamsScreen: React.FC<ExamsScreenProps> = ({
 
       {hasOngoing && (
         <button
+          type="button"
           onClick={onResumeOngoing}
-          className="w-full glass-card rounded-2xl p-4 border border-amber-200/70 text-left"
+          disabled={isBusy}
+          className="w-full glass-card rounded-2xl p-4 border border-amber-200/70 text-left disabled:opacity-60 disabled:cursor-wait"
         >
           <span className="text-[10px] font-bold uppercase text-amber-700">Ongoing</span>
           <p className="text-sm font-bold text-slate-900 mt-0.5">
             {ongoingAttempt?.examTitle || ongoingSummary?.examTitle}
           </p>
-          <p className="text-xs text-blue-600 font-semibold mt-1">Tap to resume →</p>
+          <p className="text-xs text-blue-600 font-semibold mt-1">{isBusy ? 'Resuming…' : 'Tap to resume →'}</p>
         </button>
       )}
 

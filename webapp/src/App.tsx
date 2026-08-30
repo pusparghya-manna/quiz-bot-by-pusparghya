@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRef } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { Exam, ExamAttempt, UserProfile, Question, OngoingSummary } from './types';
 import { DesktopNavigation, MobileNavigation } from './components/Navigation';
@@ -186,6 +187,7 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionLoading, setActionLoading] = useState<ActionLoadingKind | null>(null);
+  const actionLockRef = useRef(false);
 
   const refreshResults = useCallback(async () => {
     const { results } = await webappApi.results();
@@ -333,19 +335,20 @@ export default function App() {
     };
   }, [refreshExams, refreshResults]);
 
-  const handleStartExam = async (exam: Exam, forceNew = false) => {
+  const handleStartExam = async (
+    exam: Exam,
+    forceNew = false,
+    resumeExisting = false
+  ) => {
+    if (busy || actionLockRef.current) return;
+    actionLockRef.current = true;
     setActionError(null);
     setBusy(true);
     setActionLoading('start');
     try {
-      // Prefer fresh detail metadata
-      try {
-        const { exam: detail } = await webappApi.examDetail(exam.id);
-        exam = { ...exam, ...mapExam(detail) };
-      } catch {
-        /* use list summary */
-      }
-      if (exam.startDate) {
+      // startExam returns fresh exam metadata and questions, so avoid a
+      // redundant exam-detail request on every resume.
+      if (exam.startDate && !resumeExisting) {
         const startMs = new Date(exam.startDate).getTime();
         if (Number.isFinite(startMs) && Date.now() < startMs) {
           throw new Error(
@@ -354,6 +357,16 @@ export default function App() {
         }
       }
       const data = await webappApi.startExam(exam.id, forceNew);
+      if (data.attempt.status !== 'IN_PROGRESS') {
+        const completed = mapResult({ ...data.attempt, examTitle: data.exam.title });
+        setPastResults((prev) => [completed, ...prev.filter((p) => p.id !== completed.id)]);
+        setSelectedResultAttempt(completed);
+        setOngoingAttempt(null);
+        setOngoingSummary(null);
+        setCurrentTab('results');
+        void refreshResults().catch(() => {});
+        return;
+      }
       if (!data.questions?.length) {
         throw new Error('This exam has no questions yet. Ask your teacher to publish questions.');
       }
@@ -375,6 +388,7 @@ export default function App() {
     } finally {
       setBusy(false);
       setActionLoading(null);
+      actionLockRef.current = false;
     }
   };
 
@@ -393,7 +407,7 @@ export default function App() {
         totalMarks: 0,
         status: 'LIVE',
       } as Exam);
-    await handleStartExam(exam, false);
+    await handleStartExam(exam, false, true);
   };
 
   const handleFinalSubmit = async (answersOverride?: Record<string, number>) => {
@@ -596,10 +610,10 @@ export default function App() {
               setSelectedExam(exam);
               setCurrentTab('details');
             }}
-            onResumeOngoing={handleResumeOngoing}
+                        onResumeOngoing={handleResumeOngoing}
+            isBusy={busy}
           />
         )}
-
         {currentTab === 'exams' && (
           <ExamsScreen
             exams={availableExams}
@@ -612,6 +626,7 @@ export default function App() {
             }}
             onStartExamDirect={(exam) => handleStartExam(exam, true)}
             onResumeOngoing={handleResumeOngoing}
+            isBusy={busy}
           />
         )}
 

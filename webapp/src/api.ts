@@ -63,19 +63,35 @@ export function mediaUrl(pathOrFileId: string | null | undefined): string | null
   return `${API_BASE}/api/media/telegram/${encodeURIComponent(pathOrFileId)}`;
 }
 
-async function api<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+async function api<T>(
+  path: string,
+  body?: Record<string, unknown>,
+  options: { timeoutMs?: number } = {}
+): Promise<T> {
   const initData = getTelegramInitData();
   if (!initData) {
     throw new Error('Telegram login required. Open Quiz Bot inside Telegram and tap Open App.');
   }
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, ...(body || {}) }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as any).error || `Request failed (${res.status})`);
-  return data as T;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? 20_000);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData, ...(body || {}) }),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as any).error || `Request failed (${res.status})`);
+    return data as T;
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Request timed out. Please tap Resume again.');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 export type ApiExamSummary = {
@@ -172,7 +188,7 @@ export const webappApi = {
       exam: ApiExamSummary;
       questions: ApiQuestion[];
       secondsLeft: number;
-    }>('/api/webapp/start', { examId, forceNew: !!forceNew }),
+    }>('/api/webapp/start', { examId, forceNew: !!forceNew }, { timeoutMs: 15_000 }),
 
   saveAnswer: (attemptId: string, questionId: string, optionIndex: number | null) =>
     api<{ ok: boolean }>('/api/webapp/answer', {

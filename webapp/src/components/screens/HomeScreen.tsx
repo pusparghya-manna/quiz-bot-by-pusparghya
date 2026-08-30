@@ -10,6 +10,7 @@ interface HomeScreenProps {
   onNavigate: (tab: string) => void;
   onSelectExam: (exam: Exam) => void;
   onResumeOngoing: () => void;
+  isBusy?: boolean;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -20,6 +21,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onNavigate,
   onSelectExam,
   onResumeOngoing,
+  isBusy = false,
 }) => {
   const hasOngoing =
     (ongoingAttempt && !ongoingAttempt.isSubmitted) || !!ongoingSummary;
@@ -124,11 +126,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </div>
             </div>
             <button
+              type="button"
               onClick={onResumeOngoing}
-              className="mt-3 w-full py-2.5 px-3 rounded-xl glass-btn-primary text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs"
+              disabled={isBusy}
+              className="mt-3 w-full py-2.5 px-3 rounded-xl glass-btn-primary text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-60 disabled:cursor-wait"
             >
               <PlayCircle className="w-4 h-4" />
-              Resume Exam
+              {isBusy ? 'Resuming…' : 'Resume Exam'}
             </button>
           </div>
         </section>

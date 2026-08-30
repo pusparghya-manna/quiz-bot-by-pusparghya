@@ -430,8 +430,14 @@ class Store {
   }
   getAttempt(examId: string, telegramUserId: number) {
     const mine = this.getStudentAttempts(examId, telegramUserId);
-    const inProg = mine.find((a) => a.status === 'IN_PROGRESS');
-    if (inProg) return inProg;
+    const inProgress = mine
+      .filter((a) => a.status === 'IN_PROGRESS')
+      .sort(
+        (a, b) =>
+          (b.attemptNumber || 0) - (a.attemptNumber || 0) ||
+          new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+      );
+    if (inProgress.length > 0) return inProgress[0];
     return mine.length ? mine[mine.length - 1] : undefined;
   }
 

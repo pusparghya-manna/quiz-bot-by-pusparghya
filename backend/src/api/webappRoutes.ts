@@ -263,12 +263,6 @@ export function registerWebappRoutes(app: Express) {
         } as any;
         student = createdStudent;
         await store.saveStudent(createdStudent);
-      } else if (exam.teacherId) {
-        try {
-          await (store as any).linkStudentTeacher?.(student.id, exam.teacherId);
-        } catch {
-          /* */
-        }
       }
 
       let attempt = await S(store.getAttempt(examId, auth.userId));
@@ -293,6 +287,14 @@ export function registerWebappRoutes(app: Express) {
       }
 
       if (!student) return res.status(500).json({ error: 'Student initialization failed' });
+
+      if (exam.teacherId && !(student.teacherIds || []).includes(exam.teacherId)) {
+        try {
+          await (store as any).linkStudentTeacher?.(student.id, exam.teacherId);
+        } catch {
+          /* Non-blocking relationship sync; exam start can continue. */
+        }
+      }
 
       const now = new Date();
       const attemptNumber = await store.nextAttemptNumber(examId, auth.userId);
