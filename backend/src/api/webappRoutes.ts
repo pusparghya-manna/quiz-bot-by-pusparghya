@@ -343,7 +343,9 @@ export function registerWebappRoutes(app: Express) {
       if (attempt.status !== 'IN_PROGRESS') {
         return res.status(400).json({ error: 'Exam not in progress' });
       }
-      if (secondsLeft(attempt) <= 0) return res.status(400).json({ error: 'Time expired' });
+      // Allow a short post-expiry grace so auto-submit can flush the last selected answers
+      const left = secondsLeft(attempt);
+      if (left < -15) return res.status(400).json({ error: 'Time expired' });
 
       if (!attempt.answers) attempt.answers = {};
       if (optionIndex === null || optionIndex === undefined) {
@@ -409,6 +411,19 @@ export function registerWebappRoutes(app: Express) {
           }
         } catch {
           attempt.answers = attempt.answers || {};
+        }
+      }
+
+      // Merge client-side answers (authoritative on submit / auto-submit) so
+      // last-second selections are not marked skipped after timer expiry.
+      const clientAnswers = req.body?.answers;
+      if (clientAnswers && typeof clientAnswers === 'object') {
+        if (!attempt.answers) attempt.answers = {};
+        for (const [qid, val] of Object.entries(clientAnswers)) {
+          if (val === null || val === undefined || qid === '') continue;
+          const idx = Number(val);
+          if (!Number.isFinite(idx)) continue;
+          attempt.answers[String(qid)] = idx;
         }
       }
 

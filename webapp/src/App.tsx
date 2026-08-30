@@ -394,29 +394,42 @@ export default function App() {
     await handleStartExam(exam, false);
   };
 
-  const handleFinalSubmit = async () => {
+  const handleFinalSubmit = async (answersOverride?: Record<string, number>) => {
     if (!ongoingAttempt) return;
+    const snapshot = ongoingAttempt;
+    const answersPayload = {
+      ...(snapshot.answers || {}),
+      ...(answersOverride || {}),
+    };
     setActionError(null);
     setBusy(true);
     setActionLoading('submit');
+    // Leave live UI immediately so the student sees submit skeleton, not the exam
+    setOngoingSummary(null);
     try {
-      const { attempt } = await webappApi.submit(ongoingAttempt.id);
+      // Best-effort flush of individual answers (ignore failures after expiry)
+      await Promise.all(
+        Object.entries(answersPayload).map(([qid, idx]) =>
+          webappApi.saveAnswer(snapshot.id, qid, idx).catch(() => null)
+        )
+      );
+      const { attempt } = await webappApi.submit(snapshot.id, answersPayload);
       const completed = mapResult({
         ...attempt,
-        examTitle: ongoingAttempt.examTitle,
+        answers: { ...answersPayload, ...(attempt.answers || {}) },
+        examTitle: snapshot.examTitle,
       });
       setPastResults((prev) => [completed, ...prev.filter((p) => p.id !== completed.id)]);
       setSelectedResultAttempt(completed);
       setOngoingAttempt(null);
-      setOngoingSummary(null);
       setCurrentTab('results');
-      try {
-        await refreshResults();
-      } catch {
-        /* */
-      }
+      // Refresh list in background — do not block result screen
+      void refreshResults().catch(() => {});
     } catch (err: any) {
+      // Restore attempt so student can retry submit
+      setOngoingAttempt(snapshot);
       setActionError(err?.message || 'Failed to submit exam');
+      setCurrentTab('review');
     } finally {
       setBusy(false);
       setActionLoading(null);
@@ -426,6 +439,7 @@ export default function App() {
   const handleReviewAnswers = async (attempt: ExamAttempt) => {
     setActionError(null);
     setBusy(true);
+    setActionLoading('review');
     try {
       const data = await webappApi.review(attempt.id);
       setReviewQuestions(mapQuestions(data.questions));
@@ -446,6 +460,7 @@ export default function App() {
       setActionError(err?.message || 'Could not load solutions (results may be unpublished)');
     } finally {
       setBusy(false);
+      setActionLoading(null);
     }
   };
 
@@ -477,6 +492,9 @@ export default function App() {
           <img
             src={`${import.meta.env.BASE_URL}exam-bot-logo.png`}
             alt="Exam Bot logo"
+            draggable={false}
+            onContextMenu={(e) => e.preventDefault()}
+            onDragStart={(e) => e.preventDefault()}
             className="w-16 h-16 rounded-2xl object-cover bg-white mx-auto shadow-lg shadow-blue-500/15"
             width="64"
             height="64"
@@ -518,6 +536,9 @@ export default function App() {
               <img
                 src={`${import.meta.env.BASE_URL}exam-bot-logo.png`}
                 alt="Exam Bot logo"
+                draggable={false}
+                onContextMenu={(e) => e.preventDefault()}
+                onDragStart={(e) => e.preventDefault()}
                 className="w-10 h-10 rounded-xl object-cover bg-white shadow-md shadow-blue-500/20"
                 width="40"
                 height="40"
@@ -561,7 +582,10 @@ export default function App() {
           </div>
         )}
         {busy && !actionLoading && (
-          <div className="mb-3 text-xs font-semibold text-blue-600 animate-pulse">Working…</div>
+          <div className="mb-3 space-y-2 animate-pulse" aria-busy="true" aria-label="Loading">
+            <div className="h-3 w-40 rounded bg-slate-200/80" />
+            <div className="h-3 w-64 max-w-full rounded bg-slate-200/60" />
+          </div>
         )}
 
         {currentTab === 'home' && (
@@ -613,10 +637,11 @@ export default function App() {
             }
             attempt={ongoingAttempt}
             soundEnabled={profile.soundEnabled}
+            isPractice={ongoingAttempt.isOfficial === false}
             onUpdateAttempt={setOngoingAttempt}
             onOpenReview={() => setCurrentTab('review')}
             onLeaveExam={() => setCurrentTab('exams')}
-            onTimeUp={handleFinalSubmit}
+            onTimeUp={(answers) => void handleFinalSubmit(answers)}
           />
         )}
 

@@ -9,6 +9,8 @@ import {
   ChevronRight,
   X,
   Bookmark,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { Exam, ExamAttempt } from '../../types';
 import { QuestionImage } from '../QuestionImage';
@@ -19,16 +21,20 @@ interface LiveExamScreenProps {
   exam: Exam;
   attempt: ExamAttempt;
   soundEnabled: boolean;
+  /** Practice / reattempt (not the official timed window). */
+  isPractice?: boolean;
   onUpdateAttempt: (updated: ExamAttempt) => void;
   onOpenReview: () => void;
   onLeaveExam: () => void;
-  onTimeUp: () => void;
+  /** Called with latest local answers so auto-submit does not mark them skipped. */
+  onTimeUp: (answers: Record<string, number>) => void;
 }
 
 export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   exam,
   attempt,
   soundEnabled,
+  isPractice = false,
   onUpdateAttempt,
   onOpenReview,
   onLeaveExam,
@@ -43,15 +49,27 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(attempt.secondsLeft);
+  const [paused, setPaused] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timeUpFired = useRef(false);
   const onTimeUpRef = useRef(onTimeUp);
   const soundEnabledRef = useRef(soundEnabled);
+  const answersRef = useRef(attempt.answers);
+  const pausedRef = useRef(false);
 
   useEffect(() => {
     onTimeUpRef.current = onTimeUp;
     soundEnabledRef.current = soundEnabled;
   }, [onTimeUp, soundEnabled]);
+
+  useEffect(() => {
+    answersRef.current = attempt.answers;
+  }, [attempt.answers]);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   const currentQ = questions[currentIdx];
 
@@ -77,11 +95,18 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (pausedRef.current) return; // practice pause freezes countdown
       setSecondsLeft((s) => {
         if (s <= 1) {
           if (!timeUpFired.current) {
             timeUpFired.current = true;
-            onTimeUpRef.current();
+            setSubmitting(true);
+            // Flush pending debounce + auto-submit with latest answers
+            if (saveTimer.current) {
+              clearTimeout(saveTimer.current);
+              saveTimer.current = null;
+            }
+            onTimeUpRef.current({ ...(answersRef.current || {}) });
           }
           return 0;
         }
@@ -111,7 +136,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   };
 
   const handleSelectOption = (optIdx: number) => {
-    if (!currentQ) return;
+    if (!currentQ || submitting) return;
     soundManager.playSelect(soundEnabled);
     const next = {
       ...attempt,
@@ -174,7 +199,26 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   }
 
   return (
-    <div className="min-h-[calc(100dvh-7rem)] flex flex-col pb-28 md:pb-24">
+    <div className={`min-h-[calc(100dvh-7rem)] flex flex-col pb-28 md:pb-24 ${submitting ? 'pointer-events-none opacity-60' : ''}`}>
+      {submitting && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 backdrop-blur-sm">
+          <div className="glass-card rounded-2xl px-5 py-4 text-center text-sm font-bold text-slate-800">
+            Time up — submitting your answers…
+          </div>
+        </div>
+      )}
+      {paused && isPractice && !submitting && (
+        <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-[11px] font-semibold text-amber-900 flex items-center justify-between gap-2">
+          <span>Practice paused — timer frozen. Tap Resume when ready.</span>
+          <button
+            type="button"
+            onClick={() => setPaused(false)}
+            className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold shrink-0"
+          >
+            Resume
+          </button>
+        </div>
+      )}
       <header className="sticky top-0 z-30 glass-header -mx-4 px-4 py-2.5 shadow-2xs">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -195,17 +239,40 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
             </div>
           </div>
 
-          <div
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-mono font-bold text-xs md:text-sm ${
-              isCriticalTime
-                ? 'bg-rose-100/90 text-rose-700 border border-rose-300 animate-pulse'
-                : isLowTime
-                  ? 'bg-amber-100/90 text-amber-800 border border-amber-300'
-                  : 'glass-pill text-slate-800'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span>{formatTimer(secondsLeft)}</span>
+          <div className="flex items-center gap-1.5">
+            {isPractice && (
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.playClick(soundEnabled);
+                  setPaused((p) => !p);
+                }}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-bold border ${
+                  paused
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                }`}
+                title={paused ? 'Resume practice' : 'Pause practice timer'}
+              >
+                {paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                <span className="hidden xs:inline sm:inline">{paused ? 'Resume' : 'Pause'}</span>
+              </button>
+            )}
+            <div
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-mono font-bold text-xs md:text-sm ${
+                paused
+                  ? 'bg-slate-200/90 text-slate-600 border border-slate-300'
+                  : isCriticalTime
+                    ? 'bg-rose-100/90 text-rose-700 border border-rose-300 animate-pulse'
+                    : isLowTime
+                      ? 'bg-amber-100/90 text-amber-800 border border-amber-300'
+                      : 'glass-pill text-slate-800'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>{formatTimer(secondsLeft)}</span>
+              {paused ? <span className="text-[10px] font-sans font-bold">PAUSED</span> : null}
+            </div>
           </div>
 
           <button

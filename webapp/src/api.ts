@@ -182,8 +182,11 @@ export const webappApi = {
   setIndex: (attemptId: string, index: number) =>
     api<{ ok: boolean }>('/api/webapp/index', { attemptId, index }),
 
-  submit: (attemptId: string) =>
-    api<{ attempt: ApiAttempt }>('/api/webapp/submit', { attemptId }),
+  submit: (attemptId: string, answers?: Record<string, number>) =>
+    api<{ attempt: ApiAttempt }>('/api/webapp/submit', {
+      attemptId,
+      ...(answers ? { answers } : {}),
+    }),
 
   results: () =>
     api<{
