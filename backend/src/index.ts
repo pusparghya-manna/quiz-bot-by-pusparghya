@@ -53,6 +53,10 @@ async function main() {
     process.on('SIGINT', shutdown);
   });
 
+  // Mount CORS/API routes before DB initialization so startup failures are
+  // returned as JSON with CORS headers instead of an opaque browser fetch error.
+  await startServer(app);
+
   // Database + store (after HTTP is up)
   try {
     await initDb();
@@ -69,9 +73,6 @@ async function main() {
       process.exit(1);
     }
   }
-
-  // Mount API routes on the already-listening app
-  await startServer(app);
 
   // Telegram after HTTP + DB (must not block /health)
   try {

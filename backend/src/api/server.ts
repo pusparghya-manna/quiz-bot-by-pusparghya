@@ -204,6 +204,19 @@ async function startServer(app?: import('express').Express) {
   });
 
 
+  // Mount Mini App routes even while the database is still booting. Without
+  // this guard, a slow startup leaves the browser with a CORS-less 404 and the
+  // unhelpful generic error “Failed to fetch”.
+  app.use('/api/webapp', (req, res, next) => {
+    if (!store.isReady()) {
+      return res.status(503).json({
+        error: 'QuizBot server is still starting. Please retry shortly.',
+        retryable: true,
+      });
+    }
+    next();
+  });
+
   registerWebappRoutes(app);
 
   // Student Telegram Mini App (built into public/webapp, served at /app)

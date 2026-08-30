@@ -222,7 +222,21 @@ export default function App() {
         return;
       }
       try {
-        const session = await webappApi.session();
+        let session;
+        let sessionError: any;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            session = await webappApi.session();
+            sessionError = null;
+            break;
+          } catch (err: any) {
+            sessionError = err;
+            const transient = /503|still starting|initializing|failed to fetch/i.test(String(err?.message || err));
+            if (!transient || attempt === 2) break;
+            await new Promise((resolve) => setTimeout(resolve, 1200 * (attempt + 1)));
+          }
+        }
+        if (sessionError || !session) throw sessionError || new Error('Failed to load session');
         if (cancelled) return;
         const tgUser = getTelegramUser();
         const displayName =

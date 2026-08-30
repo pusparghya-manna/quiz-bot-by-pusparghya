@@ -3,13 +3,12 @@
 /** Empty = same origin (Railway /app). Set VITE_API_URL on standalone Vercel. */
 const DEFAULT_API = 'https://quiz-bot-by-pusparghya-production.up.railway.app';
 const raw = import.meta.env.VITE_API_URL;
-export const API_BASE = (
-  raw === '' || raw === undefined
-    ? (typeof window !== 'undefined' && /railway\.app$/i.test(window.location.hostname)
-        ? ''
-        : DEFAULT_API)
-    : String(raw)
+const useSameOriginProxy =
+  typeof window !== 'undefined' && /(?:vercel\.app|railway\.app)$/i.test(window.location.hostname);
+const configuredApiBase = (
+  raw === '' || raw === undefined ? DEFAULT_API : String(raw)
 ).replace(/\/$/, '');
+export const API_BASE = useSameOriginProxy ? '' : configuredApiBase;
 
 export function getTelegramInitData(): string {
   try {
