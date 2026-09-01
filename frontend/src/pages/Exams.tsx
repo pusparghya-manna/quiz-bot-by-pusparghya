@@ -1378,7 +1378,7 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
                         <p className="text-[10px] text-slate-500">You can add more images while work continues.</p>
                       </div>
                     ) : (
-                      <p className="text-xs text-slate-600">Upload one or more photos of questions. OCR runs in parallel.</p>
+                      <p className="text-xs text-slate-600">Upload one or more photos of questions.</p>
                     )}
                   </div>
                   {ocrQueue.length > 0 && (
