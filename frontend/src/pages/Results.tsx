@@ -20,7 +20,6 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   const [dmText, setDmText] = useState('');
   const [dmBusy, setDmBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
-  const [actionLabel, setActionLabel] = useState('Loading…');
 
   const selectedExam = exams.find((e) => e.id === examId);
 
@@ -65,7 +64,6 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
 
   const removeAttempt = async (id: string) => {
     if (!(await confirmAsync('Remove from results?'))) return;
-    setActionLabel('Removing result…');
     setActionBusy(true);
     try {
       const res = await api(`/api/attempts/${id}`, { method: 'DELETE' });
@@ -85,7 +83,6 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
 
   const removeStudent = async (studentId: string) => {
     if (!(await confirmAsync('Delete student and all attempts?'))) return;
-    setActionLabel('Deleting student…');
     setActionBusy(true);
     try {
       const res = await api(`/api/students/${studentId}`, { method: 'DELETE' });
@@ -165,7 +162,7 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   if (view === 'exams') {
     return (
     <>
-    <ActionOverlay show={actionBusy || detailLoading || dmBusy} label={detailLoading ? 'Loading result…' : dmBusy ? 'Sending…' : actionLabel} />
+    <ActionOverlay show={dmBusy} label="Sending…" />
       <div className="space-y-3">
         <div>
           <h1 className="text-lg font-bold tracking-tight">Results</h1>
@@ -204,7 +201,7 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   if (view === 'pick') {
     return (
     <>
-    <ActionOverlay show={actionBusy || detailLoading || dmBusy} label={detailLoading ? 'Loading result…' : dmBusy ? 'Sending…' : actionLabel} />
+    <ActionOverlay show={dmBusy} label="Sending…" />
       <div className="space-y-3">
         <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 py-2 pr-3" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setView('exams'); }}>
           <IconArrowLeft className="w-4 h-4" /> All exams
@@ -229,7 +226,7 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
   // —— Official or practice list ——
   return (
     <>
-    <ActionOverlay show={actionBusy || detailLoading || dmBusy} label={detailLoading ? 'Loading result…' : dmBusy ? 'Sending…' : actionLabel} />
+    <ActionOverlay show={dmBusy} label="Sending…" />
     <div className="space-y-3">
       <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 py-2 pr-3" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setView('pick'); }}>
         <IconArrowLeft className="w-4 h-4" /> Back
@@ -442,6 +439,8 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
               <button
                 type="button"
                 className={btnD + ' flex-1 !py-2 !text-[11px] border border-red-100 rounded-lg'}
+                disabled={actionBusy}
+                aria-busy={actionBusy}
                 onClick={() => removeAttempt(detail.attempt.id)}
               >
                 Remove result
@@ -450,6 +449,8 @@ export function Results({ exams, attempts, students, onRefresh }: { exams: Exam[
                 <button
                   type="button"
                   className={btnD + ' flex-1 !py-2 !text-[11px] border border-red-100 rounded-lg'}
+                  disabled={actionBusy}
+                  aria-busy={actionBusy}
                   onClick={() => removeStudent(findStudent(detail.attempt)!.id)}
                 >
                   Delete student

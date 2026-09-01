@@ -10,6 +10,7 @@ interface ReviewQuestion {
   correctIndex: number | null;
   selectedIndex: number | null;
   status: QStatus;
+  imageUrl?: string | null;
 }
 
 interface ReviewPayload {
@@ -457,9 +458,6 @@ export default function TelegramReview() {
           );
         })}
 
-        {filtered.length === 0 && (
-          <div style={s.centerCard}>No questions in this filter.</div>
-        )}
       </main>
     </div>
   );

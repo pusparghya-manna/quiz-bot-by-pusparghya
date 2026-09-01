@@ -17,7 +17,7 @@ import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconUpload, IconShare, IconInfo,
   IconCalendar, IconCopy, IconFileText, IconSparkles, IconClose, IconSearch,
   IconChevronDown, IconClock, IconExam, IconUsers, IconBook, IconHash,
-  IconShuffle, IconMinus, IconBookmark, IconUser, IconEye, IconUpload
+  IconShuffle, IconMinus, IconBookmark, IconUser, IconEye
 } from '../icons';
 
 export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }: { exams: Exam[]; botUsername: string; onRefresh: () => void; defaultOpenNew?: boolean }) {
