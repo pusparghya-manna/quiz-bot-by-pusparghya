@@ -118,8 +118,13 @@ export function registerWebappRoutes(app: Express) {
         student = createdStudent;
         await store.saveStudent(createdStudent);
       }
-      await finalizeExpiredAttempts();
       const attempts = (await S(store.getAttempts())) as any[];
+      const userActive = attempts.find(
+        (a: any) => Number(a.telegramUserId) === auth.userId && a.status === 'IN_PROGRESS'
+      );
+      if (userActive) {
+        await finalizeExpiredAttempt(userActive);
+      }
       const ongoingRaw = attempts.find(
         (a: any) =>
           Number(a.telegramUserId) === auth.userId &&
@@ -296,11 +301,11 @@ export function registerWebappRoutes(app: Express) {
       if (!student) return res.status(500).json({ error: 'Student initialization failed' });
 
       if (exam.teacherId && !(student.teacherIds || []).includes(exam.teacherId)) {
-        try {
-          await (store as any).linkStudentTeacher?.(student.id, exam.teacherId);
-        } catch {
-          /* Non-blocking relationship sync; exam start can continue. */
-        }
+        // Teacher visibility is eventual consistency and must never delay the
+        // critical exam-start transaction or cause a client timeout.
+        void (store as any).linkStudentTeacher?.(student.id, exam.teacherId).catch((error: any) => {
+          console.warn('[webapp/start] deferred teacher link failed:', error?.message || error);
+        });
       }
 
       const now = new Date();
