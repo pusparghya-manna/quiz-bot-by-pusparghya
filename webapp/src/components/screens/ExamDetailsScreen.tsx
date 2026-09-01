@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, AlertCircle, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, AlertCircle } from 'lucide-react';
 import { Exam } from '../../types';
 
 interface ExamDetailsScreenProps {
@@ -79,30 +79,6 @@ export const ExamDetailsScreen: React.FC<ExamDetailsScreenProps> = ({
         </div>
       </div>
 
-      <div className="glass-card-subtle rounded-3xl p-5 md:p-6 shadow-xs">
-        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-blue-600" />
-          Important Instructions
-        </h3>
-        <ul className="mt-3.5 space-y-2.5 text-xs text-slate-600">
-          <li className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 shrink-0" />
-            <span>Timer starts when you confirm. Answers sync to the server as you select them.</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 shrink-0" />
-            <span>Use the Question Palette to jump between questions and check status.</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 shrink-0" />
-            <span>Mark questions for review before final submit.</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 shrink-0" />
-            <span>When time ends, your attempt is auto-submitted to the database.</span>
-          </li>
-        </ul>
-      </div>
 
       {!showConfirm ? (
         <div className="glass-card rounded-3xl p-5 shadow-xs text-center space-y-3">

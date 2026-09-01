@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useRef } from 'react';
+import React from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { Exam, ExamAttempt, UserProfile, Question, OngoingSummary } from './types';
 import { DesktopNavigation, MobileNavigation } from './components/Navigation';
@@ -21,6 +21,7 @@ import {
   ApiAttempt,
   ApiQuestion,
 } from './api';
+import { mergePendingAnswers, useAttemptSync } from './hooks/useAttemptSync';
 
 const EMPTY_PROFILE: UserProfile = {
   name: '',
@@ -78,7 +79,7 @@ function mapAttemptFromStart(
 ): ExamAttempt {
   const qs = mapQuestions(questions);
   const firstId = qs[0]?.id;
-  const answers = { ...(attempt.answers || {}) };
+  const answers = mergePendingAnswers(attempt.id, { ...(attempt.answers || {}) });
   const visited: Record<string, boolean> = {};
   if (firstId) visited[firstId] = true;
   for (const id of Object.keys(answers)) visited[id] = true;
@@ -185,9 +186,32 @@ export default function App() {
   const [reviewQuestions, setReviewQuestions] = useState<Question[]>([]);
   const [currentTab, setCurrentTab] = useState('home');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [notStartedAt, setNotStartedAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionLoading, setActionLoading] = useState<ActionLoadingKind | null>(null);
   const actionLockRef = useRef(false);
+
+  const handleBackendFinalized = useCallback(
+    (serverAttempt: ApiAttempt) => {
+      const completed = mapResult({
+        ...serverAttempt,
+        examTitle: selectedExam?.title || 'Exam',
+      });
+      setPastResults((prev) => [completed, ...prev.filter((p) => p.id !== completed.id)]);
+      setSelectedResultAttempt(completed);
+      setOngoingAttempt(null);
+      setOngoingSummary(null);
+      setBusy(false);
+      setActionLoading(null);
+      setCurrentTab('results');
+    },
+    [selectedExam?.title]
+  );
+
+  const attemptSync = useAttemptSync({
+    attempt: ongoingAttempt,
+    onFinalized: handleBackendFinalized,
+  });
 
   const refreshResults = useCallback(async () => {
     const { results } = await webappApi.results();
@@ -357,19 +381,12 @@ export default function App() {
     if (busy || actionLockRef.current) return;
     actionLockRef.current = true;
     setActionError(null);
+    setNotStartedAt(null);
     setBusy(true);
     setActionLoading('start');
     try {
-      // startExam returns fresh exam metadata and questions, so avoid a
-      // redundant exam-detail request on every resume.
-      if (exam.startDate && !resumeExisting) {
-        const startMs = new Date(exam.startDate).getTime();
-        if (Number.isFinite(startMs) && Date.now() < startMs) {
-          throw new Error(
-            `Exam has not started yet. It opens at ${new Date(startMs).toLocaleString()}.`
-          );
-        }
-      }
+      // The backend owns the scheduled-start check and returns the exact ISO
+      // start time for a dedicated modal when the window is still closed.
       const data = await webappApi.startExam(exam.id, forceNew);
       if (data.attempt.status !== 'IN_PROGRESS') {
         const completed = mapResult({ ...data.attempt, examTitle: data.exam.title });
@@ -398,7 +415,12 @@ export default function App() {
       setOngoingSummary(null);
       setCurrentTab('live');
     } catch (err: any) {
-      setActionError(err?.message || 'Failed to start exam');
+      if (err?.code === 'EXAM_NOT_STARTED') {
+        setNotStartedAt(err.startTime || exam.startDate || null);
+        setActionError(null);
+      } else {
+        setActionError(err?.message || 'Failed to start exam');
+      }
     } finally {
       setBusy(false);
       setActionLoading(null);
@@ -424,26 +446,24 @@ export default function App() {
     await handleStartExam(exam, false, true);
   };
 
-  const handleFinalSubmit = async (answersOverride?: Record<string, number>) => {
-    if (!ongoingAttempt) return;
+  const handleFinalSubmit = async () => {
+    if (!ongoingAttempt || actionLockRef.current) return;
+    actionLockRef.current = true;
     const snapshot = ongoingAttempt;
-    const answersPayload = {
-      ...(snapshot.answers || {}),
-      ...(answersOverride || {}),
-    };
     setActionError(null);
     setBusy(true);
     setActionLoading('submit');
-    // Leave live UI immediately so the student sees submit skeleton, not the exam
+    // Leave live UI immediately so the student sees one consistent skeleton.
     setOngoingSummary(null);
     try {
-      // Submit the complete local snapshot in one request. This preserves the
-      // last tap even when the server deadline has just elapsed and avoids a
-      // slow N-request flush for large exams.
-      const { attempt } = await webappApi.submit(snapshot.id, answersPayload);
+      // Flush only the queued deltas. If the backend expiry sweep has already
+      // completed the attempt, reuse that response instead of submitting twice.
+      const synced = await attemptSync.flush();
+      const attempt = synced && synced.status !== 'IN_PROGRESS'
+        ? synced
+        : (await webappApi.submit(snapshot.id)).attempt;
       const completed = mapResult({
         ...attempt,
-        answers: { ...answersPayload, ...(attempt.answers || {}) },
         examTitle: snapshot.examTitle,
       });
       setPastResults((prev) => [completed, ...prev.filter((p) => p.id !== completed.id)]);
@@ -460,6 +480,7 @@ export default function App() {
     } finally {
       setBusy(false);
       setActionLoading(null);
+      actionLockRef.current = false;
     }
   };
 
@@ -606,13 +627,6 @@ export default function App() {
             {actionError}
           </div>
         )}
-        {busy && !actionLoading && (
-          <div className="mb-3 space-y-2 animate-pulse" aria-busy="true" aria-label="Loading">
-            <div className="h-3 w-40 rounded bg-slate-200/80" />
-            <div className="h-3 w-64 max-w-full rounded bg-slate-200/60" />
-          </div>
-        )}
-
         {currentTab === 'home' && (
           <HomeScreen
             profile={profile}
@@ -667,7 +681,11 @@ export default function App() {
             onUpdateAttempt={setOngoingAttempt}
             onOpenReview={() => setCurrentTab('review')}
             onLeaveExam={() => setCurrentTab('exams')}
-            onTimeUp={(answers) => void handleFinalSubmit(answers)}
+            onTimeUp={() => void handleFinalSubmit()}
+            onAnswerChange={attemptSync.recordAnswer}
+            onIndexChange={attemptSync.recordIndex}
+            syncState={attemptSync.state}
+            pendingCount={attemptSync.pendingCount}
           />
         )}
 
@@ -728,6 +746,30 @@ export default function App() {
           <ProfileScreen profile={profile} onUpdateName={handleUpdateName} />
         )}
       </main>
+
+      {notStartedAt && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 backdrop-blur-sm p-4">
+          <div className="glass-card w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4" role="dialog" aria-modal="true" aria-labelledby="exam-not-started-title">
+            <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 id="exam-not-started-title" className="text-base font-extrabold text-slate-900">This exam hasn’t started</h2>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">The server will allow the exam to begin at:</p>
+              <p className="mt-2 rounded-2xl glass-pill px-3 py-2 text-sm font-bold text-slate-900">
+                {new Date(notStartedAt).toLocaleString()}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setNotStartedAt(null)}
+              className="w-full rounded-2xl glass-btn-primary py-2.5 text-xs font-bold text-white"
+            >
+              Okay
+            </button>
+          </div>
+        </div>
+      )}
 
       {actionLoading && <ActionLoadingSkeleton kind={actionLoading} />}
 

@@ -18,6 +18,14 @@ export const attemptRepository = {
     return res.rows as any[];
   },
 
+  async findInProgress(limit = 10000): Promise<any[]> {
+    const res = await db.execute({
+      sql: `SELECT * FROM attempts WHERE status = 'IN_PROGRESS' ORDER BY expires_at ASC LIMIT ?`,
+      args: [limit],
+    });
+    return res.rows as any[];
+  },
+
   async nextAttemptNumber(examId: string, telegramUserId: number): Promise<number> {
     const res = await db.execute({
       sql: `SELECT COALESCE(MAX(attempt_number), 0) as m FROM attempts WHERE exam_id = ? AND telegram_user_id = ?`,
@@ -66,6 +74,16 @@ export const attemptRepository = {
         }
       }
     });
+  },
+
+  async updateCurrentQuestionIndex(id: string, index: number): Promise<boolean> {
+    const result = await db.execute({
+      sql: `UPDATE attempts
+            SET current_question_index = ?
+            WHERE id = ? AND status = 'IN_PROGRESS'`,
+      args: [Math.max(0, Math.floor(index)), id],
+    });
+    return Number((result as any).rowsAffected ?? 0) > 0;
   },
 
   /** Update only pause metadata; never rewrite the saved answer set. */

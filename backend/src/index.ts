@@ -5,6 +5,7 @@ import { ensureTeachersTable } from './auth.js';
 import { store } from './store.js';
 import { startTelegramPolling } from './telegram/polling.js';
 import { startServer } from './api/server.js';
+import { finalizeExpiredAttempts } from './services/attemptFinalizer.js';
 
 async function main() {
   // Fail fast on missing production secrets (JWT / Turso / Telegram token)
@@ -65,6 +66,15 @@ async function main() {
     if (!store.isReady()) {
       throw new Error('Store failed to become ready');
     }
+    const expirySweep = setInterval(() => {
+      void finalizeExpiredAttempts().catch((error: any) => {
+        console.warn('[attempt-finalizer] sweep failed:', error?.message || error);
+      });
+    }, 5000);
+    expirySweep.unref?.();
+    void finalizeExpiredAttempts().catch((error: any) => {
+      console.warn('[attempt-finalizer] initial sweep failed:', error?.message || error);
+    });
   } catch (e: any) {
     bootError = e?.message || String(e);
     console.error('[boot] FATAL database/store init:', bootError);

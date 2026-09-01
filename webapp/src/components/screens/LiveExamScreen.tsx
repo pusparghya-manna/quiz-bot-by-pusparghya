@@ -16,6 +16,7 @@ import { Exam, ExamAttempt } from '../../types';
 import { QuestionImage } from '../QuestionImage';
 import { soundManager } from '../../utils/audio';
 import { webappApi } from '../../api';
+import { AttemptSyncState } from '../../hooks/useAttemptSync';
 
 interface LiveExamScreenProps {
   exam: Exam;
@@ -26,8 +27,12 @@ interface LiveExamScreenProps {
   onUpdateAttempt: (updated: ExamAttempt) => void;
   onOpenReview: () => void;
   onLeaveExam: () => void;
-  /** Called with latest local answers so auto-submit does not mark them skipped. */
-  onTimeUp: (answers: Record<string, number>) => void;
+  /** Called when the server deadline is reached; server-persisted answers are authoritative. */
+  onTimeUp: () => void;
+  onAnswerChange: (questionId: string, value: number | null) => void;
+  onIndexChange: (index: number) => void;
+  syncState: AttemptSyncState;
+  pendingCount: number;
 }
 
 export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
@@ -39,6 +44,10 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   onOpenReview,
   onLeaveExam,
   onTimeUp,
+  onAnswerChange,
+  onIndexChange,
+  syncState,
+  pendingCount,
 }) => {
   const questions = attempt.questions || exam.questions || [];
   const initialIdx = Math.min(
@@ -53,7 +62,6 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const [pauseBusy, setPauseBusy] = useState(false);
   const [pauseError, setPauseError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timeUpFired = useRef(false);
   const onTimeUpRef = useRef(onTimeUp);
   const soundEnabledRef = useRef(soundEnabled);
@@ -92,7 +100,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
         currentQuestionIndex: currentIdx,
       });
     }
-    webappApi.setIndex(attempt.id, currentIdx).catch(() => {});
+    onIndexChange(currentIdx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIdx]);
 
@@ -104,12 +112,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
           if (!timeUpFired.current) {
             timeUpFired.current = true;
             setSubmitting(true);
-            // Flush pending debounce + auto-submit with latest answers
-            if (saveTimer.current) {
-              clearTimeout(saveTimer.current);
-              saveTimer.current = null;
-            }
-            onTimeUpRef.current({ ...(answersRef.current || {}) });
+            onTimeUpRef.current();
           }
           return 0;
         }
@@ -131,13 +134,6 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const isLowTime = secondsLeft <= 300;
   const isCriticalTime = secondsLeft <= 60;
 
-  const persistAnswer = (questionId: string, optionIndex: number | null) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      webappApi.saveAnswer(attempt.id, questionId, optionIndex).catch(() => {});
-    }, 200);
-  };
-
   const handleSelectOption = (optIdx: number) => {
     if (!currentQ || submitting) return;
     soundManager.playSelect(soundEnabled);
@@ -150,7 +146,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     // React has committed the parent state update.
     answersRef.current = next.answers;
     onUpdateAttempt(next);
-    persistAnswer(currentQ.id, optIdx);
+    onAnswerChange(currentQ.id, optIdx);
   };
 
   const handleClearResponse = () => {
@@ -160,7 +156,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     delete answers[currentQ.id];
     answersRef.current = answers;
     onUpdateAttempt({ ...attempt, answers });
-    persistAnswer(currentQ.id, null);
+    onAnswerChange(currentQ.id, null);
   };
 
   const handleToggleMark = () => {
@@ -279,6 +275,14 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
+            <span
+              className={`hidden sm:inline text-[10px] font-semibold ${
+                syncState === 'offline' || syncState === 'error' ? 'text-amber-700' : 'text-slate-400'
+              }`}
+              title={pendingCount ? `${pendingCount} change(s) waiting to sync` : 'Answers sync automatically'}
+            >
+              {syncState === 'offline' ? 'Offline · saved locally' : pendingCount ? 'Syncing…' : 'Synced'}
+            </span>
             {isPractice && (
               <button
                 type="button"

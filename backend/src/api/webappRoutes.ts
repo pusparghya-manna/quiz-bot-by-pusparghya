@@ -3,6 +3,12 @@ import { store } from '../store.js';
 import { validateWebAppInitData } from '../telegram/webappAuth.js';
 import { calculateAttemptScore, updateExamRanks } from '../services/scoringService.js';
 import { effectiveExamStatus } from '../examStatus.js';
+import {
+  finalizeExpiredAttempt,
+  finalizeExpiredAttempts,
+  serverActiveElapsedSeconds,
+  serverSecondsLeft,
+} from '../services/attemptFinalizer.js';
 
 function botToken(): string {
   return process.env.TELEGRAM_BOT_TOKEN || store.getSettings().telegramBotToken || '';
@@ -56,30 +62,11 @@ function publicQuestions(exam: any) {
 }
 
 function secondsLeft(attempt: any): number {
-  if (!attempt?.expiresAt) return 0;
-  const now = Date.now();
-  let deadline = new Date(attempt.expiresAt).getTime();
-  // Practice pauses stop the server-authoritative deadline as well as the UI timer.
-  // Keep both completed and currently active pause time outside the deadline.
-  if (attempt.isOfficial === false) {
-    deadline += Math.max(0, Number(attempt.pausedSeconds || 0) * 1000);
-  }
-  if (attempt.isOfficial === false && attempt.pausedAt) {
-    const pausedAt = new Date(attempt.pausedAt).getTime();
-    if (Number.isFinite(pausedAt)) deadline += Math.max(0, now - pausedAt);
-  }
-  return Math.max(0, Math.floor((deadline - now) / 1000));
+  return serverSecondsLeft(attempt);
 }
 
 function activeElapsedSeconds(attempt: any, now = Date.now()): number {
-  const started = new Date(attempt.startedAt).getTime();
-  if (!Number.isFinite(started)) return 0;
-  let pausedMs = Math.max(0, Number(attempt.pausedSeconds || 0) * 1000);
-  if (attempt.isOfficial === false && attempt.pausedAt) {
-    const pausedAt = new Date(attempt.pausedAt).getTime();
-    if (Number.isFinite(pausedAt)) pausedMs += Math.max(0, now - pausedAt);
-  }
-  return Math.max(0, Math.floor((now - started - pausedMs) / 1000));
+  return serverActiveElapsedSeconds(attempt, now);
 }
 
 function findAttemptById(attemptId: string): any | undefined {
@@ -131,6 +118,7 @@ export function registerWebappRoutes(app: Express) {
         student = createdStudent;
         await store.saveStudent(createdStudent);
       }
+      await finalizeExpiredAttempts();
       const attempts = (await S(store.getAttempts())) as any[];
       const ongoingRaw = attempts.find(
         (a: any) =>
@@ -260,6 +248,15 @@ export function registerWebappRoutes(app: Express) {
       const exam = await S(store.getExamById(examId));
       if (!exam) return res.status(404).json({ error: 'Exam not found' });
 
+      const windowStart = new Date(exam.startDate).getTime();
+      if (Number.isFinite(windowStart) && Date.now() < windowStart) {
+        return res.status(409).json({
+          code: 'EXAM_NOT_STARTED',
+          startTime: exam.startDate,
+          error: 'This exam has not started yet.',
+        });
+      }
+
       let student = await S(store.getStudentByTelegramId(auth.userId));
       if (!student) {
         const name =
@@ -283,24 +280,17 @@ export function registerWebappRoutes(app: Express) {
       }
 
       let attempt = await S(store.getAttempt(examId, auth.userId));
-      if (attempt && attempt.status === 'IN_PROGRESS' && !forceNew) {
-        if (secondsLeft(attempt) > 0) {
-          if (!attempt.answers || Object.keys(attempt.answers).length === 0) {
-            try {
-              if (typeof (store as any).loadAttemptAnswers === 'function') {
-                await (store as any).loadAttemptAnswers(attempt.id);
-              }
-            } catch {
-              /* */
-            }
-          }
-          return res.json({
-            attempt,
-            exam: summaryExam(exam),
-            questions: publicQuestions(exam),
-            secondsLeft: secondsLeft(attempt),
-          });
-        }
+      if (attempt?.status === 'IN_PROGRESS') {
+        attempt = await finalizeExpiredAttempt(attempt);
+      }
+      if (attempt && attempt.status === 'IN_PROGRESS' && !forceNew && secondsLeft(attempt) > 0) {
+        await store.loadAttemptAnswers(attempt.id);
+        return res.json({
+          attempt,
+          exam: summaryExam(exam),
+          questions: publicQuestions(exam),
+          secondsLeft: secondsLeft(attempt),
+        });
       }
 
       if (!student) return res.status(500).json({ error: 'Student initialization failed' });
@@ -315,13 +305,9 @@ export function registerWebappRoutes(app: Express) {
 
       const now = new Date();
       const attemptNumber = await store.nextAttemptNumber(examId, auth.userId);
-      const windowStart = new Date(exam.startDate).getTime();
-      const windowEnd = windowStart + Math.max(1, exam.durationMinutes || 60) * 60 * 1000;
-      if (Number.isFinite(windowStart) && Date.now() < windowStart) {
-        return res.status(403).json({
-          error: `Exam has not started yet. It opens at ${new Date(windowStart).toLocaleString()}.`,
-        });
-      }
+      const windowEnd = Number.isFinite(windowStart)
+        ? windowStart + Math.max(1, exam.durationMinutes || 60) * 60 * 1000
+        : Number.POSITIVE_INFINITY;
       const windowOpen = Date.now() >= windowStart && Date.now() < windowEnd;
       const priorOfficial = (await S(store.getStudentAttempts(examId, auth.userId))).some(
         (a: any) =>
@@ -383,8 +369,12 @@ export function registerWebappRoutes(app: Express) {
       if (!attempt || Number(attempt.telegramUserId) !== auth.userId) {
         return res.status(404).json({ error: 'Attempt not found' });
       }
+      if (attempt.status === 'IN_PROGRESS') {
+        const finalized = await finalizeExpiredAttempt(attempt);
+        if (finalized) Object.assign(attempt, finalized);
+      }
       if (attempt.status !== 'IN_PROGRESS') {
-        return res.status(400).json({ error: 'Exam not in progress' });
+        return res.status(409).json({ error: 'Exam has already been finalized', attempt });
       }
       if (attempt.isOfficial !== false) {
         return res.status(400).json({ error: 'Pause is available for practice exams only' });
@@ -433,6 +423,57 @@ export function registerWebappRoutes(app: Express) {
     }
   });
 
+  app.post('/api/webapp/sync', async (req, res) => {
+    try {
+      const auth = authWebapp(req, res);
+      if (!auth) return;
+      const attemptId = String(req.body?.attemptId || '');
+      const attempt = findAttemptById(attemptId);
+      if (!attempt || Number(attempt.telegramUserId) !== auth.userId) {
+        return res.status(404).json({ error: 'Attempt not found' });
+      }
+      if (attempt.status === 'IN_PROGRESS') {
+        const finalized = await finalizeExpiredAttempt(attempt);
+        if (finalized) Object.assign(attempt, finalized);
+      }
+      if (attempt.status !== 'IN_PROGRESS') {
+        return res.status(200).json({ ok: true, attempt });
+      }
+
+      const changes = req.body?.changes;
+      if (changes && typeof changes === 'object' && !Array.isArray(changes)) {
+        for (const [questionId, rawValue] of Object.entries(changes)) {
+          if (!questionId) continue;
+          if (rawValue === null || rawValue === undefined) {
+            await store.clearAnswer(attempt.id, questionId);
+            continue;
+          }
+          const optionIndex = Number(rawValue);
+          if (!Number.isInteger(optionIndex) || optionIndex < 0) continue;
+          const ok = await store.saveAnswer(
+            attempt.id,
+            questionId,
+            optionIndex,
+            req.body?.currentQuestionIndex === undefined
+              ? undefined
+              : Number(req.body.currentQuestionIndex)
+          );
+          if (!ok) {
+            const finalized = await finalizeExpiredAttempt(attempt);
+            return res.status(200).json({ ok: true, attempt: finalized || attempt });
+          }
+        }
+      }
+      if (req.body?.currentQuestionIndex !== undefined) {
+        await store.updateAttemptIndex(attempt.id, Number(req.body.currentQuestionIndex));
+      }
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error('[webapp/sync]', e?.message || e);
+      res.status(500).json({ error: 'Failed to sync attempt' });
+    }
+  });
+
   app.post('/api/webapp/answer', async (req, res) => {
     try {
       const auth = authWebapp(req, res);
@@ -444,25 +485,25 @@ export function registerWebappRoutes(app: Express) {
       if (!attempt || Number(attempt.telegramUserId) !== auth.userId) {
         return res.status(404).json({ error: 'Attempt not found' });
       }
-      if (attempt.status !== 'IN_PROGRESS') {
-        return res.status(400).json({ error: 'Exam not in progress' });
+      if (attempt.status === 'IN_PROGRESS') {
+        const finalized = await finalizeExpiredAttempt(attempt);
+        if (finalized) Object.assign(attempt, finalized);
       }
-      // Allow a short post-expiry grace so auto-submit can flush the last selected answers
-      const left = secondsLeft(attempt);
-      if (left < -15) return res.status(400).json({ error: 'Time expired' });
+      if (attempt.status !== 'IN_PROGRESS') {
+        return res.status(409).json({ error: 'Exam has already been finalized', attempt });
+      }
+      if (secondsLeft(attempt) <= 0) {
+        const finalized = await finalizeExpiredAttempt(attempt);
+        return res.status(409).json({ error: 'Time expired', attempt: finalized || attempt });
+      }
 
-      if (!attempt.answers) attempt.answers = {};
+      if (!questionId) return res.status(400).json({ error: 'Question id required' });
       if (optionIndex === null || optionIndex === undefined) {
-        delete attempt.answers[questionId];
-        await store.saveAttempt(attempt);
+        await store.clearAnswer(attempt.id, questionId);
       } else {
         const idx = Number(optionIndex);
-        attempt.answers[questionId] = idx;
-        if (typeof store.saveAnswer === 'function') {
-          await store.saveAnswer(attempt.id, questionId, idx, attempt.currentQuestionIndex);
-        } else {
-          await store.saveAttempt(attempt);
-        }
+        if (!Number.isInteger(idx) || idx < 0) return res.status(400).json({ error: 'Invalid answer' });
+        await store.saveAnswer(attempt.id, questionId, idx, attempt.currentQuestionIndex);
       }
       res.json({ ok: true });
     } catch (e: any) {
@@ -481,11 +522,15 @@ export function registerWebappRoutes(app: Express) {
       if (!attempt || Number(attempt.telegramUserId) !== auth.userId) {
         return res.status(404).json({ error: 'Attempt not found' });
       }
-      if (attempt.status !== 'IN_PROGRESS') {
-        return res.status(400).json({ error: 'Exam not in progress' });
+      if (attempt.status === 'IN_PROGRESS') {
+        const finalized = await finalizeExpiredAttempt(attempt);
+        if (finalized) Object.assign(attempt, finalized);
       }
-      attempt.currentQuestionIndex = Math.max(0, index);
-      await store.saveAttempt(attempt);
+      if (attempt.status !== 'IN_PROGRESS') {
+        return res.status(409).json({ error: 'Exam has already been finalized', attempt });
+      }
+      const ok = await store.updateAttemptIndex(attempt.id, index);
+      if (!ok) return res.status(409).json({ error: 'Exam has already been finalized', attempt });
       res.json({ ok: true });
     } catch (e: any) {
       console.error('[webapp/index]', e?.message || e);
@@ -502,50 +547,32 @@ export function registerWebappRoutes(app: Express) {
       if (!attempt || Number(attempt.telegramUserId) !== auth.userId) {
         return res.status(404).json({ error: 'Attempt not found' });
       }
+      if (attempt.status === 'IN_PROGRESS') {
+        const expired = await finalizeExpiredAttempt(attempt);
+        if (expired) Object.assign(attempt, expired);
+      }
       if (attempt.status !== 'IN_PROGRESS') {
         return res.json({ attempt });
       }
       const exam = await S(store.getExamById(attempt.examId));
       if (!exam) return res.status(404).json({ error: 'Exam not found' });
 
-      if (!attempt.answers || Object.keys(attempt.answers).length === 0) {
-        try {
-          if (typeof (store as any).loadAttemptAnswers === 'function') {
-            await (store as any).loadAttemptAnswers(attempt.id);
-          }
-        } catch {
-          attempt.answers = attempt.answers || {};
-        }
-      }
-
-      // Merge client-side answers (authoritative on submit / auto-submit) so
-      // last-second selections are not marked skipped after timer expiry.
-      const clientAnswers = req.body?.answers;
-      if (clientAnswers && typeof clientAnswers === 'object') {
-        if (!attempt.answers) attempt.answers = {};
-        for (const [qid, val] of Object.entries(clientAnswers)) {
-          if (val === null || val === undefined || qid === '') continue;
-          const idx = Number(val);
-          if (!Number.isFinite(idx)) continue;
-          attempt.answers[String(qid)] = idx;
-        }
-      }
-
+      // The server-side answer rows are authoritative. The browser must sync
+      // changed answers before calling submit; no large snapshot is accepted.
+      await store.loadAttemptAnswers(attempt.id);
       const timeTakenSeconds = activeElapsedSeconds(attempt);
       const scored = calculateAttemptScore(exam, attempt.answers || {}, timeTakenSeconds);
-      Object.assign(attempt, scored);
-      attempt.status = secondsLeft(attempt) <= 0 ? 'AUTO_SUBMITTED' : 'SUBMITTED';
-      attempt.submittedAt = new Date().toISOString();
-      attempt.timeTakenSeconds = timeTakenSeconds;
+      Object.assign(attempt, scored, {
+        status: 'SUBMITTED',
+        submittedAt: new Date().toISOString(),
+        timeTakenSeconds,
+        pausedAt: null,
+      });
 
-      if (typeof store.submitAttemptIfInProgress === 'function') {
-        const ok = await store.submitAttemptIfInProgress(attempt);
-        if (!ok) {
-          const existing = findAttemptById(attemptId);
-          return res.json({ attempt: existing || attempt });
-        }
-      } else {
-        await store.saveAttempt(attempt);
+      const ok = await store.submitAttemptIfInProgress(attempt);
+      if (!ok) {
+        const existing = findAttemptById(attemptId);
+        return res.json({ attempt: existing || attempt });
       }
 
       // Ranking is secondary to showing the student their completed result. Do not

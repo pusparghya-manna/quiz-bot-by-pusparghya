@@ -7,7 +7,7 @@ interface ExamReviewScreenProps {
   attempt: ExamAttempt;
   onReturnToLive: () => void;
   onJumpToQuestion: (idx: number) => void;
-  onFinalSubmit: (answers?: Record<string, number>) => void;
+  onFinalSubmit: () => void;
 }
 
 export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
@@ -175,7 +175,7 @@ export const ExamReviewScreen: React.FC<ExamReviewScreenProps> = ({
                 type="button"
                 onClick={() => {
                   setShowSubmitModal(false);
-                  onFinalSubmit({ ...(attempt.answers || {}) });
+                  onFinalSubmit();
                 }}
                 className="py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs"
               >

@@ -84,6 +84,9 @@ async function api<T>(
     if (!res.ok) {
       const error = new Error((data as any).error || `Request failed (${res.status})`);
       (error as any).status = res.status;
+      (error as any).code = (data as any).code;
+      (error as any).startTime = (data as any).startTime;
+      (error as any).attempt = (data as any).attempt;
       (error as any).retryable = Boolean((data as any).retryable) || res.status >= 500;
       throw error;
     }
@@ -91,9 +94,11 @@ async function api<T>(
   } catch (err: any) {
     if (err?.name === 'AbortError') {
       const timeoutError = new Error(
-        path.endsWith('/pause')
-          ? 'Pause update is taking longer than expected. Retrying…'
-          : 'Resume request is taking longer than expected. Retrying…'
+          path.endsWith('/pause')
+          ? 'Pause update is taking longer than expected.'
+          : path.endsWith('/start')
+            ? 'Exam request is taking longer than expected.'
+            : 'Request is taking longer than expected.'
       );
       (timeoutError as any).retryable = true;
       throw timeoutError;
@@ -216,17 +221,28 @@ export const webappApi = {
       exam: ApiExamSummary;
       questions: ApiQuestion[];
       secondsLeft: number;
-    }>('/api/webapp/start', { examId, forceNew: !!forceNew }, { timeoutMs: 30_000, maxRetries: 2 }),
+    }>('/api/webapp/start', { examId, forceNew: !!forceNew }, { timeoutMs: 15_000, maxRetries: 0 }),
+
+  syncAttempt: (
+    attemptId: string,
+    changes: Record<string, number | null>,
+    currentQuestionIndex?: number
+  ) =>
+    api<{ ok: boolean; attempt?: ApiAttempt }>('/api/webapp/sync', {
+      attemptId,
+      changes,
+      ...(currentQuestionIndex === undefined ? {} : { currentQuestionIndex }),
+    }),
 
   saveAnswer: (attemptId: string, questionId: string, optionIndex: number | null) =>
-    api<{ ok: boolean }>('/api/webapp/answer', {
+    api<{ ok: boolean; attempt?: ApiAttempt }>('/api/webapp/answer', {
       attemptId,
       questionId,
       optionIndex,
     }),
 
   setIndex: (attemptId: string, index: number) =>
-    api<{ ok: boolean }>('/api/webapp/index', { attemptId, index }),
+    api<{ ok: boolean; attempt?: ApiAttempt }>('/api/webapp/index', { attemptId, index }),
 
   pause: (attemptId: string, pause: boolean) =>
     apiWithRetry<{
@@ -237,11 +253,8 @@ export const webappApi = {
       secondsLeft: number;
     }>('/api/webapp/pause', { attemptId, pause }, { timeoutMs: 10_000, maxRetries: 1 }),
 
-  submit: (attemptId: string, answers?: Record<string, number>) =>
-    api<{ attempt: ApiAttempt }>('/api/webapp/submit', {
-      attemptId,
-      ...(answers ? { answers } : {}),
-    }),
+  submit: (attemptId: string) =>
+    api<{ attempt: ApiAttempt }>('/api/webapp/submit', { attemptId }),
 
   results: () =>
     api<{

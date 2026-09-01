@@ -11,7 +11,7 @@
     "postbuild": "node -e \"require('fs').accessSync('dist/index.js'); console.log('dist/index.js ok')\"",
     "start": "node dist/index.js",
     "db:migrate": "tsx src/database/migrateFromBlobs.ts",
-    "test": "tsx src/__tests__/security.regression.test.ts && tsx src/__tests__/telegramSplit.test.ts && tsx src/__tests__/migration.smoke.test.ts && tsx src/__tests__/data.integrity.test.ts && tsx src/__tests__/ocrNormalization.test.ts",
+    "test": "tsx src/__tests__/security.regression.test.ts && tsx src/__tests__/telegramSplit.test.ts && tsx src/__tests__/migration.smoke.test.ts && tsx src/__tests__/data.integrity.test.ts && tsx src/__tests__/ocrNormalization.test.ts && tsx src/__tests__/webappAttemptLifecycle.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

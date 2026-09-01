@@ -324,13 +324,27 @@ class Store {
 
   /** Single-answer UPSERT — preferred for live exam answering (idempotent). */
   async saveAnswer(attemptId: string, questionId: string, optionIndex: number, currentQuestionIndex?: number) {
-    await answerRepository.upsertAnswer(attemptId, questionId, optionIndex, currentQuestionIndex);
+    const ok = await answerRepository.upsertAnswer(attemptId, questionId, optionIndex, currentQuestionIndex);
     const att = this.data.attempts.find((a) => a.id === attemptId);
-    if (att) {
+    if (att && ok) {
       if (!att.answers) att.answers = {};
       att.answers[questionId] = optionIndex;
       if (currentQuestionIndex !== undefined) att.currentQuestionIndex = currentQuestionIndex;
     }
+    return ok;
+  }
+
+  async clearAnswer(attemptId: string, questionId: string) {
+    await answerRepository.deleteAnswer(attemptId, questionId);
+    const att = this.data.attempts.find((a) => a.id === attemptId);
+    if (att?.answers) delete att.answers[questionId];
+  }
+
+  async updateAttemptIndex(attemptId: string, index: number): Promise<boolean> {
+    const ok = await attemptRepository.updateCurrentQuestionIndex(attemptId, index);
+    const att = this.data.attempts.find((a) => a.id === attemptId);
+    if (att && ok) att.currentQuestionIndex = Math.max(0, index);
+    return ok;
   }
 
   /**
@@ -422,6 +436,23 @@ class Store {
 
   getAttempts(examId?: string) {
     return examId ? this.data.attempts.filter((a) => a.examId === examId) : this.data.attempts;
+  }
+
+  async getInProgressAttempts() {
+    const rows = await attemptRepository.findInProgress();
+    const hydrated: Attempt[] = [];
+    for (const row of rows) {
+      const existing = this.data.attempts.find((attempt) => attempt.id === String(row.id));
+      const attempt = existing || mapAttemptRow(row);
+      if (!existing) {
+        this.data.attempts.unshift(attempt);
+        if (this.data.attempts.length > ATTEMPT_CACHE_MAX) this.data.attempts.length = ATTEMPT_CACHE_MAX;
+      } else {
+        Object.assign(existing, mapAttemptRow(row, existing.answers || {}));
+      }
+      hydrated.push(attempt);
+    }
+    return hydrated;
   }
   getStudentAttempts(examId: string, telegramUserId: number) {
     return this.data.attempts
