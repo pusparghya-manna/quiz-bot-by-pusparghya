@@ -17,7 +17,10 @@ import {
 } from './repositories/index.js';
 
 const AUDIT_CACHE_MAX = 200;
-const ATTEMPT_CACHE_MAX = 2000;
+// Dashboard and ownership queries must see the complete authorized attempt history.
+// The database remains the source of truth; this process keeps all attempt metadata
+// needed by the current API architecture and loads answer maps on demand.
+const ATTEMPT_CACHE_MAX = 100_000;
 
 function generateInitialSettings(): SystemSettings {
   return {
@@ -238,9 +241,11 @@ class Store {
       });
     }
 
-    // Attempts: metadata only (answers on demand) — bounded
+    // Attempts: metadata only (answers on demand). Do not truncate historical
+    // attempts here: dashboard visibility and tenant ownership depend on the
+    // complete attempt set, while answer maps remain lazy-loaded.
     const ares = await db.execute(
-      `SELECT * FROM attempts ORDER BY started_at DESC LIMIT ${ATTEMPT_CACHE_MAX}`
+      'SELECT * FROM attempts ORDER BY started_at DESC'
     );
     this.data.attempts = (ares.rows as any[]).map((r) => mapAttemptRow(r, {}));
 
@@ -488,9 +493,6 @@ class Store {
     if (idx >= 0) this.data.attempts[idx] = attempt;
     else {
       this.data.attempts.unshift(attempt);
-      if (this.data.attempts.length > ATTEMPT_CACHE_MAX) {
-        this.data.attempts.length = ATTEMPT_CACHE_MAX;
-      }
     }
     await this.persistAttempt(attempt, { replaceAnswers: true });
     return attempt;
