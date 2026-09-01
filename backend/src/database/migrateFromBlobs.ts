@@ -149,15 +149,15 @@ async function migrateStudents(students: any[]): Promise<number> {
   let n = 0;
   for (const s of students || []) {
     await db.execute({
-      sql: `INSERT INTO students (id, student_code, name, class_name, telegram_user_id, telegram_username, link_code, status, linked_at)
+      sql: `INSERT INTO students (id, student_code, name, class_name, telegram_user_id, telegram_username, link_code, status, joined_at)
             VALUES (?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET name=excluded.name, telegram_user_id=excluded.telegram_user_id,
-              telegram_username=excluded.telegram_username, status=excluded.status, linked_at=excluded.linked_at,
+              telegram_username=excluded.telegram_username, status=excluded.status, joined_at=excluded.joined_at,
               student_code=excluded.student_code, class_name=excluded.class_name, link_code=excluded.link_code`,
       args: [
         s.id, s.studentId || s.id, s.name || 'Student', s.className || null,
         s.telegramUserId ?? null, s.telegramUsername || null, s.linkCode || null,
-        s.status || 'linked', s.linkedAt || null,
+        s.status || 'linked', s.joinedAt || s.linkedAt || null,
       ],
     });
     const tids: string[] = Array.isArray(s.teacherIds) ? s.teacherIds : [];

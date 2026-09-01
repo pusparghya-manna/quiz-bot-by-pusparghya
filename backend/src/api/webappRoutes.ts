@@ -350,7 +350,21 @@ export function registerWebappRoutes(app: Express) {
         attemptNumber,
       } as any;
       attempt = createdAttempt;
-      await store.saveAttempt(createdAttempt);
+      // MAX(attempt_number)+1 is only a hint under concurrent starts. The
+      // database unique index is authoritative; retry the insert with the next
+      // number if another request wins the race.
+      for (let attemptInsert = 0; attemptInsert < 3; attemptInsert++) {
+        try {
+          await store.saveAttempt(createdAttempt);
+          break;
+        } catch (error: any) {
+          const message = String(error?.message || error);
+          const isAttemptNumberConflict =
+            /unique|constraint/i.test(message) && /attempt/i.test(message);
+          if (!isAttemptNumberConflict || attemptInsert === 2) throw error;
+          createdAttempt.attemptNumber = await store.nextAttemptNumber(examId, auth.userId);
+        }
+      }
 
       res.json({
         attempt,
