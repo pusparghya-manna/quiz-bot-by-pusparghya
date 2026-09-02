@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://quiz-bot-by-pusparghya.vercel.app/sitemap.xml

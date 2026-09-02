@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { api, setToken } from '../api';
+import { Link } from 'react-router-dom';
 import { inp, btnP, card } from '../styles/ui';
 import { Field } from './ui/Field';
 import { IconEye, IconEyeOff, IconUser, IconHash, IconAlert } from '../icons';
@@ -43,6 +44,7 @@ export function Login({ onOk }: { onOk: () => void }) {
           <img src="/favicon.png" alt="Quiz Bot" className="mx-auto w-14 h-14 rounded-xl object-contain mb-3" />
           <h1 className="text-xl font-bold tracking-tight text-slate-900">Quiz Bot by Pusparghya</h1>
           <p className="text-xs text-slate-500 mt-0.5">Teacher Dashboard</p>
+          <p className="text-xs text-slate-600 mt-2">Create exams, review results, and keep your quiz workflow organized.</p>
         </div>
 
         <div className="flex gap-1 bg-slate-200/60 p-1 rounded-lg mb-3 ring-1 ring-slate-200">
@@ -89,7 +91,13 @@ export function Login({ onOk }: { onOk: () => void }) {
             {busy ? (mode === 'login' ? 'Signing in…' : 'Creating account…') : (mode === 'login' ? 'Sign in' : 'Create account')}
           </button>
         </form>
-        <p className="text-center text-xs text-slate-400 mt-5">Quiz Bot by Pusparghya</p>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[11px] text-slate-400">
+          <a href="https://t.me/quizbotbypusparghya_bot" className="font-bold text-blue-600 hover:text-blue-800">Open Quiz Bot in Telegram</a>
+          <Link to="/audit-report" className="hover:text-slate-600">Website audit</Link>
+          <Link to="/privacy" className="hover:text-slate-600">Privacy</Link>
+          <Link to="/terms" className="hover:text-slate-600">Terms</Link>
+        </div>
+        <p className="text-center text-xs text-slate-400 mt-3">Quiz Bot by Pusparghya</p>
       </div>
     </div>
   );

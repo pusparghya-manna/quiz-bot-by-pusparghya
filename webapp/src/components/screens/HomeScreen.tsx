@@ -63,7 +63,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {profile.photoUrl ? (
             <img
               src={profile.photoUrl}
-              alt=""
+              alt="Student profile photo"
               className="w-11 h-11 rounded-xl object-cover shadow-md shadow-blue-500/20"
               referrerPolicy="no-referrer"
             />

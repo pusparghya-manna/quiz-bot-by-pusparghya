@@ -77,3 +77,11 @@ button { cursor: pointer; touch-action: manipulation; }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .animate-notif-in { animation: notif-in 0.16s ease-out; }
+
+.mobile-sticky-cta { display: inline-flex; align-items: center; }
+@media (min-width: 768px) {
+  .mobile-sticky-cta { display: none; }
+}
+@media (max-width: 420px) {
+  .mobile-sticky-cta { right: 12px; bottom: calc(76px + var(--safe-bottom)); }
+}

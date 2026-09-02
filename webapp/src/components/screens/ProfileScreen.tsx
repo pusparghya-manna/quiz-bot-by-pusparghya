@@ -47,7 +47,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onUpdateN
               {profile.photoUrl ? (
                 <img
                   src={profile.photoUrl}
-                  alt=""
+                  alt="Student profile photo"
                   className="w-24 h-24 rounded-full object-cover ring-4 ring-white shadow-lg"
                   referrerPolicy="no-referrer"
                 />

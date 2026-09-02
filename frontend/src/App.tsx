@@ -5,6 +5,7 @@ import { DashboardLayout } from './components/layout/DashboardLayout';
 import { Login } from './components/Login';
 import { getToken } from './api';
 import { NotFound } from './pages/NotFound';
+import { AuditReport, AnalyticsLoader, CookieBanner, PageMeta, PrivacyPage, TermsPage, ThankYouPage } from './pages/PublicInfo';
 import TelegramReview from './pages/TelegramReview';
 import { HomeSkeleton } from './components/ui/HomeSkeleton';
 
@@ -44,9 +45,17 @@ function LazyFallback() {
  */
 export default function App() {
   return (
-    <Suspense fallback={<LazyFallback />}>
+    <>
+      <PageMeta />
+      <AnalyticsLoader />
+      <CookieBanner />
+      <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/login" element={<LoginRoute />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/thank-you" element={<ThankYouPage />} />
+        <Route path="/audit-report" element={<AuditReport />} />
         <Route path="/review" element={<TelegramReview />} />
 
         <Route
@@ -65,6 +74,7 @@ export default function App() {
 
         <Route path="*" element={<NotFound />} />
       </Routes>
-    </Suspense>
+      </Suspense>
+    </>
   );
 }
