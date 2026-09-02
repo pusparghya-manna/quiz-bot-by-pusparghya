@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://quiz-bot-by-pusparghya.vercel.app/sitemap.xml
+Sitemap: https://quizbot.pusparghya.de5.net/sitemap.xml

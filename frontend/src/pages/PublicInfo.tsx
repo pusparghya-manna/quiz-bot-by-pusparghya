@@ -35,7 +35,7 @@ export function PageMeta() {
     if (!tag) { tag = document.createElement('meta'); tag.name = 'description'; document.head.appendChild(tag); }
     tag.content = current.description;
     const canonical = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
-    if (canonical) canonical.href = `https://quiz-bot-by-pusparghya.vercel.app${path}`;
+    if (canonical) canonical.href = `https://quizbot.pusparghya.de5.net${path}`;
   }, [current.description, current.title, path]);
   return null;
 }
