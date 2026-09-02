@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, Suspense } from 'react';
-import { NavLink, Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { clearToken } from '../../api';
 import {
@@ -181,10 +181,6 @@ export function DashboardLayout() {
           </Suspense>
         )}
       </main>
-
-      <Link to="/exams/new" className="mobile-sticky-cta fixed bottom-[76px] right-4 z-40 rounded-full bg-blue-600 px-4 py-3 text-xs font-black text-white shadow-xl shadow-blue-600/25 hover:bg-blue-700">
-        + Create exam
-      </Link>
 
       <nav
         className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]"
