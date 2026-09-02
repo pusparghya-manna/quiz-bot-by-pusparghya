@@ -142,26 +142,42 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
   exams = [],
   currentUserName,
 }) => {
-  const examOptions: {
-    id: string;
-    title: string;
-    score?: number;
-    maxScore?: number;
-    rank?: number | null;
-    accuracy?: number;
-  }[] =
-    pastResults.length > 0
-      ? pastResults.map((r) => ({
-          id: r.examId,
-          title: r.examTitle,
-          score: r.score,
-          maxScore: r.maxScore,
-          rank: r.rank,
-          accuracy: r.accuracy,
-        }))
-      : exams
-          .filter((e) => e.status === 'ENDED' || e.status === 'RESULTS_PUBLISHED')
-          .map((e) => ({ id: e.id, title: e.title }));
+  // The exam catalog is the source of truth for the selector. Previously, any
+  // completed result caused the selector to be built only from pastResults,
+  // hiding every other exam returned by the teacher/student session.
+  const resultByExam = new Map<string, ExamAttempt>();
+  for (const result of pastResults) {
+    if (!resultByExam.has(result.examId)) resultByExam.set(result.examId, result);
+  }
+  const examOptions: ExamOption[] = [];
+  const seenExamIds = new Set<string>();
+  for (const exam of exams) {
+    if (seenExamIds.has(exam.id)) continue;
+    seenExamIds.add(exam.id);
+    const result = resultByExam.get(exam.id);
+    examOptions.push({
+      id: exam.id,
+      title: exam.title,
+      score: result?.score,
+      maxScore: result?.maxScore,
+      rank: result?.rank,
+      accuracy: result?.accuracy,
+    });
+  }
+  // Keep result-only entries visible for older attempts whose exam is no
+  // longer present in the current catalog response.
+  for (const result of pastResults) {
+    if (seenExamIds.has(result.examId)) continue;
+    seenExamIds.add(result.examId);
+    examOptions.push({
+      id: result.examId,
+      title: result.examTitle || 'Exam',
+      score: result.score,
+      maxScore: result.maxScore,
+      rank: result.rank,
+      accuracy: result.accuracy,
+    });
+  }
 
   const [selectedExamId, setSelectedExamId] = useState<string>(examOptions[0]?.id || '');
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
