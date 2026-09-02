@@ -93,7 +93,7 @@ export function Login({ onOk }: { onOk: () => void }) {
         </form>
         <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[11px] text-slate-400">
           <a href="https://t.me/quizbotbypusparghya_bot" className="font-bold text-blue-600 hover:text-blue-800">Open Quiz Bot in Telegram</a>
-          <Link to="/audit-report" className="hover:text-slate-600">Website audit</Link>
+          <Link to="/contact" className="hover:text-slate-600">Contact</Link>
           <Link to="/privacy" className="hover:text-slate-600">Privacy</Link>
           <Link to="/terms" className="hover:text-slate-600">Terms</Link>
         </div>
