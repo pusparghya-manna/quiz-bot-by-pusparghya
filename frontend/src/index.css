@@ -85,3 +85,37 @@ button { cursor: pointer; touch-action: manipulation; }
 @media (max-width: 420px) {
   .mobile-sticky-cta { right: 12px; bottom: calc(76px + var(--safe-bottom)); }
 }
+
+/* Public pages and legal typography */
+.public-page {
+  font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  background: radial-gradient(42rem 24rem at 100% -5%, rgba(37, 99, 235, 0.12), transparent 65%), #f8fafc;
+  color: #0f172a;
+}
+.public-back-link { display: inline-flex; align-items: center; gap: 0.5rem; color: #2563eb; font-size: 0.82rem; font-weight: 800; letter-spacing: -0.01em; transition: color 0.16s ease; }
+.public-back-link:hover { color: #1d4ed8; }
+.public-card { overflow: hidden; border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 1.5rem; background: rgba(255, 255, 255, 0.96); padding: 1.5rem; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.07); }
+@media (min-width: 640px) { .public-card { padding: 2.75rem; } }
+.public-card-heading { display: flex; align-items: flex-start; gap: 0.9rem; padding-bottom: 1.75rem; border-bottom: 1px solid #e2e8f0; }
+.public-brand-mark { display: grid; place-items: center; flex: 0 0 auto; width: 2.5rem; height: 2.5rem; border-radius: 0.85rem; background: #2563eb; color: white; font-family: "JetBrains Mono", monospace; font-size: 0.68rem; font-weight: 800; letter-spacing: -0.08em; box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22); }
+.public-eyebrow { margin: 0 0 0.35rem; color: #2563eb; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+.public-title { margin: 0; color: #0f172a; font-size: clamp(1.75rem, 4vw, 2.45rem); font-weight: 800; letter-spacing: -0.045em; line-height: 1.08; }
+.public-lead { margin: 1.5rem 0 0; color: #475569; font-size: 0.98rem; line-height: 1.8; }
+.legal-intro { margin: 1.5rem 0 0; padding: 1rem 1.1rem; border-left: 3px solid #2563eb; border-radius: 0.75rem; background: #eff6ff; color: #334155; font-size: 0.88rem; line-height: 1.75; }
+.legal-intro p { margin: 0; }
+.legal-intro span { display: block; margin-top: 0.65rem; color: #64748b; font-family: "JetBrains Mono", monospace; font-size: 0.68rem; letter-spacing: 0.02em; }
+.legal-sections { margin-top: 1.75rem; }
+.legal-section { display: grid; grid-template-columns: 2.35rem minmax(0, 1fr); gap: 0.8rem; padding: 1.35rem 0; border-top: 1px solid #e2e8f0; }
+.legal-section-number { padding-top: 0.15rem; color: #2563eb; font-family: "JetBrains Mono", monospace; font-size: 0.68rem; font-weight: 800; }
+.legal-section h2 { margin: 0; color: #0f172a; font-size: 1rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.35; }
+.legal-section-copy { margin-top: 0.55rem; color: #475569; font-size: 0.88rem; line-height: 1.85; }
+.legal-section-copy p { margin: 0; }
+.legal-section-copy a { color: #2563eb; font-weight: 700; text-decoration: underline; text-decoration-color: rgba(37, 99, 235, 0.28); text-underline-offset: 3px; }
+.legal-section-copy a:hover { color: #1d4ed8; text-decoration-color: #1d4ed8; }
+.contact-grid { display: grid; grid-template-columns: 1fr; gap: 0.8rem; margin-top: 1.5rem; }
+@media (min-width: 640px) { .contact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.contact-card { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; padding: 1.15rem; border: 1px solid #e2e8f0; border-radius: 1rem; background: #f8fafc; transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease; }
+.contact-card:hover { border-color: #bfdbfe; background: #eff6ff; transform: translateY(-1px); }
+.contact-card span { color: #2563eb; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.11em; text-transform: uppercase; }
+.contact-card strong { overflow-wrap: anywhere; color: #0f172a; font-size: 0.88rem; line-height: 1.45; }
+.contact-note { margin: 1.5rem 0 0; color: #64748b; font-size: 0.8rem; line-height: 1.75; }
