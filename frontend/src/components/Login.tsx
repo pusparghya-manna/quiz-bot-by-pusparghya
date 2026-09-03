@@ -14,6 +14,7 @@ import {
   IconLogIn,
   IconUserPlus,
   IconArrowRight,
+  IconGoogle,
 } from '../icons';
 
 export function Login({ onOk }: { onOk: () => void }) {
@@ -171,7 +172,7 @@ export function Login({ onOk }: { onOk: () => void }) {
             <>
               <div className="my-6 flex items-center gap-3 text-xs font-bold text-slate-500"><span className="h-px flex-1 bg-slate-200" /> OR <span className="h-px flex-1 bg-slate-200" /></div>
               <button type="button" disabled={busy || googleBusy} onClick={continueWithGoogle} className="flex w-full items-center justify-center gap-3 rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-base font-bold text-indigo-950 transition hover:border-blue-200 hover:bg-blue-50/40 disabled:pointer-events-none disabled:opacity-60">
-                <span className="text-xl font-black leading-none"><span className="text-blue-600">G</span></span>
+                <IconGoogle className="h-5 w-5" />
                 {googleBusy ? 'Connecting to Google…' : 'Continue with Google'}
               </button>
               <p className="mt-6 text-center text-sm text-slate-500">Don&apos;t have an account?{' '}
