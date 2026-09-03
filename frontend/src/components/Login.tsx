@@ -81,31 +81,31 @@ export function Login({ onOk }: { onOk: () => void }) {
   };
 
   return (
-    <main className="min-h-full overflow-y-auto bg-[#f5f7fc] px-4 py-8 text-slate-900 sm:py-10">
-      <div className="mx-auto flex min-h-full w-full max-w-[560px] flex-col items-center">
+    <main className="min-h-[100dvh] overflow-y-auto overscroll-contain bg-[#f5f7fc] px-4 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-5 text-slate-900 sm:py-10">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col items-center">
         <header className="w-full text-center">
           <img
             src="/exam-bot-logo.png"
             alt="Exam Bot by Pusparghya"
-            className="mx-auto h-28 w-28 rounded-full object-contain drop-shadow-[0_8px_14px_rgba(37,99,235,0.15)] sm:h-32 sm:w-32"
+            className="mx-auto h-24 w-24 rounded-full object-contain drop-shadow-[0_8px_14px_rgba(37,99,235,0.15)] sm:h-32 sm:w-32"
           />
-          <p className="mt-4 text-xl font-bold tracking-tight sm:text-2xl">
+          <p className="mt-3 text-xl font-bold tracking-tight sm:mt-4 sm:text-2xl">
             <span className="bg-gradient-to-r from-emerald-500 via-blue-600 to-indigo-700 bg-clip-text text-transparent">Welcome back!</span>{' '}
             <span aria-hidden="true">👋</span>
           </p>
-          <h1 className="mt-2 text-[3.15rem] font-black leading-none tracking-[-0.055em] text-blue-600 sm:text-[4.2rem]">Quiz Bot</h1>
-          <p className="mt-1 text-[2rem] font-black leading-none tracking-[-0.045em] text-indigo-950 sm:text-[2.7rem]">by Pusparghya</p>
-          <p className="mx-auto mt-6 max-w-[420px] text-base leading-7 text-slate-500 sm:text-lg sm:leading-8">
+          <h1 className="mt-1.5 text-[2.9rem] font-black leading-none tracking-[-0.055em] text-blue-600 sm:mt-2 sm:text-[4.2rem]">Quiz Bot</h1>
+          <p className="mt-1 text-[1.85rem] font-black leading-none tracking-[-0.045em] text-indigo-950 sm:text-[2.7rem]">by Pusparghya</p>
+          <p className="mx-auto mt-4 max-w-[420px] text-base leading-7 text-slate-500 sm:mt-6 sm:text-lg sm:leading-8">
             Create exams, review results, and<br className="hidden sm:block" /> keep your quiz workflow organized.
           </p>
         </header>
 
-        <section className="mt-8 w-full rounded-[2rem] border border-white bg-white p-5 shadow-[0_18px_50px_rgba(51,65,85,0.12)] sm:mt-10 sm:p-8">
+        <section className="mt-6 w-full rounded-[2rem] border border-white bg-white p-4 shadow-[0_18px_50px_rgba(51,65,85,0.12)] sm:mt-10 sm:p-8">
           <div className="grid grid-cols-2 border-b border-slate-200">
             <button
               type="button"
               onClick={() => switchMode('login')}
-              className={`relative flex items-center justify-center gap-2 py-4 text-base font-extrabold transition sm:text-lg ${isLogin ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`relative flex items-center justify-center gap-2 py-3.5 text-base font-extrabold transition sm:py-4 sm:text-lg ${isLogin ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
             >
               <IconLogIn className="h-6 w-6" /> Sign in
               {isLogin && <span className="absolute inset-x-0 -bottom-px h-1 rounded-full bg-blue-600" />}
@@ -120,7 +120,7 @@ export function Login({ onOk }: { onOk: () => void }) {
             </button>
           </div>
 
-          <form onSubmit={go} className="space-y-5 pt-7">
+          <form onSubmit={go} className="space-y-4 pt-5 sm:space-y-5 sm:pt-7">
             {mode === 'register' && (
               <Field label="Full name">
                 <div className="relative">
@@ -181,7 +181,7 @@ export function Login({ onOk }: { onOk: () => void }) {
           )}
         </section>
 
-        <footer className="pb-2 pt-8 text-center text-sm text-slate-500">
+        <footer className="pb-2 pt-6 text-center text-sm text-slate-500 sm:pt-8">
           <p>© {new Date().getFullYear()} Quiz Bot by Pusparghya</p>
           <nav className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
             <button type="button" onClick={() => navigate('/privacy')} className="hover:text-blue-600">Privacy Policy</button>
