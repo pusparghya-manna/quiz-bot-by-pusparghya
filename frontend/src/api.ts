@@ -13,9 +13,10 @@ export const getToken = () => {
   }
 };
 
-export const setToken = (t: string) => {
+export const setToken = (t: string, remember = true) => {
   try {
-    localStorage.setItem('quiz_token', t);
+    if (remember) localStorage.setItem('quiz_token', t);
+    else localStorage.removeItem('quiz_token');
     sessionStorage.setItem('quiz_token', t);
   } catch {
     /* ignore */

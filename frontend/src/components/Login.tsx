@@ -1,27 +1,32 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, setToken } from '../api';
-import { inp, btnP } from '../styles/ui';
+import { inp } from '../styles/ui';
 import { Field } from './ui/Field';
+import { firebaseConfigured, firebaseGoogleLogin, firebaseIdToken } from '../firebase';
 import {
   IconEye,
   IconEyeOff,
   IconUser,
   IconHash,
   IconAlert,
-  IconBook,
-  IconChart,
-  IconCheck,
-  IconSparkles,
+  IconLock,
+  IconLogIn,
+  IconUserPlus,
+  IconArrowRight,
 } from '../icons';
 
 export function Login({ onOk }: { onOk: () => void }) {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [u, setU] = useState('');
   const [p, setP] = useState('');
   const [name, setName] = useState('');
   const [show, setShow] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   const go = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,138 +40,157 @@ export function Login({ onOk }: { onOk: () => void }) {
       const res = await api(path, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || (mode === 'login' ? 'Invalid credentials' : 'Registration failed'));
-      setToken(data.token);
+      setToken(data.token, remember);
       onOk();
     } catch (e: any) {
-      setErr(e.message || 'Failed');
+      setErr(e.message || 'Unable to continue');
     } finally {
       setBusy(false);
     }
   };
 
+  const continueWithGoogle = async () => {
+    setErr('');
+    if (!firebaseConfigured) {
+      setErr('Google sign-in is not configured yet. Use username and password instead.');
+      return;
+    }
+    setGoogleBusy(true);
+    try {
+      const user = await firebaseGoogleLogin();
+      const idToken = await firebaseIdToken(user);
+      const res = await api('/api/auth/firebase/exchange', {
+        method: 'POST',
+        body: JSON.stringify({ idToken, name: user.displayName || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Google sign-in failed');
+      setToken(data.token, remember);
+      onOk();
+    } catch (e: any) {
+      setErr(e.message || 'Google sign-in failed');
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
+
   const isLogin = mode === 'login';
+  const switchMode = (next: 'login' | 'register') => {
+    setMode(next);
+    setErr('');
+  };
 
   return (
-    <main className="min-h-full relative overflow-hidden flex items-center justify-center px-4 py-8 sm:px-6">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-32 -right-24 h-80 w-80 rounded-full bg-blue-300/25 blur-3xl" />
-        <div className="absolute -bottom-40 -left-28 h-96 w-96 rounded-full bg-indigo-300/25 blur-3xl" />
-        <div className="absolute top-1/3 left-1/2 h-48 w-48 -translate-x-1/2 rounded-full bg-sky-200/20 blur-3xl" />
-      </div>
+    <main className="min-h-full overflow-y-auto bg-[#f5f7fc] px-4 py-8 text-slate-900 sm:py-10">
+      <div className="mx-auto flex min-h-full w-full max-w-[560px] flex-col items-center">
+        <header className="w-full text-center">
+          <img
+            src="/exam-bot-logo.png"
+            alt="Exam Bot by Pusparghya"
+            className="mx-auto h-28 w-28 rounded-full object-contain drop-shadow-[0_8px_14px_rgba(37,99,235,0.15)] sm:h-32 sm:w-32"
+          />
+          <p className="mt-4 text-xl font-bold tracking-tight sm:text-2xl">
+            <span className="bg-gradient-to-r from-emerald-500 via-blue-600 to-indigo-700 bg-clip-text text-transparent">Welcome back!</span>{' '}
+            <span aria-hidden="true">👋</span>
+          </p>
+          <h1 className="mt-2 text-[3.15rem] font-black leading-none tracking-[-0.055em] text-blue-600 sm:text-[4.2rem]">Quiz Bot</h1>
+          <p className="mt-1 text-[2rem] font-black leading-none tracking-[-0.045em] text-indigo-950 sm:text-[2.7rem]">by Pusparghya</p>
+          <p className="mx-auto mt-6 max-w-[420px] text-base leading-7 text-slate-500 sm:text-lg sm:leading-8">
+            Create exams, review results, and<br className="hidden sm:block" /> keep your quiz workflow organized.
+          </p>
+        </header>
 
-      <div className="relative z-10 grid w-full max-w-5xl overflow-hidden rounded-[2rem] border border-white/80 bg-white/70 shadow-2xl shadow-slate-300/40 backdrop-blur-xl lg:grid-cols-[0.95fr_1.05fr]">
-        <section className="hidden bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-900 p-9 text-white lg:flex lg:flex-col lg:justify-between xl:p-12">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm">
-                <img src="/favicon.png" alt="" className="h-8 w-8 rounded-xl object-contain" />
-              </div>
-              <div>
-                <p className="text-sm font-bold tracking-tight">Quiz Bot</p>
-                <p className="text-[11px] text-blue-100">by Pusparghya</p>
-              </div>
-            </div>
-            <div className="mt-20 max-w-sm">
-              <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-blue-100 ring-1 ring-white/15">
-                <IconSparkles className="h-3.5 w-3.5" /> A calmer way to manage exams
-              </div>
-              <h1 className="text-4xl font-black leading-[1.08] tracking-tight xl:text-5xl">
-                Make every assessment count.
-              </h1>
-              <p className="mt-5 text-sm leading-6 text-blue-100/85">
-                Create engaging exams, follow student progress, and keep your results organized in one focused workspace.
-              </p>
-            </div>
+        <section className="mt-8 w-full rounded-[2rem] border border-white bg-white p-5 shadow-[0_18px_50px_rgba(51,65,85,0.12)] sm:mt-10 sm:p-8">
+          <div className="grid grid-cols-2 border-b border-slate-200">
+            <button
+              type="button"
+              onClick={() => switchMode('login')}
+              className={`relative flex items-center justify-center gap-2 py-4 text-base font-extrabold transition sm:text-lg ${isLogin ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <IconLogIn className="h-6 w-6" /> Sign in
+              {isLogin && <span className="absolute inset-x-0 -bottom-px h-1 rounded-full bg-blue-600" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMode('register')}
+              className={`relative flex items-center justify-center gap-2 py-4 text-base font-extrabold transition sm:text-lg ${!isLogin ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <IconUserPlus className="h-6 w-6" /> Register
+              {!isLogin && <span className="absolute inset-x-0 -bottom-px h-1 rounded-full bg-blue-600" />}
+            </button>
           </div>
-          <div className="grid grid-cols-3 gap-2 border-t border-white/15 pt-6 text-[11px] text-blue-100">
-            <div className="flex items-center gap-2"><IconBook className="h-4 w-4 text-cyan-200" /> Exams</div>
-            <div className="flex items-center gap-2"><IconChart className="h-4 w-4 text-emerald-200" /> Insights</div>
-            <div className="flex items-center gap-2"><IconCheck className="h-4 w-4 text-amber-200" /> Results</div>
-          </div>
-        </section>
 
-        <section className="p-5 sm:p-8 lg:p-10 xl:p-12">
-          <div className="mx-auto max-w-md">
-            <div className="mb-8 flex items-center gap-3 lg:hidden">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/25">
-                <img src="/favicon.png" alt="Quiz Bot" className="h-9 w-9 rounded-xl object-contain" />
-              </div>
-              <div>
-                <p className="text-base font-black tracking-tight text-slate-900">Quiz Bot</p>
-                <p className="text-xs font-medium text-slate-500">Teacher workspace by Pusparghya</p>
-              </div>
-            </div>
-
-            <div className="mb-7">
-              <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-blue-600">Teacher workspace</p>
-              <h2 className="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
-                {isLogin ? 'Welcome back' : 'Create your workspace'}
-              </h2>
-              <p className="mt-2 text-sm leading-5 text-slate-500">
-                {isLogin ? 'Sign in to continue managing your exams and students.' : 'Set up your account and start building better assessments.'}
-              </p>
-            </div>
-
-            <div className="mb-6 grid grid-cols-2 rounded-xl bg-slate-100/85 p-1 ring-1 ring-slate-200/70">
-              <button
-                type="button"
-                onClick={() => { setMode('login'); setErr(''); }}
-                className={`rounded-lg px-3 py-2.5 text-xs font-bold transition ${isLogin ? 'bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/70' : 'text-slate-500 hover:text-slate-700'}`}
-              >
-                Sign in
-              </button>
-              <button
-                type="button"
-                onClick={() => { setMode('register'); setErr(''); }}
-                className={`rounded-lg px-3 py-2.5 text-xs font-bold transition ${!isLogin ? 'bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/70' : 'text-slate-500 hover:text-slate-700'}`}
-              >
-                Register
-              </button>
-            </div>
-
-            <form onSubmit={go} className="space-y-4">
-              {mode === 'register' && (
-                <Field label="Full name">
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"><IconUser className="h-4 w-4" /></span>
-                    <input className={inp + ' rounded-xl py-3 pl-10'} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Your name" />
-                  </div>
-                </Field>
-              )}
-              <Field label="Username">
+          <form onSubmit={go} className="space-y-5 pt-7">
+            {mode === 'register' && (
+              <Field label="Full name">
                 <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"><IconHash className="h-4 w-4" /></span>
-                  <input className={inp + ' rounded-xl py-3 pl-10'} value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" autoCapitalize="off" required placeholder="Enter your username" />
+                  <IconUser className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                  <input className={inp + ' rounded-xl border-2 py-3.5 pl-12 text-base'} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Enter your name" />
                 </div>
               </Field>
-              <Field label="Password">
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"><IconEyeOff className="h-4 w-4" /></span>
-                  <input className={inp + ' rounded-xl py-3 pl-10 pr-11'} type={show ? 'text' : 'password'} value={p} onChange={(e) => setP(e.target.value)} autoComplete={isLogin ? 'current-password' : 'new-password'} required placeholder={isLogin ? 'Enter your password' : 'At least 8 characters'} />
-                  <button type="button" tabIndex={-1} onMouseDown={(e) => e.preventDefault()} onClick={() => setShow((v) => !v)} aria-label={show ? 'Hide password' : 'Show password'} className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600">
-                    {show ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </Field>
+            )}
+            <Field label="Username">
+              <div className="relative">
+                <IconUser className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
+                <input className={inp + ' rounded-xl border-2 py-3.5 pl-12 text-base'} value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" autoCapitalize="off" required placeholder="Enter your username" />
+              </div>
+            </Field>
+            <Field label="Password">
+              <div className="relative">
+                <IconLock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
+                <input className={inp + ' rounded-xl border-2 py-3.5 pl-12 pr-12 text-base'} type={show ? 'text' : 'password'} value={p} onChange={(e) => setP(e.target.value)} autoComplete={isLogin ? 'current-password' : 'new-password'} required placeholder={isLogin ? 'Enter your password' : 'At least 8 characters'} />
+                <button type="button" tabIndex={-1} onMouseDown={(e) => e.preventDefault()} onClick={() => setShow((v) => !v)} aria-label={show ? 'Hide password' : 'Show password'} className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100">
+                  {show ? <IconEyeOff className="h-5 w-5" /> : <IconEye className="h-5 w-5" />}
+                </button>
+              </div>
+            </Field>
 
-              {err && (
-                <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 px-3.5 py-3 text-xs leading-5 text-red-700">
-                  <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{err}</span>
-                </div>
-              )}
+            {isLogin && (
+              <div className="flex items-center justify-between gap-3 text-sm font-semibold">
+                <label className="flex cursor-pointer items-center gap-2 text-slate-600">
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-5 w-5 rounded border-slate-300 text-blue-600 accent-blue-600" />
+                  Remember me
+                </label>
+                <button type="button" onClick={() => navigate('/forgot-password')} className="font-bold text-blue-600 hover:text-blue-800">Forgot password?</button>
+              </div>
+            )}
 
-              <button type="submit" disabled={busy} className={btnP + ' mt-2 w-full rounded-xl py-3 text-sm shadow-lg shadow-blue-600/20'}>
-                {busy ? (isLogin ? 'Signing in…' : 'Creating account…') : (isLogin ? 'Sign in to dashboard' : 'Create teacher account')}
+            {err && (
+              <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 px-3.5 py-3 text-sm leading-5 text-red-700">
+                <IconAlert className="mt-0.5 h-5 w-5 shrink-0" /> <span>{err}</span>
+              </div>
+            )}
+
+            <button type="submit" disabled={busy || googleBusy} className="flex w-full items-center justify-center gap-3 rounded-xl bg-blue-600 px-4 py-3.5 text-base font-extrabold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60">
+              {busy ? (isLogin ? 'Signing in…' : 'Creating account…') : (isLogin ? 'Sign in' : 'Create account')}
+              {!busy && <IconArrowRight className="h-5 w-5" />}
+            </button>
+          </form>
+
+          {isLogin && (
+            <>
+              <div className="my-6 flex items-center gap-3 text-xs font-bold text-slate-500"><span className="h-px flex-1 bg-slate-200" /> OR <span className="h-px flex-1 bg-slate-200" /></div>
+              <button type="button" disabled={busy || googleBusy} onClick={continueWithGoogle} className="flex w-full items-center justify-center gap-3 rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-base font-bold text-indigo-950 transition hover:border-blue-200 hover:bg-blue-50/40 disabled:pointer-events-none disabled:opacity-60">
+                <span className="text-xl font-black leading-none"><span className="text-blue-600">G</span></span>
+                {googleBusy ? 'Connecting to Google…' : 'Continue with Google'}
               </button>
-            </form>
-
-            <p className="mt-7 text-center text-[11px] leading-5 text-slate-400">
-              Secure teacher access for your exam workspace.<br />
-              Quiz Bot by Pusparghya
-            </p>
-          </div>
+              <p className="mt-6 text-center text-sm text-slate-500">Don&apos;t have an account?{' '}
+                <button type="button" onClick={() => switchMode('register')} className="font-extrabold text-blue-600 hover:text-blue-800">Register</button>
+              </p>
+            </>
+          )}
         </section>
+
+        <footer className="pb-2 pt-8 text-center text-sm text-slate-500">
+          <p>© {new Date().getFullYear()} Quiz Bot by Pusparghya</p>
+          <nav className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <button type="button" onClick={() => navigate('/privacy')} className="hover:text-blue-600">Privacy Policy</button>
+            <span className="text-slate-300">•</span>
+            <button type="button" onClick={() => navigate('/terms')} className="hover:text-blue-600">Terms of Service</button>
+            <span className="text-slate-300">•</span>
+            <button type="button" onClick={() => navigate('/contact')} className="hover:text-blue-600">Contact</button>
+          </nav>
+        </footer>
       </div>
     </main>
   );

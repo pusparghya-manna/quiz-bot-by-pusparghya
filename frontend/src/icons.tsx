@@ -11,6 +11,10 @@ export const IconPlus = ({ className }: P) => <svg {...s} className={className}>
 export const IconTrash = ({ className }: P) => <svg {...s} className={className}><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>;
 export const IconEdit = ({ className }: P) => <svg {...s} className={className}><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>;
 export const IconLogout = ({ className }: P) => <svg {...s} className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>;
+export const IconLogIn = ({ className }: P) => <svg {...s} className={className}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/></svg>;
+export const IconLock = ({ className }: P) => <svg {...s} className={className}><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v3"/></svg>;
+export const IconUserPlus = ({ className }: P) => <svg {...s} className={className}><path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M19 8v6M16 11h6"/></svg>;
+export const IconArrowRight = ({ className }: P) => <svg {...s} className={className}><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>;
 export const IconCheck = ({ className }: P) => <svg {...s} className={className}><path d="M20 6 9 17l-5-5"/></svg>;
 export const IconUpload = ({ className }: P) => <svg {...s} className={className}><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 20h16"/></svg>;
 export const IconEye = ({ className }: P) => <svg {...s} className={className}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>;
