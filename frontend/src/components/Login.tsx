@@ -8,7 +8,6 @@ import {
   IconEye,
   IconEyeOff,
   IconUser,
-  IconHash,
   IconAlert,
   IconLock,
   IconLogIn,
@@ -23,6 +22,7 @@ export function Login({ onOk }: { onOk: () => void }) {
   const [u, setU] = useState('');
   const [p, setP] = useState('');
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(true);
   const [err, setErr] = useState('');
@@ -37,7 +37,7 @@ export function Login({ onOk }: { onOk: () => void }) {
       const path = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
       const body = mode === 'login'
         ? { username: u.trim(), password: p }
-        : { username: u.trim(), password: p, name: name.trim() || u.trim() };
+        : { username: u.trim(), password: p, name: name.trim() || u.trim(), email: email.trim() };
       const res = await api(path, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || (mode === 'login' ? 'Invalid credentials' : 'Registration failed'));
@@ -82,7 +82,7 @@ export function Login({ onOk }: { onOk: () => void }) {
   };
 
   return (
-    <main className="min-h-[100dvh] overflow-y-auto overscroll-contain bg-[#f5f7fc] px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] text-slate-900 sm:px-6 sm:py-10">
+    <main className="min-h-[100dvh] overflow-y-auto overscroll-contain bg-[#f5f7fc] px-4 pb-[calc(2.5rem+env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] text-slate-900 sm:px-6 sm:py-10">
       <div className="mx-auto flex w-full max-w-[480px] flex-col items-center sm:max-w-[560px]">
         <header className="w-full text-center">
           <img
@@ -127,24 +127,72 @@ export function Login({ onOk }: { onOk: () => void }) {
 
           <form onSubmit={go} className="space-y-3 pt-4 sm:space-y-5 sm:pt-7">
             {mode === 'register' && (
-              <Field label="Full name">
-                <div className="relative">
-                  <IconUser className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 sm:left-4 sm:h-5 sm:w-5" />
-                  <input className={inp + ' rounded-xl border-2 py-2.5 pl-10 text-sm sm:py-3.5 sm:pl-12 sm:text-base'} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Enter your name" />
-                </div>
-              </Field>
+              <>
+                <Field label="Full name">
+                  <div className="relative">
+                    <IconUser className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 sm:left-4 sm:h-5 sm:w-5" />
+                    <input
+                      className={inp + ' rounded-xl border-2 py-2.5 pl-10 text-sm sm:py-3.5 sm:pl-12 sm:text-base'}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      autoComplete="name"
+                      placeholder="Enter your name"
+                    />
+                  </div>
+                </Field>
+                <Field label="Email">
+                  <div className="relative">
+                    <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 sm:left-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="2" y="4" width="20" height="16" rx="2" />
+                      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                    </svg>
+                    <input
+                      className={inp + ' rounded-xl border-2 py-2.5 pl-10 text-sm sm:py-3.5 sm:pl-12 sm:text-base'}
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      autoComplete="email"
+                      required
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                </Field>
+              </>
             )}
             <Field label="Username">
               <div className="relative">
                 <IconUser className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 sm:left-4 sm:h-5 sm:w-5" />
-                <input className={inp + ' rounded-xl border-2 py-2.5 pl-10 text-sm sm:py-3.5 sm:pl-12 sm:text-base'} value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" autoCapitalize="off" required placeholder="Enter your username" />
+                <input
+                  className={inp + ' rounded-xl border-2 py-2.5 pl-10 text-sm sm:py-3.5 sm:pl-12 sm:text-base'}
+                  value={u}
+                  onChange={(e) => setU(e.target.value)}
+                  autoComplete="username"
+                  autoCapitalize="off"
+                  required
+                  placeholder="Enter your username"
+                />
               </div>
             </Field>
             <Field label="Password">
               <div className="relative">
                 <IconLock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 sm:left-4 sm:h-5 sm:w-5" />
-                <input className={inp + ' rounded-xl border-2 py-2.5 pl-10 pr-10 text-sm sm:py-3.5 sm:pl-12 sm:pr-12 sm:text-base'} type={show ? 'text' : 'password'} value={p} onChange={(e) => setP(e.target.value)} autoComplete={isLogin ? 'current-password' : 'new-password'} required placeholder={isLogin ? 'Enter your password' : 'At least 8 characters'} />
-                <button type="button" tabIndex={-1} onMouseDown={(e) => e.preventDefault()} onClick={() => setShow((v) => !v)} aria-label={show ? 'Hide password' : 'Show password'} className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 sm:right-2 sm:h-10 sm:w-10">
+                <input
+                  className={inp + ' rounded-xl border-2 py-2.5 pl-10 pr-10 text-sm sm:py-3.5 sm:pl-12 sm:pr-12 sm:text-base'}
+                  type={show ? 'text' : 'password'}
+                  value={p}
+                  onChange={(e) => setP(e.target.value)}
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                  required
+                  placeholder={isLogin ? 'Enter your password' : 'At least 8 characters'}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setShow((v) => !v)}
+                  aria-label={show ? 'Hide password' : 'Show password'}
+                  className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 sm:right-2 sm:h-10 sm:w-10"
+                >
                   {show ? <IconEyeOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <IconEye className="h-4 w-4 sm:h-5 sm:w-5" />}
                 </button>
               </div>
@@ -153,10 +201,17 @@ export function Login({ onOk }: { onOk: () => void }) {
             {isLogin && (
               <div className="flex items-center justify-between gap-2 text-xs font-semibold sm:text-sm">
                 <label className="flex cursor-pointer items-center gap-1.5 text-slate-600 sm:gap-2">
-                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 accent-blue-600 sm:h-5 sm:w-5" />
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 accent-blue-600 sm:h-5 sm:w-5"
+                  />
                   Remember me
                 </label>
-                <button type="button" onClick={() => navigate('/forgot-password')} className="font-bold text-blue-600 hover:text-blue-800">Forgot password?</button>
+                <button type="button" onClick={() => navigate('/forgot-password')} className="font-bold text-blue-600 hover:text-blue-800">
+                  Forgot password?
+                </button>
               </div>
             )}
 
@@ -166,7 +221,11 @@ export function Login({ onOk }: { onOk: () => void }) {
               </div>
             )}
 
-            <button type="submit" disabled={busy || googleBusy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60 sm:gap-3 sm:py-3.5 sm:text-base">
+            <button
+              type="submit"
+              disabled={busy || googleBusy}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60 sm:gap-3 sm:py-3.5 sm:text-base"
+            >
               {busy ? (isLogin ? 'Signing in…' : 'Creating account…') : (isLogin ? 'Sign in' : 'Create account')}
               {!busy && <IconArrowRight className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
@@ -177,26 +236,39 @@ export function Login({ onOk }: { onOk: () => void }) {
               <div className="my-4 flex items-center gap-3 text-[11px] font-bold text-slate-500 sm:my-6 sm:text-xs">
                 <span className="h-px flex-1 bg-slate-200" /> OR <span className="h-px flex-1 bg-slate-200" />
               </div>
-              <button type="button" disabled={busy || googleBusy} onClick={continueWithGoogle} className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-indigo-950 transition hover:border-blue-200 hover:bg-blue-50/40 disabled:pointer-events-none disabled:opacity-60 sm:gap-3 sm:py-3.5 sm:text-base">
+              <button
+                type="button"
+                disabled={busy || googleBusy}
+                onClick={continueWithGoogle}
+                className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-indigo-950 transition hover:border-blue-200 hover:bg-blue-50/40 disabled:pointer-events-none disabled:opacity-60 sm:gap-3 sm:py-3.5 sm:text-base"
+              >
                 <IconGoogle className="h-5 w-5" />
                 {googleBusy ? 'Connecting to Google…' : 'Continue with Google'}
               </button>
               <p className="mt-4 text-center text-xs text-slate-500 sm:mt-6 sm:text-sm">
                 Don&apos;t have an account?{' '}
-                <button type="button" onClick={() => switchMode('register')} className="font-extrabold text-blue-600 hover:text-blue-800">Register</button>
+                <button type="button" onClick={() => switchMode('register')} className="font-extrabold text-blue-600 hover:text-blue-800">
+                  Register
+                </button>
               </p>
             </>
           )}
         </section>
 
-        <footer className="pb-1 pt-5 text-center text-xs text-slate-500 sm:pt-8 sm:text-sm">
+        <footer className="w-full pb-4 pt-5 text-center text-xs text-slate-500 sm:pb-2 sm:pt-8 sm:text-sm">
           <p>© {new Date().getFullYear()} Quiz Bot by Pusparghya</p>
           <nav className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 sm:mt-3 sm:gap-x-4 sm:gap-y-2">
-            <button type="button" onClick={() => navigate('/privacy')} className="hover:text-blue-600">Privacy Policy</button>
+            <button type="button" onClick={() => navigate('/privacy')} className="hover:text-blue-600">
+              Privacy Policy
+            </button>
             <span className="text-slate-300">•</span>
-            <button type="button" onClick={() => navigate('/terms')} className="hover:text-blue-600">Terms of Service</button>
+            <button type="button" onClick={() => navigate('/terms')} className="hover:text-blue-600">
+              Terms of Service
+            </button>
             <span className="text-slate-300">•</span>
-            <button type="button" onClick={() => navigate('/contact')} className="hover:text-blue-600">Contact</button>
+            <button type="button" onClick={() => navigate('/contact')} className="hover:text-blue-600">
+              Contact
+            </button>
           </nav>
         </footer>
       </div>
