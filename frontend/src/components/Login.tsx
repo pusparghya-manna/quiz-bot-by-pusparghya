@@ -82,32 +82,17 @@ export function Login({ onOk }: { onOk: () => void }) {
   };
 
   return (
-    <main className="min-h-[100dvh] overflow-y-auto overscroll-contain bg-[#f5f7fc] px-3 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-[max(0.5rem,env(safe-area-inset-top))] text-slate-900 sm:px-6 sm:py-10">
+    <main className="min-h-[100dvh] overflow-y-auto overscroll-contain bg-[#f5f7fc] px-3 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] text-slate-900 sm:px-6 sm:py-10">
       <div className="mx-auto flex w-full max-w-[400px] flex-col items-center sm:max-w-[520px]">
-        {/* Compact header on mobile */}
         <header className="w-full text-center">
           <img
             src="/exam-bot-logo.png"
             alt="Exam Bot by Pusparghya"
-            className="mx-auto h-12 w-12 rounded-full object-contain drop-shadow-[0_4px_10px_rgba(37,99,235,0.12)] sm:h-24 sm:w-24"
+            className="mx-auto h-28 w-28 rounded-full object-contain drop-shadow-[0_8px_18px_rgba(37,99,235,0.18)] sm:h-36 sm:w-36"
           />
-          <p className="mt-1.5 text-sm font-bold tracking-tight sm:mt-3 sm:text-xl">
-            <span className="bg-gradient-to-r from-emerald-500 via-blue-600 to-indigo-700 bg-clip-text text-transparent">Welcome back!</span>{' '}
-            <span aria-hidden="true">👋</span>
-          </p>
-          <h1 className="mt-0.5 text-[1.55rem] font-black leading-none tracking-[-0.04em] text-blue-600 sm:mt-1.5 sm:text-[3.2rem] sm:tracking-[-0.055em]">
-            Quiz Bot
-          </h1>
-          <p className="mt-0.5 text-[1rem] font-black leading-none tracking-[-0.03em] text-indigo-950 sm:text-[2.1rem] sm:tracking-[-0.045em]">
-            by Pusparghya
-          </p>
-          <p className="mx-auto mt-1.5 max-w-[300px] text-[12px] leading-4 text-slate-500 sm:mt-4 sm:max-w-[400px] sm:text-[15px] sm:leading-6">
-            Create exams, review results, and keep your quiz workflow organized.
-          </p>
         </header>
 
-        {/* Compact card */}
-        <section className="mt-3 w-full rounded-xl border border-white bg-white px-3.5 py-3 shadow-[0_10px_32px_rgba(51,65,85,0.1)] sm:mt-7 sm:rounded-2xl sm:px-7 sm:py-6 sm:shadow-[0_16px_44px_rgba(51,65,85,0.12)]">
+        <section className="mt-4 w-full rounded-xl border border-white bg-white px-3.5 py-3 shadow-[0_10px_32px_rgba(51,65,85,0.1)] sm:mt-6 sm:rounded-2xl sm:px-7 sm:py-6 sm:shadow-[0_16px_44px_rgba(51,65,85,0.12)]">
           <div className="grid grid-cols-2 border-b border-slate-200">
             <button
               type="button"
