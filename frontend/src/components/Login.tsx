@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, setToken } from '../api';
 import { firebaseConfigured, firebaseGoogleLogin, firebaseIdToken, firebaseRegister } from '../firebase';
-import { inp, btnP, card } from '../styles/ui';
 import { Field } from './ui/Field';
 import { IconEye, IconEyeOff, IconUser, IconHash, IconAlert } from '../icons';
 
@@ -16,6 +15,19 @@ function firebaseMessage(error: any) {
   return error?.message || 'Authentication failed. Please try again.';
 }
 
+function SignInIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3M21 19V5a2 2 0 0 0-2-2h-4M21 19a2 2 0 0 1-2 2h-4" /></svg>;
+}
+function RegisterIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4" /><path d="M2 21v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5M19 8v6M16 11h6" /></svg>;
+}
+function LockIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></svg>;
+}
+function ArrowIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" /></svg>;
+}
+
 export function Login({ onOk }: { onOk: () => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [identifier, setIdentifier] = useState('');
@@ -23,6 +35,7 @@ export function Login({ onOk }: { onOk: () => void }) {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [busy, setBusy] = useState(false);
@@ -38,7 +51,7 @@ export function Login({ onOk }: { onOk: () => void }) {
     setToken(data.token);
   };
 
-  const go = async (e: React.FormEvent) => {
+  const go = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
@@ -52,11 +65,11 @@ export function Login({ onOk }: { onOk: () => void }) {
       if (mode === 'register' && firebaseConfigured) {
         const user = await firebaseRegister(email, password);
         await exchange(user, value, name.trim() || value);
-        setSuccess('Account created. A verification email has been sent, but you can continue to the dashboard now.');
+        setSuccess('Account created. A verification email has been sent.');
       } else {
         const path = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
         const body = mode === 'login'
-          ? { username: value, password }
+          ? { username: value, password, remember }
           : { username: value, email: email.trim(), password, name: name.trim() || value };
         const res = await api(path, { method: 'POST', body: JSON.stringify(body) });
         const data = await res.json().catch(() => ({}));
@@ -74,6 +87,7 @@ export function Login({ onOk }: { onOk: () => void }) {
   const google = async () => {
     setError('');
     setSuccess('');
+    if (!firebaseConfigured) return setError('Google sign-in is not configured yet.');
     setBusy(true);
     try {
       const user = await firebaseGoogleLogin();
@@ -87,37 +101,40 @@ export function Login({ onOk }: { onOk: () => void }) {
   };
 
   return (
-    <div className="min-h-full flex flex-col items-center justify-center p-5 relative overflow-hidden">
-      <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-blue-200/40 blur-3xl" />
-      <div className="absolute -bottom-28 -left-24 w-80 h-80 rounded-full bg-indigo-200/40 blur-3xl" />
-      <div className="relative w-full max-w-sm">
-        <div className="text-center mb-5">
-          <img src="/exam-bot-logo.png" alt="Quiz Bot by Pusparghya logo" className="mx-auto w-20 h-20 rounded-2xl object-contain mb-3" />
-          <p className="text-sm font-semibold text-slate-500">Welcome back!</p>
-          <h1 className="text-2xl font-extrabold tracking-tight text-blue-600">Quiz Bot</h1>
-          <p className="text-base font-bold text-slate-900">by Pusparghya</p>
-          <p className="text-xs text-slate-600 mt-2">Create exams, review results, and keep your quiz workflow organized.</p>
-        </div>
+    <main className="login-page">
+      <div className="login-orb login-orb-top" />
+      <div className="login-orb login-orb-bottom" />
+      <div className="login-content">
+        <header className="login-hero">
+          <img src="/exam-bot-logo.png" alt="Quiz Bot by Pusparghya logo" className="login-logo" />
+          <p className="login-welcome"><span>Welcome back!</span> <span aria-hidden="true">👋</span></p>
+          <h1><span>Quiz Bot</span><strong>by Pusparghya</strong></h1>
+          <p className="login-tagline">Create exams, review results, and<br className="login-tagline-break" /> keep your quiz workflow organized.</p>
+        </header>
 
-        <div className="flex gap-1 bg-slate-200/60 p-1 rounded-lg mb-3 ring-1 ring-slate-200">
-          <button type="button" onClick={() => { setMode('login'); setError(''); setSuccess(''); }} className={`flex-1 py-2 rounded-md text-sm font-bold transition ${mode === 'login' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>Sign in</button>
-          <button type="button" onClick={() => { setMode('register'); setError(''); setSuccess(''); }} className={`flex-1 py-2 rounded-md text-sm font-bold transition ${mode === 'register' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>Register</button>
-        </div>
+        <section className="login-card" aria-label="Teacher authentication">
+          <div className="login-tabs" role="tablist" aria-label="Authentication options">
+            <button type="button" role="tab" aria-selected={mode === 'login'} onClick={() => { setMode('login'); setError(''); setSuccess(''); }} className={mode === 'login' ? 'active' : ''}><SignInIcon /> <span>Sign in</span></button>
+            <button type="button" role="tab" aria-selected={mode === 'register'} onClick={() => { setMode('register'); setError(''); setSuccess(''); }} className={mode === 'register' ? 'active' : ''}><RegisterIcon /> <span>Register</span></button>
+          </div>
 
-        <form onSubmit={go} className={card + ' p-5 space-y-3 ring-1 ring-slate-200/70 shadow-xl shadow-slate-200/50'} noValidate>
-          {mode === 'register' && <Field label="Full name"><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><IconUser className="w-4 h-4" /></span><input className={inp + ' pl-10'} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Your name" /></div></Field>}
-          {mode === 'register' && <Field label="Email address"><input className={inp} value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="email" required placeholder="you@example.com" /></Field>}
-          <Field label={mode === 'login' ? 'Username or email' : 'Username'}><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><IconHash className="w-4 h-4" /></span><input className={inp + ' pl-10'} value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoComplete="username" autoCapitalize="off" required placeholder={mode === 'login' ? 'Enter username or email' : 'Choose a username'} /></div></Field>
-          <Field label="Password"><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><IconEyeOff className="w-4 h-4" /></span><input className={inp + ' pr-10 pl-10'} type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required placeholder={mode === 'register' ? 'At least 8 characters' : 'Enter your password'} /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((v) => !v)} className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600">{showPassword ? <IconEyeOff className="w-4 h-4" /> : <IconEye className="w-4 h-4" />}</button></div></Field>
-          {mode === 'login' && <div className="flex justify-end"><Link to="/forgot-password" className="text-sm font-bold text-blue-600 hover:text-blue-800">Forgot password?</Link></div>}
-          {error && <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2" role="alert"><IconAlert className="w-4 h-4 shrink-0" />{error}</div>}
-          {success && <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2" role="status">{success}</div>}
-          <button type="submit" disabled={busy} className={btnP + ' w-full disabled:opacity-60'}>{busy ? (mode === 'login' ? 'Signing in…' : 'Creating account…') : (mode === 'login' ? 'Sign in  →' : 'Create account')}</button>
-          {firebaseConfigured && <><div className="flex items-center gap-3 text-xs font-bold text-slate-400"><span className="h-px flex-1 bg-slate-200" />OR<span className="h-px flex-1 bg-slate-200" /></div><button type="button" disabled={busy} onClick={google} className="w-full rounded-xl border border-slate-200 bg-white py-3 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-60">Continue with Google</button></>}
-        </form>
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[11px] text-slate-400"><a href="https://t.me/quizbotbypusparghya_bot" className="font-bold text-blue-600 hover:text-blue-800">Open Quiz Bot in Telegram</a><Link to="/contact" className="hover:text-slate-600">Contact</Link><Link to="/privacy" className="hover:text-slate-600">Privacy</Link><Link to="/terms" className="hover:text-slate-600">Terms</Link></div>
-        <p className="text-center text-xs text-slate-400 mt-3">Quiz Bot by Pusparghya</p>
+          <form onSubmit={go} className="login-form" noValidate>
+            {mode === 'register' && <Field label="Full name"><div className="login-input-wrap"><IconUser className="login-field-icon" /><input className="login-input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Your name" /></div></Field>}
+            {mode === 'register' && <Field label="Email address"><input className="login-input" value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="email" required placeholder="you@example.com" /></Field>}
+            <Field label={mode === 'login' ? 'Username or email' : 'Username'}><div className="login-input-wrap"><IconHash className="login-field-icon" /><input className="login-input login-input-with-icon" value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoComplete="username" autoCapitalize="off" required placeholder={mode === 'login' ? 'Enter your username' : 'Choose a username'} /></div></Field>
+            <Field label="Password"><div className="login-input-wrap"><LockIcon /><input className="login-input login-input-with-icon login-input-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required placeholder={mode === 'register' ? 'At least 8 characters' : 'Enter your password'} /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((v) => !v)} className="login-password-toggle">{showPassword ? <IconEyeOff /> : <IconEye />}</button></div></Field>
+
+            {mode === 'login' && <div className="login-options"><label><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /><span className="login-checkmark">✓</span><span>Remember me</span></label><Link to="/forgot-password">Forgot password?</Link></div>}
+            {error && <div className="login-alert" role="alert"><IconAlert /> <span>{error}</span></div>}
+            {success && <div className="login-success" role="status">{success}</div>}
+            <button type="submit" disabled={busy} className="login-submit">{busy ? (mode === 'login' ? 'Signing in…' : 'Creating account…') : <><span>{mode === 'login' ? 'Sign in' : 'Create account'}</span>{mode === 'login' && <ArrowIcon />}</>}</button>
+
+            {mode === 'login' && <><div className="login-divider"><span /> <strong>OR</strong> <span /></div><button type="button" disabled={busy} onClick={google} className="login-google"><span className="login-google-g">G</span><span>Continue with Google</span></button><p className="login-switch">Don't have an account? <button type="button" onClick={() => { setMode('register'); setError(''); setSuccess(''); }}>Register</button></p></>}
+          </form>
+        </section>
+
+        <footer className="login-footer"><p>© 2026 Quiz Bot by Pusparghya</p><nav><Link to="/privacy">Privacy Policy</Link><span>•</span><Link to="/terms">Terms of Service</Link><span>•</span><Link to="/contact">Contact</Link></nav></footer>
       </div>
-    </div>
+    </main>
   );
 }
