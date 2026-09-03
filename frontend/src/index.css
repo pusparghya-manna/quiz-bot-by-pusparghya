@@ -268,20 +268,20 @@ button { cursor: pointer; touch-action: manipulation; }
 
 /* True phone viewport (including 720px screenshots captured at 2x DPR). */
 @media (max-width: 420px) {
-  .login-content { padding: 53px 12px 20px; }
+  .login-content { padding: 28px 12px 20px; }
   .login-logo { width: 120px; height: 120px; margin-bottom: 14px; }
   .login-welcome { margin-bottom: 4px; font-size: 16px; }
   .login-hero h1 span { font-size: 44px; letter-spacing: -.065em; }
   .login-hero h1 strong { font-size: 32px; letter-spacing: -.065em; }
-  .login-tagline { margin: 13px 0 70px; font-size: 14px; line-height: 1.45; }
-  .login-card { width: 100%; padding: 15px 12px 18px; border-radius: 18px; }
-  .login-tabs { margin-bottom: 18px; }
-  .login-tabs button { min-height: 42px; gap: 7px; font-size: 15px; }
+  .login-tagline { margin: 13px 0 15px; font-size: 14px; line-height: 1.45; }
+  .login-card { width: 100%; padding: 12px 12px 14px; border-radius: 18px; }
+  .login-tabs { margin-bottom: 14px; }
+  .login-tabs button { min-height: 40px; gap: 7px; font-size: 15px; }
   .login-tabs button svg { width: 19px; height: 19px; }
-  .login-form { gap: 12px; }
+  .login-form { gap: 8px; }
   .login-form label.block { gap: 5px; }
   .login-form label.block > span { font-size: 14px; }
-  .login-input { min-height: 50px; border-width: 1.5px; border-radius: 12px; padding: 0 13px; font-size: 14px !important; }
+  .login-input { min-height: 44px; border-width: 1.5px; border-radius: 12px; padding: 0 13px; font-size: 14px !important; }
   .login-input-wrap > svg, .login-field-icon { left: 13px; width: 17px; height: 17px; }
   .login-input-with-icon { padding-left: 42px; }
   .login-input-password { padding-right: 45px; }
@@ -290,12 +290,12 @@ button { cursor: pointer; touch-action: manipulation; }
   .login-options { gap: 10px; font-size: 12px; }
   .login-options label { gap: 7px; }
   .login-checkmark { width: 22px; height: 22px; border-radius: 5px; font-size: 15px; }
-  .login-submit { min-height: 52px; border-radius: 12px; font-size: 16px; gap: 10px; }
+  .login-submit { min-height: 48px; border-radius: 12px; font-size: 16px; gap: 10px; }
   .login-submit svg { width: 22px; height: 22px; }
   .login-divider { gap: 10px; font-size: 13px; }
-  .login-google { min-height: 50px; border-width: 1.5px; border-radius: 12px; gap: 10px; font-size: 14px; }
+  .login-google { min-height: 46px; border-width: 1.5px; border-radius: 12px; gap: 10px; font-size: 14px; }
   .login-google-g { font-size: 22px; }
-  .login-switch { margin-top: 12px; font-size: 13px; }
+  .login-switch { margin-top: 9px; font-size: 13px; }
   .login-footer { margin-top: 18px; }
   .login-footer p { margin-bottom: 11px; font-size: 12px; }
   .login-footer nav { gap: 7px; font-size: 11px; }
