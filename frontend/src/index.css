@@ -193,7 +193,7 @@ button { cursor: pointer; touch-action: manipulation; }
 .login-footer a { color: #5b6682; text-decoration: none; }
 .login-footer a:hover { color: #155ee1; text-decoration: underline; }
 .login-footer nav span { color: #b8bdc8; }
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .login-content { padding: 30px 16px 25px; }
   .login-logo { width: 132px; height: 132px; margin-bottom: 14px; }
   .login-welcome { font-size: 21px; margin-bottom: 7px; }
@@ -230,4 +230,38 @@ button { cursor: pointer; touch-action: manipulation; }
   .login-card { padding-left: 13px; padding-right: 13px; }
   .login-options { font-size: 12px; }
   .login-options label { gap: 8px; }
+}
+
+/* Portrait tablet / large-phone reference scale: the supplied 720px screenshot sits here. */
+@media (min-width: 600px) and (max-width: 900px) {
+  .login-content { padding: 64px 22px 34px; }
+  .login-logo { width: 176px; height: 176px; margin-bottom: 20px; }
+  .login-welcome { margin-bottom: 9px; font-size: 26px; }
+  .login-hero h1 span { font-size: 62px; }
+  .login-hero h1 strong { font-size: 46px; }
+  .login-tagline { margin: 25px 0 104px; font-size: 20px; line-height: 1.55; }
+  .login-card { width: min(100%, 660px); padding: 42px 32px 40px; border-radius: 27px; }
+  .login-tabs { margin-bottom: 44px; }
+  .login-tabs button { min-height: 68px; gap: 13px; font-size: 20px; }
+  .login-tabs button svg { width: 27px; height: 27px; }
+  .login-form { gap: 25px; }
+  .login-form label.block { gap: 9px; }
+  .login-form label.block > span { font-size: 18px; }
+  .login-input { min-height: 76px; border-radius: 17px; padding: 0 19px; font-size: 18px !important; }
+  .login-input-wrap > svg, .login-field-icon { left: 20px; width: 23px; height: 23px; }
+  .login-input-with-icon { padding-left: 60px; }
+  .login-input-password { padding-right: 65px; }
+  .login-password-toggle { right: 9px; width: 46px; height: 46px; }
+  .login-password-toggle svg { width: 25px; height: 25px; }
+  .login-options { font-size: 16px; }
+  .login-checkmark { width: 28px; height: 28px; font-size: 19px; }
+  .login-submit { min-height: 76px; border-radius: 17px; font-size: 21px; gap: 19px; }
+  .login-submit svg { width: 29px; height: 29px; }
+  .login-divider { gap: 17px; font-size: 17px; }
+  .login-google { min-height: 72px; border-radius: 16px; font-size: 20px; gap: 18px; }
+  .login-google-g { font-size: 27px; }
+  .login-switch { margin-top: 30px; font-size: 17px; }
+  .login-footer { margin-top: 34px; }
+  .login-footer p { margin-bottom: 19px; font-size: 16px; }
+  .login-footer nav { gap: 12px; font-size: 15px; }
 }
