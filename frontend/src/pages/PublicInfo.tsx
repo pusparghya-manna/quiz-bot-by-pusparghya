@@ -42,10 +42,10 @@ export function PageMeta() {
 
 function PublicShell({ title, children, legal = false }: { title: string; children: React.ReactNode; legal?: boolean }) {
   return (
-    <main className="public-page min-h-screen px-4 py-8 sm:px-6 sm:py-12">
-      <div className="mx-auto max-w-3xl">
-        <Link to="/login" className="public-back-link">← Quiz Bot by Pusparghya</Link>
-        <article className={`public-card mt-6 ${legal ? 'legal-card' : ''}`}>
+    <main className="public-page min-h-[100dvh] overflow-y-auto px-3 py-4 sm:px-6 sm:py-10">
+      <div className="mx-auto max-w-lg sm:max-w-2xl">
+        <Link to="/login" className="public-back-link">← Back to sign in</Link>
+        <article className={`public-card mt-3 sm:mt-5 ${legal ? 'legal-card' : ''}`}>
           <div className="public-card-heading">
             <img src="/exam-bot-logo.png" alt="Exam Bot logo" className="public-brand-logo" />
             <div>
