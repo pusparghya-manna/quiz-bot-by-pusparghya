@@ -12,7 +12,7 @@ import { securityHeaders } from '../middleware/securityHeaders.js';
 import { clampStr, csvCell } from '../middleware/validate.js';
 import { requireTeacher, getOwnedExam, ownsExam, studentBelongsToTeacher, attemptBelongsToTeacher, questionBelongsToTeacher } from '../middleware/ownership.js';
 import { initDb } from '../database/client.js';
-import { loginTeacher, registerTeacher, authMiddleware, ensureTeachersTable } from '../auth.js';
+import { loginTeacher, registerTeacher, authMiddleware, ensureTeachersTable, syncFirebaseTeacher, sendFirebasePasswordReset, setSessionCookie, clearSessionCookie } from '../auth.js';
 import { store } from '../store.js';
 import { processTelegramUpdate, updateExamRanks, calculateAttemptScore, sendTelegramResponse } from '../telegram/bot.js';
 import { startTelegramPolling } from '../telegram/polling.js';
@@ -52,8 +52,9 @@ async function startServer(app?: import('express').Express) {
   app.post('/api/auth/login', authLimiter, async (req, res) => {
     try {
       const { username, password } = req.body || {};
-      if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+      if (!username || !password) return res.status(400).json({ error: 'Username/email and password required' });
       const result = await loginTeacher(username, password);
+      setSessionCookie(res, result.token);
       res.json(result);
     } catch {
       res.status(401).json({ error: 'Invalid credentials' });
@@ -62,13 +63,44 @@ async function startServer(app?: import('express').Express) {
 
   app.post('/api/auth/register', authLimiter, async (req, res) => {
     try {
-      const { username, password, name } = req.body || {};
-      if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-      const result = await registerTeacher(username, password, name || username);
+      const { username, password, name, email } = req.body || {};
+      if (!username || !email || !password) return res.status(400).json({ error: 'Username, email, and password required' });
+      const result = await registerTeacher(username, password, name || username, email);
+      setSessionCookie(res, result.token);
       res.json(result);
     } catch (e: any) {
       res.status(400).json({ error: e.message || 'Registration failed' });
     }
+  });
+
+  app.post('/api/auth/firebase/exchange', authLimiter, async (req, res) => {
+    try {
+      const { idToken, username, name } = req.body || {};
+      if (!idToken) return res.status(400).json({ error: 'Firebase ID token required' });
+      const result = await syncFirebaseTeacher(String(idToken), username, name);
+      setSessionCookie(res, result.token);
+      res.json(result);
+    } catch (e: any) {
+      console.warn('[auth] Firebase exchange failed:', e?.message || e);
+      res.status(401).json({ error: 'Unable to authenticate this account' });
+    }
+  });
+
+  app.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
+    const email = String(req.body?.email || '').trim();
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    try {
+      await sendFirebasePasswordReset(email);
+    } catch (e: any) {
+      console.warn('[auth] Password reset request failed:', e?.message || e);
+    }
+    // Do not reveal whether an account exists.
+    res.json({ ok: true, message: 'If an account uses that email, a secure reset link has been sent.' });
+  });
+
+  app.post('/api/auth/logout', (_req, res) => {
+    clearSessionCookie(res);
+    res.json({ ok: true });
   });
 
   app.get('/api/auth/me', authMiddleware, (req, res) => {

@@ -6,6 +6,7 @@ import { Login } from './components/Login';
 import { getToken } from './api';
 import { NotFound } from './pages/NotFound';
 import { ContactPage, PageMeta, PrivacyPage, TermsPage, ThankYouPage } from './pages/PublicInfo';
+import { ForgotPasswordPage, ResetPasswordPage } from './pages/AuthRecovery';
 import TelegramReview from './pages/TelegramReview';
 import { HomeSkeleton } from './components/ui/HomeSkeleton';
 
@@ -50,6 +51,8 @@ export default function App() {
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/login" element={<LoginRoute />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/thank-you" element={<ThankYouPage />} />

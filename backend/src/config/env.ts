@@ -36,6 +36,12 @@ export function assertSecureConfig(): void {
   if (!process.env.TURSO_AUTH_TOKEN?.trim()) missing.push('TURSO_AUTH_TOKEN');
   if (!process.env.TELEGRAM_BOT_TOKEN?.trim()) missing.push('TELEGRAM_BOT_TOKEN');
 
+  const firebaseFields = ['FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY', 'FIREBASE_WEB_API_KEY'];
+  const firebaseConfigured = firebaseFields.every((key) => process.env[key]?.trim());
+  if (process.env.FIREBASE_AUTH_ENABLED === 'true' && !firebaseConfigured) {
+    missing.push(...firebaseFields.filter((key) => !process.env[key]?.trim()));
+  }
+
   if (missing.length) {
     console.error(`[config] FATAL: Missing required production env: ${missing.join(', ')}`);
     process.exit(1);
@@ -70,6 +76,10 @@ export const env = {
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || '',
   /** Explicit opt-out of long-polling (e.g. when using webhooks only) */
   telegramPollingEnabled: process.env.TELEGRAM_POLLING_ENABLED !== 'false',
+  firebaseProjectId: process.env.FIREBASE_PROJECT_ID || '',
+  firebaseClientEmail: process.env.FIREBASE_CLIENT_EMAIL || '',
+  firebasePrivateKey: process.env.FIREBASE_PRIVATE_KEY || '',
+  firebaseWebApiKey: process.env.FIREBASE_WEB_API_KEY || '',
 };
 
 export function corsOriginDelegate(

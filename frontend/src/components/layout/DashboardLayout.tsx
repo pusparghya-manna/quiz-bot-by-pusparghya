@@ -76,7 +76,12 @@ export function DashboardLayout() {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      // Local cleanup still happens if the network is unavailable.
+    }
     clearToken();
     qc.clear();
     navigate('/login', { replace: true });
