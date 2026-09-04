@@ -22,6 +22,7 @@ import {
 
 export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }: { exams: Exam[]; botUsername: string; onRefresh: () => void; defaultOpenNew?: boolean }) {
   const [shareLink, setShareLink] = useState('');
+  const [shareMessage, setShareMessage] = useState('');
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(!!defaultOpenNew);
   const [editId, setEditId] = useState<string | null>(null);
@@ -100,40 +101,77 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
     const u = (botUsername || '').replace(/^@/, '').trim() || 'YourBot';
     return `https://t.me/${u}?start=exam_${id}`;
   };
+
+  const formatShareDateParts = (iso: string | undefined) => {
+    if (!iso) return { date: '—', time: '—' };
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return { date: '—', time: '—' };
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).formatToParts(d);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || '';
+    const dayPeriod = (get('dayPeriod') || '').toUpperCase();
+    return {
+      date: `${get('day')} ${get('month')} ${get('year')}`.trim(),
+      time: `${get('hour')}:${get('minute')} ${dayPeriod}`.trim(),
+    };
+  };
+
+  const buildExamShareMessage = (exam: Exam, link: string) => {
+    const { date, time } = formatShareDateParts(exam.startDate);
+    const duration = `${exam.durationMinutes || 0} min`;
+    const marks = exam.totalMarks ?? 0;
+    const subject = (exam.subject || 'General').trim() || 'General';
+    const title = (exam.title || 'Exam').trim() || 'Exam';
+    return (
+      `📝 ${title}\n` +
+      `📚 ${subject} • 🎯 ${marks} Marks\n` +
+      `⏱️ ${duration} • 📅 ${date} • 🕐 ${time}\n\n` +
+      `🔗 Join: ${link}`
+    );
+  };
+
   const copyLink = async (id: string) => {
     const link = examLink(id);
+    const exam = exams.find((e) => e.id === id);
+    const message = exam ? buildExamShareMessage(exam, link) : `🔗 Join: ${link}`;
     setShareLink(link);
+    setShareMessage(message);
     // System share sheet (WhatsApp, Telegram, etc.) when the browser supports it
     try {
       if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
         await navigator.share({
-          title: 'Exam link — Quiz Bot by Pusparghya',
-          text: 'Join this exam:',
-          url: link,
+          title: exam?.title ? `${exam.title} — Quiz Bot` : 'Exam — Quiz Bot by Pusparghya',
+          text: message,
         });
       }
     } catch {
       /* user cancelled system share — panel still available */
     }
     try {
-      await navigator.clipboard.writeText(link);
-      toastSuccess('Link ready below (also copied)');
+      await navigator.clipboard.writeText(message);
+      toastSuccess('Share message ready below (also copied)');
     } catch {
-      toastSuccess('Link ready below — use Copy or Share');
+      toastSuccess('Share message ready below — use Copy or Share');
     }
   };
 
-  const systemShare = async (link: string) => {
+  const systemShare = async (message: string) => {
     try {
       if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
         await navigator.share({
-          title: 'Exam link — Quiz Bot by Pusparghya',
-          text: 'Join this exam:',
-          url: link,
+          title: 'Exam — Quiz Bot by Pusparghya',
+          text: message,
         });
         return;
       }
-      toastSuccess('System share not supported on this device — use Copy link');
+      toastSuccess('System share not supported on this device — use Copy');
     } catch {
       /* cancelled */
     }
@@ -763,35 +801,35 @@ export function Exams({ exams, botUsername, onRefresh, defaultOpenNew = false }:
         <div className="rounded-xl bg-blue-50 border border-blue-100 p-3 text-xs space-y-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 font-semibold text-blue-800">
-              <IconShare className="w-3.5 h-3.5" /> Student exam link
+              <IconShare className="w-3.5 h-3.5" /> Share with students
             </div>
-            <button type="button" className="text-[10px] font-bold text-slate-500 px-2 py-1 rounded-md hover:bg-white/80" onClick={() => setShareLink('')}>Close</button>
+            <button type="button" className="text-[10px] font-bold text-slate-500 px-2 py-1 rounded-md hover:bg-white/80" onClick={() => { setShareLink(''); setShareMessage(''); }}>Close</button>
           </div>
-          <div className="bg-white rounded-lg border border-blue-100 px-2.5 py-2 break-all text-blue-700 font-medium select-all">{shareLink}</div>
+          <div className="bg-white rounded-lg border border-blue-100 px-2.5 py-2 whitespace-pre-wrap text-slate-800 font-medium select-all leading-relaxed">{shareMessage || shareLink}</div>
           <div className="flex gap-2">
             <button
               type="button"
               className={btnP + ' flex-1 !py-1.5 text-[11px]'}
               onClick={async () => {
                 try {
-                  await navigator.clipboard.writeText(shareLink);
+                  await navigator.clipboard.writeText(shareMessage || shareLink);
                   toastSuccess('Copied to clipboard');
                 } catch {
-                  toastError('Could not copy — select the link and copy manually');
+                  toastError('Could not copy — select the message and copy manually');
                 }
               }}
             >
-              <IconCopy className="w-3.5 h-3.5" /> Copy link
+              <IconCopy className="w-3.5 h-3.5" /> Copy message
             </button>
             <button
               type="button"
               className={btnS + ' flex-1 !py-1.5 text-[11px]'}
-              onClick={() => systemShare(shareLink)}
+              onClick={() => systemShare(shareMessage || shareLink)}
             >
               <IconShare className="w-3.5 h-3.5" /> Share via apps
             </button>
           </div>
-          <p className="text-[10px] text-blue-700/80 flex items-center gap-1"><IconInfo className="w-3 h-3 shrink-0" />Share this with students. Only this link starts the exam.</p>
+          <p className="text-[10px] text-blue-700/80 flex items-center gap-1"><IconInfo className="w-3 h-3 shrink-0" />Share this message with students. Only the join link starts the exam.</p>
         </div>
       )}
 
