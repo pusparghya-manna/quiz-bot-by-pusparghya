@@ -11,3 +11,4 @@
 `vercel.json` rewrites all non-API paths to `/index.html` so `/exams`, `/results`, etc. work on refresh.
 
 After pushing to `main`, open Vercel → Deployments → **Redeploy** if the URL still stays on `/` (old tab UI bundle).
+
